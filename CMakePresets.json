@@ -1,0 +1,83 @@
+﻿{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "windows-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/bin-${presetName}",
+      //"installDir": "${sourceDir}/build/install-${presetName}",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "cl.exe",
+        "CMAKE_CXX_COMPILER": "cl.exe",
+        "CMAKE_CUDA_COMPILER": "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.8/bin/nvcc.exe",
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        // "PBRT_GPU_SHADER_MODEL": "sm_89",
+        //"CMAKE_CUDA_COMPILER": "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.8/bin/nvcc.exe",
+        "PBRT_OPTIX7_PATH": "C:/ProgramData/NVIDIA Corporation/OptiX SDK 7.4.0",
+        "VCPKG_TARGET_TRIPLET": "x64-windows"
+      }
+      // "condition": {
+      //   "type": "equals",
+      //   "lhs": "${hostSystemName}",
+      //   "rhs": "Windows"
+      // }
+    },
+    {
+      "name": "x64-debug",
+      "displayName": "x64 Debug",
+      "inherits": "windows-base",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "x64-release",
+      "displayName": "x64 Release",
+      "inherits": "windows-base",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "x64-rel-deb",
+      "displayName": "x64 Release with Debug Info",
+      "inherits": "windows-base",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "x64-debug",
+      "displayName": "x64 Debug",
+      "hidden": false,
+      "configurePreset": "x64-debug"
+    },
+    {
+      "name": "x64-release",
+      "displayName": "x64 Release",
+      "hidden": false,
+      "configurePreset": "x64-release"
+    },
+    {
+      "name": "x64-rel-deb",
+      "displayName": "x64 Release with debug info",
+      "hidden": false,
+      "configurePreset": "x64-rel-deb"
+    }
+  ]
+}
