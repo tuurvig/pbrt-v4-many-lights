@@ -585,6 +585,19 @@ set (PBRT_SOURCE_HEADERS
   src/pbrt/textures.h
   )  
 
+set (PBRT_LIGHT_SAMPLERS_SOURCE_HEADERS
+  src/pbrt/lightsamplers/uniform.h
+  src/pbrt/lightsamplers/power.h
+  src/pbrt/lightsamplers/bvhlight.h
+  src/pbrt/lightsamplers/exhaustive.h
+)
+
+set (PBRT_LIGHT_SAMPLERS_SOURCE
+  src/pbrt/lightsamplers/power.cpp
+  src/pbrt/lightsamplers/bvhlight.cpp
+  src/pbrt/lightsamplers/exhaustive.cpp
+)
+
 SET (PBRT_CPU_SOURCE
   src/pbrt/cpu/aggregates.cpp
   src/pbrt/cpu/integrators.cpp
@@ -775,6 +788,7 @@ if (PBRT_CUDA_ENABLED)
 
     ${PBRT_WAVEFRONT_SOURCE}
     ${PBRT_GPU_SOURCE}
+    ${PBRT_LIGHT_SAMPLERS_SOURCE}
 
     src/pbrt/cmd/pspec_gpu.cpp
 
@@ -792,6 +806,9 @@ source_group ("Source Files/util" FILES ${PBRT_UTIL_SOURCE})
 source_group ("Header Files/util" FILES ${PBRT_UTIL_SOURCE_HEADERS})
 source_group ("Source Files/wavefront" FILES ${PBRT_WAVEFRONT_SOURCE})
 source_group ("Header Files/wavefront" FILES ${PBRT_WAVEFRONT_SOURCE_HEADERS})
+source_group ("Source Files/lightsamplers" FILES ${PBRT_LIGHT_SAMPLERS_SOURCE})
+source_group ("Header Files/lightsamplers" FILES ${PBRT_LIGHT_SAMPLERS_SOURCE_HEADERS})
+
 if (PBRT_CUDA_ENABLED)
   source_group ("Source Files/gpu" FILES ${PBRT_GPU_SOURCE})
   source_group ("Header Files/gpu" FILES ${PBRT_GPU_SOURCE_HEADERS})
@@ -845,6 +862,8 @@ add_library (pbrt_lib STATIC
   ${PBRT_UTIL_SOURCE_HEADERS}
   ${PBRT_WAVEFRONT_SOURCE}
   ${PBRT_WAVEFRONT_SOURCE_HEADERS}
+  ${PBRT_LIGHT_SAMPLERS_SOURCE}
+  ${PBRT_LIGHT_SAMPLERS_SOURCE_HEADERS}
   ${PBRT_GPU_SOURCE}
   ${PBRT_GPU_SOURCE_HEADERS}
 

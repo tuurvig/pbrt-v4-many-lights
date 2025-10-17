@@ -23,11 +23,14 @@ struct SampledLight {
 class UniformLightSampler;
 class PowerLightSampler;
 class BVHLightSampler;
+class LightcutsLightSampler;
 class ExhaustiveLightSampler;
 
 // LightSampler Definition
-class LightSampler : public TaggedPointer<UniformLightSampler, PowerLightSampler,
-                                          ExhaustiveLightSampler, BVHLightSampler> {
+class LightSampler : public TaggedPointer<UniformLightSampler,
+                                          PowerLightSampler,
+                                          ExhaustiveLightSampler,
+                                          BVHLightSampler> {
   public:
     // LightSampler Interface
     using TaggedPointer::TaggedPointer;
