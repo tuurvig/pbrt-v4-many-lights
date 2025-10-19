@@ -36,6 +36,8 @@ LightSampler LightSampler::Create(const std::string &name, pstd::span<const Ligh
         return alloc.new_object<PowerLightSampler>(lights, alloc);
     else if (name == "bvh")
         return alloc.new_object<BVHLightSampler>(lights, alloc);
+    else if (name == "lightcuts")
+        return alloc.new_object<LightcutsLightSampler>(lights, alloc);
     else if (name == "exhaustive")
         return alloc.new_object<ExhaustiveLightSampler>(lights, alloc);
     else {

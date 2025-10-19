@@ -1,5 +1,8 @@
 #include "bvhlight.h"
 
+#include <pbrt/util/stats.h>
+#include <pbrt/util/vecmath.h>
+
 namespace pbrt{
 ///////////////////////////////////////////////////////////////////////////
 // BVHLightSampler
