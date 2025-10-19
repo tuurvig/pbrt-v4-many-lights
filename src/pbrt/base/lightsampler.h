@@ -30,7 +30,8 @@ class ExhaustiveLightSampler;
 class LightSampler : public TaggedPointer<UniformLightSampler,
                                           PowerLightSampler,
                                           ExhaustiveLightSampler,
-                                          BVHLightSampler> {
+                                          BVHLightSampler,
+                                          LightcutsLightSampler> {
   public:
     // LightSampler Interface
     using TaggedPointer::TaggedPointer;
