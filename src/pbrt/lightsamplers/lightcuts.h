@@ -13,6 +13,7 @@
 #include <pbrt/lights.h>
 
 #include <pbrt/util/pstd.h>
+#include <pbrt/util/math.h>
 #include <pbrt/util/sampling.h>
 #include <pbrt/util/containers.h>
 
@@ -72,9 +73,39 @@ public:
 
             while (true) {
                 LightcutsTreeNode node = m_nodes[nodeIndex];
+                Float errBounds = Infinity;
+
+                if (node.isLeaf) {
+                    return SampledLight{m_lights[node.childOrLightIndex], pmf};
+                }
+
                 if (!node.isLeaf) {
                     const LightcutsTreeNode *children[2] = {&m_nodes[nodeIndex + 1],
                                                             &m_nodes[node.childOrLightIndex]};
+                    Float power[2] = {
+                        children[0]->compactLightBounds.Phi(),
+                        children[1]->compactLightBounds.Phi()
+                    };
+
+                    if (power[0] == 0 && power[1] == 0) {
+                        return {};
+                    }
+
+                    // Randomly sample a children node
+                    Float nodePMF;
+                    int child = SampleDiscrete(power, u, &nodePMF, &u);
+                    pmf *= nodePMF;
+                    nodeIndex = (child == 0) ? (nodeIndex + 1) : node.childOrLightIndex;
+                    LightcutsTreeNode childNode = m_nodes[nodeIndex];
+                    Bounds3f bounds = childNode.compactLightBounds.Bounds(m_allLightBounds);
+
+                    // find error bounds
+                    // Geometric term
+                    Float minDistSqr = DistanceSquared(p, bounds);
+                    if (minDistSqr == 0) {
+                        // Infinite error bounds because it is inside the box
+                        continue;
+                    }
 
 
                 }
