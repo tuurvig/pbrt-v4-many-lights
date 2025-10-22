@@ -1520,12 +1520,28 @@ PBRT_CPU_GPU inline bool InsideExclusive(Point3<T> p, const Bounds3<T> &b) {
 }
 
 template <typename T, typename U>
+PBRT_CPU_GPU inline auto DistanceSquared(const Bounds3<T>& a, const Bounds3<U>& b) {
+    using TDist = decltype(T{} - U{});
+    TDist dx = std::max<TDist>({0, b.pMin.x - a.pMax.x, a.pMin.x - b.pMax.x});
+    TDist dy = std::max<TDist>({0, b.pMin.y - a.pMax.y, a.pMin.y - b.pMax.y});
+    TDist dz = std::max<TDist>({0, b.pMin.z - a.pMax.z, a.pMin.z - b.pMax.z});
+    return Sqr(dx) + Sqr(dy) + Sqr(dz);
+}
+
+template <typename T, typename U>
 PBRT_CPU_GPU inline auto DistanceSquared(Point3<T> p, const Bounds3<U> &b) {
     using TDist = decltype(T{} - U{});
     TDist dx = std::max<TDist>({0, b.pMin.x - p.x, p.x - b.pMax.x});
     TDist dy = std::max<TDist>({0, b.pMin.y - p.y, p.y - b.pMax.y});
     TDist dz = std::max<TDist>({0, b.pMin.z - p.z, p.z - b.pMax.z});
     return Sqr(dx) + Sqr(dy) + Sqr(dz);
+}
+
+template <typename T, typename U>
+PBRT_CPU_GPU inline auto Distance(const Bounds3<T>& a, const Bounds3<U>& b) {
+    auto dist2 = DistanceSquared(a, b);
+    using TDist = typename TupleLength<decltype(dist2)>::type;
+    return std::sqrt(TDist(dist2));
 }
 
 template <typename T, typename U>
