@@ -45,7 +45,7 @@ struct alignas(32) LightcutsTreeNode {
 class LightcutsLightSampler {
 public:
     // LightcutsLightSampler Public Methods
-    LightcutsLightSampler(pstd::span<const Light> lights, Allocator alloc);
+    LightcutsLightSampler(pstd::span<const Light> lights, Allocator alloc, Float threshold = 0.02);
 
     PBRT_CPU_GPU pstd::optional<SampledLight> Sample(const LightSampleContext& ctx, Float u) const {
         // Compute infinite light sampling probability _pInfinite_
@@ -60,58 +60,43 @@ public:
             Float pmf = pInfinite / m_infiniteLights.size();
             return SampledLight{m_infiniteLights[index], pmf};
 
-        } else {
-            if (m_nodes.empty()) {
+        }
+
+        if (m_nodes.empty()) {
+            return {};
+        }
+
+        Point3f p = ctx.p();
+        Normal3f n = ctx.ns;
+        u = std::min<Float>((u - pInfinite) / (1 - pInfinite), OneMinusEpsilon);
+        int nodeIndex = 0;
+        Float pmf = 1 - pInfinite;
+
+        const LightcutsTreeNode* node = &m_nodes[nodeIndex];
+        while (!node->isLeaf) {
+            int childrenIndices[2] = {nodeIndex + 1, node->childOrLightIndex};
+            const LightcutsTreeNode *children[2] = {&m_nodes[nodeIndex + 1],
+                                                    &m_nodes[node->childOrLightIndex]};
+            
+            Float errBounds[2] = {ComputeErrorBounds(children[0], p), ComputeErrorBounds(children[1], p)};
+            if (errBounds[0] == 0 && errBounds[1] == 0) {
                 return {};
             }
 
-            Point3f p = ctx.p();
-            Normal3f n = ctx.ns;
-            u = std::min<Float>((u - pInfinite) / (1 - pInfinite), OneMinusEpsilon);
-            int nodeIndex = 0;
-            Float pmf = 1 - pInfinite;
+            // Randomly sample a children node
+            Float nodePMF;
+            int child = SampleDiscrete(errBounds, u, &nodePMF, &u);
+            pmf *= nodePMF;
+            nodeIndex = (child == 0) ? (nodeIndex + 1) : node->childOrLightIndex;
+            node = &m_nodes[nodeIndex];
 
-            while (true) {
-                LightcutsTreeNode node = m_nodes[nodeIndex];
-                Float errBounds = Infinity;
-
-                if (node.isLeaf) {
-                    return SampledLight{m_lights[node.childOrLightIndex], pmf};
-                }
-
-                if (!node.isLeaf) {
-                    const LightcutsTreeNode *children[2] = {&m_nodes[nodeIndex + 1],
-                                                            &m_nodes[node.childOrLightIndex]};
-                    Float power[2] = {
-                        children[0]->compactLightBounds.Phi(),
-                        children[1]->compactLightBounds.Phi()
-                    };
-
-                    if (power[0] == 0 && power[1] == 0) {
-                        return {};
-                    }
-
-                    // Randomly sample a children node
-                    Float nodePMF;
-                    int child = SampleDiscrete(power, u, &nodePMF, &u);
-                    pmf *= nodePMF;
-                    nodeIndex = (child == 0) ? (nodeIndex + 1) : node.childOrLightIndex;
-                    LightcutsTreeNode childNode = m_nodes[nodeIndex];
-                    Bounds3f bounds = childNode.compactLightBounds.Bounds(m_allLightBounds);
-
-                    // find error bounds
-                    // Geometric term
-                    Float minDistSqr = DistanceSquared(p, bounds);
-                    if (minDistSqr == 0) {
-                        // Infinite error bounds because it is inside the box
-                        continue;
-                    }
-
-
-                }
+            if (errBounds[child] < m_threshold) {
+                int representantLightIndex = m_nodes[node->representantIdx].childOrLightIndex;
+                return SampledLight{m_lights[representantLightIndex], pmf};
             }
         }
-        return {};
+
+        return SampledLight{m_lights[node->childOrLightIndex], pmf};
     }
 
     PBRT_CPU_GPU Float PMF(const LightSampleContext& ctx, Light light) const { return PMF(light); }
@@ -165,11 +150,29 @@ private:
         return bounds.phi * similarity;
     }
 
+    Float ComputeErrorBounds(const LightcutsTreeNode* node, Point3f point) const {
+        Bounds3f bounds = node->compactLightBounds.Bounds(m_allLightBounds);
+        Float intensity = node->compactLightBounds.Phi();
+
+        // Geometric term
+        Float minDistSqr = DistanceSquared(point, bounds);
+        Float diagLengthSqr = LengthSquared(bounds.Diagonal());
+        
+        Float errBounds = intensity;
+
+        if (minDistSqr > diagLengthSqr){
+            errBounds /= minDistSqr;
+        }
+
+        return errBounds;
+    }
+
     // LightcutsLightSampler Private Members
     pstd::vector<Light> m_lights;
     pstd::vector<Light> m_infiniteLights;
     Bounds3f m_allLightBounds;
     pstd::vector<LightcutsTreeNode> m_nodes;
+    Float m_threshold;
 };
 
 }

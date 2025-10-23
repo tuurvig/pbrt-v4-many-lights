@@ -86,13 +86,7 @@ class LightSampleContext {
     LightSampleContext() = default;
     PBRT_CPU_GPU
     LightSampleContext(const SurfaceInteraction &si)
-        : pi(si.pi), n(si.n), ns(si.shading.n) {
-        Point3f p = si.p();
-        gx = Union(gx, p);
-        gx = Union(gx, p + si.dpdx);
-        gx = Union(gx, p + si.dpdy);
-        gx = Union(gx, p + si.dpdx + si.dpdy);
-    }
+        : pi(si.pi), n(si.n), ns(si.shading.n) {}
     PBRT_CPU_GPU
     LightSampleContext(const Interaction &intr) : pi(intr.pi) {}
     PBRT_CPU_GPU
@@ -104,7 +98,6 @@ class LightSampleContext {
     // LightSampleContext Public Members
     Point3fi pi;
     Normal3f n, ns;
-    Bounds3f gx; ///> Geometry bound
 };
 
 // LightBounds Definition
