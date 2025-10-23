@@ -9,9 +9,8 @@ namespace pbrt{
 
 STAT_MEMORY_COUNTER("Memory/Lightcuts LightTree", lightCutsLightTreeBytes);
 
-LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, Allocator alloc) 
-    : m_lights(alloc), m_infiniteLights(alloc), m_nodes(alloc) {
-
+LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, Allocator alloc, Float threshold) 
+    : m_lights(alloc), m_infiniteLights(alloc), m_nodes(alloc), m_threshold(threshold) {
     // Initialize infiniteLights array and lightcuts lights
     std::vector<LightBuildContainer> lightcutsLights;
     SampledWavelengths lambda = SampledWavelengths::SampleVisible(0.5f);
