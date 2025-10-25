@@ -172,6 +172,8 @@ int main(int argc, char *argv[]) {
                      &options.disableWavelengthJitter, onError) ||
             ParseArg(&iter, args.end(), "displacement-edge-scale",
                      &options.displacementEdgeScale, onError) ||
+            ParseArg(&iter, args.end(), "discretize-area-lights",
+                     &options.discretizeAreaLights, onError) ||
             ParseArg(&iter, args.end(), "display-server", &options.displayServer,
                      onError) ||
             ParseArg(&iter, args.end(), "force-diffuse", &options.forceDiffuse,

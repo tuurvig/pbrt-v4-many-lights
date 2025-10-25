@@ -1288,6 +1288,9 @@ std::vector<Light> BasicScene::CreateLights(
 
     LOG_VERBOSE("Starting area lights");
     std::vector<Light> lights;
+
+    int samplesPerLight = Options->discretizeAreaLights;
+
     // Area Lights
     for (size_t i = 0; i < shapes.size(); ++i) {
         const auto &sh = shapes[i];
@@ -1325,13 +1328,18 @@ std::vector<Light> BasicScene::CreateLights(
 
         pstd::vector<Light> *shapeLights = new pstd::vector<Light>(alloc);
         const auto &areaLightEntity = areaLights[sh.lightIndex];
+
         for (pbrt::Shape ps : shapeObjects) {
             Light area = Light::CreateArea(
                 areaLightEntity.name, areaLightEntity.parameters, *sh.renderFromObject,
                 mi, ps, alphaTex, &areaLightEntity.loc, alloc);
             if (area) {
-                lights.push_back(area);
-                shapeLights->push_back(area);
+                // discretize area lights
+                if (samplesPerLight < 1) {
+                } else {
+                    lights.push_back(area);
+                    shapeLights->push_back(area);
+                }
             }
         }
 
