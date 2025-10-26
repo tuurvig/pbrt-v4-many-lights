@@ -202,7 +202,6 @@ static bool TryDiscretizeAreaLight(const std::string &name, const ParameterDicti
 
     std::vector<Light> newLights;
     newLights.reserve(maxSamples);
-    uint64_t sampleIndex = 0;
 
     for (size_t i = 0; i < shapeObjects.size(); ++i) {
         int nSamples = counts[i];
@@ -218,8 +217,7 @@ static bool TryDiscretizeAreaLight(const std::string &name, const ParameterDicti
             perSampleScale *= data.phi_v / k_e;
         }
 
-        for (int s = 0; s < nSamples; ++s, ++sampleIndex) {
-            Point2f u(RadicalInverse(0, sampleIndex), RadicalInverse(1, sampleIndex));
+        for (Point2f u : Hammersley2D(nSamples)) {
             pstd::optional<ShapeSample> ss = shapeObjects[i].Sample(u);
             if (!ss || ss->pdf == 0)
                 continue;
