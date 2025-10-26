@@ -9,6 +9,7 @@
 #ifdef PBRT_BUILD_GPU_RENDERER
 #include <pbrt/gpu/memory.h>
 #endif  // PBRT_BUILD_GPU_RENDERER
+#include <pbrt/lights.h>
 #include <pbrt/materials.h>
 #include <pbrt/options.h>
 #include <pbrt/paramdict.h>
@@ -18,14 +19,20 @@
 #include <pbrt/util/color.h>
 #include <pbrt/util/colorspace.h>
 #include <pbrt/util/file.h>
+#include <pbrt/util/hash.h>
+#include <pbrt/util/image.h>
 #include <pbrt/util/memory.h>
 #include <pbrt/util/mesh.h>
 #include <pbrt/util/parallel.h>
 #include <pbrt/util/print.h>
+#include <pbrt/util/sampling.h>
 #include <pbrt/util/spectrum.h>
 #include <pbrt/util/string.h>
 #include <pbrt/util/transform.h>
+#include <pbrt/util/vecmath.h>
+#include <pbrt/textures.h>
 
+#include <algorithm>
 #include <iostream>
 #include <mutex>
 
@@ -45,6 +52,222 @@ static std::string ToString(const std::map<T, U> &m) {
 template <typename T, typename U>
 static std::string ToString(const std::pair<T, U> &p) {
     return StringPrintf("[ std::pair first: %s second: %s ]", p.first, p.second);
+}
+
+struct AreaLightDiscretizationData {
+    Spectrum L;
+    Float baseScale = 1.f; ///> radiance is equivalent to 1 nit;
+    Float phi_v = -1.f;
+    bool twoSided = false;
+    bool useImage = false;
+    Image image;
+    Float imageAverageLuminance = 1.f;
+    const RGBColorSpace *colorSpace = nullptr;
+};
+
+static Float ComputeImageAverageLuminance(const Image &image, const RGBColorSpace *cs) {
+    RGB lum = cs->LuminanceVector();
+    Float sum = 0.f;
+    Point2i resolution = image.Resolution();
+
+    for (int y = 0; y < resolution.y; ++y)
+        for (int x = 0; x < resolution.x; ++x)
+            for (int c = 0; c < 3; ++c)
+                sum += image.GetChannel({x, y}, c) * lum[c];
+    return sum / (resolution.x * resolution.y);
+}
+
+static bool PrepareAreaLightDiscretization(const ParameterDictionary &parameters, 
+                                           const FileLoc *loc, Allocator alloc,
+                                           AreaLightDiscretizationData *data) {
+
+    const RGBColorSpace *colorSpace = parameters.ColorSpace();
+
+    Spectrum L = parameters.GetOneSpectrum("L", nullptr, SpectrumType::Illuminant, alloc);
+    Float scale = parameters.GetOneFloat("scale", 1);
+    bool twoSided = parameters.GetOneBool("twosided", false);
+
+    std::string filename = ResolveFilename(parameters.GetOneString("filename", ""));
+    Image image(alloc);
+    bool useImage = false;
+
+    if (!filename.empty()) {
+        if (L)
+            ErrorExit(loc, "Both \"L\" and \"filename\" specified for DiffuseAreaLight.");
+        ImageAndMetadata im = Image::Read(filename, alloc);
+
+        if (im.image.HasAnyInfinitePixels())
+            ErrorExit(loc,
+                      "%s: image has infinite pixel values and so is not suitable as a light.",
+                      filename);
+        if (im.image.HasAnyNaNPixels())
+            ErrorExit(loc,
+                      "%s: image has not-a-number pixel values and so is not suitable as a light.",
+                      filename);
+
+        ImageChannelDesc channelDesc = im.image.GetChannelDesc({"R", "G", "B"});
+        if (!channelDesc)
+            ErrorExit(loc,
+                      "%s: Image provided to \"diffuse\" area light must have R, G, and B channels.",
+                      filename);
+
+        image = im.image.SelectChannels(channelDesc, alloc);
+        const RGBColorSpace *imageColorSpace = im.metadata.GetColorSpace();
+        if (imageColorSpace) {
+            colorSpace = imageColorSpace;
+        }
+        useImage = true;
+    } else if (!L) {
+        L = &colorSpace->illuminant;
+    }
+
+    Float baseScale =
+        scale / SpectrumToPhotometric(L ? L : &colorSpace->illuminant);
+    Float phi_v = parameters.GetOneFloat("power", -1.f);
+
+    data->L = L;
+    data->baseScale = baseScale;
+    data->phi_v = phi_v;
+    data->twoSided = twoSided;
+    data->useImage = useImage;
+    data->colorSpace = colorSpace;
+    data->imageAverageLuminance = 1.f;
+    if (useImage) {
+        data->image = std::move(image);
+        data->imageAverageLuminance = ComputeImageAverageLuminance(data->image, colorSpace);
+    }
+
+    return true;
+}
+
+static bool TryDiscretizeAreaLight(const std::string &name, const ParameterDictionary &parameters,
+                                   const Transform & renderFromLight,
+                                   const MediumInterface &mi, FloatTexture alphaTex,
+                                   const FileLoc *loc, const pstd::vector<Shape> &shapeObjects,
+                                   int maxSamples, pstd::vector<Light> *shapeLights,
+                                   std::vector<Light> *lights, Allocator alloc) {
+    if (name != "diffuse")
+        return false;
+
+    if (shapeObjects.empty())
+        return false;
+
+    // alpha textures handling, see the constructor of DiffuseAreaLight
+    const FloatConstantTexture *fc = alphaTex.CastOrNullptr<FloatConstantTexture>();
+    if (fc && fc->Evaluate(TextureEvalContext()) == 0) {
+        return false;
+    }
+
+    AreaLightDiscretizationData data;
+    if (!PrepareAreaLightDiscretization(parameters, loc, alloc, &data))
+        return false;
+
+    std::vector<Float> areas(shapeObjects.size(), 0.f);
+    Float totalArea = 0.f;
+    for (size_t i = 0; i < shapeObjects.size(); ++i) {
+        areas[i] = shapeObjects[i].Area();
+        if (areas[i] > 0)
+            totalArea += areas[i];
+    }
+    if (totalArea <= 0)
+        return false;
+
+    std::vector<int> counts(shapeObjects.size(), 0);
+    std::vector<std::pair<Float, int>> remainders;
+    remainders.reserve(shapeObjects.size());
+    int assigned = 0;
+    for (size_t i = 0; i < shapeObjects.size(); ++i) {
+        if (areas[i] <= 0) {
+            remainders.emplace_back(0.f, int(i));
+            continue;
+        }
+        Float exact = (areas[i] / totalArea) * maxSamples;
+        int c = int(std::floor(exact));
+        counts[i] = c;
+        assigned += c;
+        remainders.emplace_back(exact - c, int(i));
+    }
+
+    int remaining = maxSamples - assigned;
+    if (remaining > 0 && !remainders.empty()) {
+        std::sort(remainders.begin(), remainders.end(),
+                  [](const auto &a, const auto &b) {
+                      if (a.first != b.first)
+                          return a.first > b.first;
+                      return a.second < b.second;
+                  });
+        for (int k = 0; k < remaining && k < int(remainders.size()); ++k)
+            counts[remainders[k].second]++;
+    }
+
+    std::vector<Light> newLights;
+    newLights.reserve(maxSamples);
+    uint64_t sampleIndex = 0;
+
+    for (size_t i = 0; i < shapeObjects.size(); ++i) {
+        int nSamples = counts[i];
+        Float shapeArea = areas[i];
+        if (shapeArea <= 0 || nSamples <= 0)
+            continue;
+
+        // point/spot light intensity
+        Float perSampleScale = data.baseScale;
+        if (data.phi_v > 0) {
+            Float k_e = data.useImage ? data.imageAverageLuminance : 1.f;
+            k_e *= nSamples * (data.twoSided ? 4 : 2 ) * Pi; // 2 or 4 PI steradians
+            perSampleScale *= data.phi_v / k_e;
+        }
+
+        for (int s = 0; s < nSamples; ++s, ++sampleIndex) {
+            Point2f u(RadicalInverse(0, sampleIndex), RadicalInverse(1, sampleIndex));
+            pstd::optional<ShapeSample> ss = shapeObjects[i].Sample(u);
+            if (!ss || ss->pdf == 0)
+                continue;
+
+            Interaction intr = ss->intr;
+            intr.mediumInterface = &mi;
+
+            Spectrum emitted;
+            if (data.useImage && data.image) {
+                Point2f texUV = intr.uv;
+                texUV[1] = 1 - texUV[1];
+                RGB rgb;
+                for (int c = 0; c < 3; ++c)
+                    rgb[c] = data.image.BilerpChannel(texUV, c);
+                const RGBColorSpace *cs = data.colorSpace;
+                if (!cs)
+                    cs = RGBColorSpace::sRGB;
+
+                emitted = alloc.new_object<RGBIlluminantSpectrum>(*cs, ClampZero(rgb));
+            } else {
+                emitted = data.L;
+            }
+
+            if (data.twoSided) {
+                Transform lightToRender =
+                    Translate(Vector3f(intr.p().x, intr.p().y, intr.p().z));
+                newLights.push_back(
+                    alloc.new_object<PointLight>(lightToRender, mi, emitted, perSampleScale));
+            } else {
+                Vector3f n = Normalize(Vector3f(intr.n));
+                if (LengthSquared(n) == 0)
+                    n = Vector3f(0, 0, 1);
+                Frame frame = Frame::FromZ(n);
+                Vector3f up = frame.y;
+                Transform lightToRender = LookAt(intr.p(), intr.p() + n, up);
+                newLights.push_back(
+                    alloc.new_object<SpotLight>(lightToRender, mi, emitted, perSampleScale,
+                                                90.f, 90.f));
+            }
+        }
+    }
+
+    if (newLights.empty())
+        return false;
+
+    lights->insert(lights->end(), newLights.begin(), newLights.end());
+    parameters.ReportUnused();
+    return true;
 }
 
 std::string BasicSceneBuilder::ToString() const {
@@ -1329,21 +1552,30 @@ std::vector<Light> BasicScene::CreateLights(
         pstd::vector<Light> *shapeLights = new pstd::vector<Light>(alloc);
         const auto &areaLightEntity = areaLights[sh.lightIndex];
 
-        for (pbrt::Shape ps : shapeObjects) {
-            Light area = Light::CreateArea(
-                areaLightEntity.name, areaLightEntity.parameters, *sh.renderFromObject,
-                mi, ps, alphaTex, &areaLightEntity.loc, alloc);
-            if (area) {
-                // discretize area lights
-                if (samplesPerLight < 1) {
-                } else {
+        bool discretized = false;
+
+        if (samplesPerLight > 0) {
+            discretized = TryDiscretizeAreaLight(areaLightEntity.name,
+                                                 areaLightEntity.parameters, 
+                                                 *sh.renderFromObject, mi, alphaTex,
+                                                 &areaLightEntity.loc, shapeObjects,
+                                                 samplesPerLight, shapeLights, &lights, alloc);
+        }
+        
+        if (!discretized) {
+            for (pbrt::Shape ps : shapeObjects) {
+                Light area = Light::CreateArea(areaLightEntity.name,
+                                               areaLightEntity.parameters,
+                                               *sh.renderFromObject, mi, ps, alphaTex,
+                                               &areaLightEntity.loc, alloc);
+                if (area) {
                     lights.push_back(area);
                     shapeLights->push_back(area);
                 }
             }
-        }
 
-        (*shapeIndexToAreaLights)[i] = shapeLights;
+            (*shapeIndexToAreaLights)[i] = shapeLights;
+        }
     }
 
     LOG_VERBOSE("Finished area lights");
