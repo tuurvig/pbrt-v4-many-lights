@@ -32,7 +32,7 @@ BVHLightSampler::BVHLightSampler(pstd::span<const Light> lights, Allocator alloc
     if (!bvhLights.empty())
         buildBVH(bvhLights, 0, bvhLights.size(), 0, 0);
     lightBVHBytes += m_nodes.size() * sizeof(LightBVHNode) +
-                     m_lightToBitTrail.capacity() * sizeof(uint32_t) +
+                     m_lightToBitTrail.capacity() * (sizeof(Light) + sizeof(uint32_t)) +
                      lights.size() * sizeof(Light) +
                      m_infiniteLights.size() * sizeof(Light);
 }
