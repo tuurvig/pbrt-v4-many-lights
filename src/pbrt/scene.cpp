@@ -209,13 +209,20 @@ static bool TryDiscretizeAreaLight(const std::string &name, const ParameterDicti
         if (shapeArea <= 0 || nSamples <= 0)
             continue;
 
-        // point/spot light intensity
-        Float perSampleScale = data.baseScale;
+        Float areaPerSample = shapeArea / nSamples;
+        Float directionalFactor = data.twoSided ? 2 : 1;
+
+        Float shapeScale = data.baseScale;
         if (data.phi_v > 0) {
-            Float k_e = data.useImage ? data.imageAverageLuminance : 1.f;
-            k_e *= nSamples * (data.twoSided ? 4 : 2 ) * Pi; // 2 or 4 PI steradians
-            perSampleScale *= data.phi_v / k_e;
+            Float averageLuminance = data.useImage ? data.imageAverageLuminance : 1;
+            Float k_e = directionalFactor * shapeArea * Pi * averageLuminance;
+            shapeScale *= data.phi_v / k_e;
         }
+
+        // Convert diffuse radiance over the sampled patch into an equivalent isotropic point intensity.
+        Float perSampleScale = shapeScale * areaPerSample;
+        if (perSampleScale <= 0)
+            continue;
 
         for (Point2f u : Hammersley2D(nSamples)) {
             pstd::optional<ShapeSample> ss = shapeObjects[i].Sample(u);
@@ -241,21 +248,22 @@ static bool TryDiscretizeAreaLight(const std::string &name, const ParameterDicti
                 emitted = data.L;
             }
 
+            Point3f p = intr.p();
+            Vector3f n = Normalize(Vector3f(intr.n));
+            if (LengthSquared(n) == 0)
+                n = Vector3f(0, 0, 1);
+
+            Point3f offsetP = p + ShadowEpsilon * n;
+            Transform translate = Translate(Vector3f(offsetP.x, offsetP.y, offsetP.z));
             if (data.twoSided) {
-                Transform lightToRender =
-                    Translate(Vector3f(intr.p().x, intr.p().y, intr.p().z));
                 newLights.push_back(
-                    alloc.new_object<PointLight>(lightToRender, mi, emitted, perSampleScale));
+                    alloc.new_object<PointLight>(translate, mi, emitted, perSampleScale / 4));
             } else {
-                Vector3f n = Normalize(Vector3f(intr.n));
-                if (LengthSquared(n) == 0)
-                    n = Vector3f(0, 0, 1);
-                Frame frame = Frame::FromZ(n);
-                Vector3f up = frame.y;
-                Transform lightToRender = LookAt(intr.p(), intr.p() + n, up);
+                Transform dirToZ = (Transform)Frame::FromZ(n);
+                Transform sampleRenderFromLight = translate * Inverse(dirToZ);
                 newLights.push_back(
-                    alloc.new_object<SpotLight>(lightToRender, mi, emitted, perSampleScale,
-                                                90.f, 90.f));
+                    alloc.new_object<SpotLight>(sampleRenderFromLight, mi, emitted, perSampleScale,
+                                                90.f, 85.f));
             }
         }
     }
@@ -1514,7 +1522,7 @@ std::vector<Light> BasicScene::CreateLights(
 
     // Area Lights
     for (size_t i = 0; i < shapes.size(); ++i) {
-        const auto &sh = shapes[i];
+        auto &sh = shapes[i];
 
         if (sh.lightIndex == -1)
             continue;
@@ -1560,20 +1568,20 @@ std::vector<Light> BasicScene::CreateLights(
                                                  samplesPerLight, shapeLights, &lights, alloc);
         }
         
-        if (!discretized) {
-            for (pbrt::Shape ps : shapeObjects) {
-                Light area = Light::CreateArea(areaLightEntity.name,
-                                               areaLightEntity.parameters,
-                                               *sh.renderFromObject, mi, ps, alphaTex,
-                                               &areaLightEntity.loc, alloc);
-                if (area) {
+        for (pbrt::Shape ps : shapeObjects) {
+            Light area = Light::CreateArea(areaLightEntity.name,
+                                           areaLightEntity.parameters,
+                                           *sh.renderFromObject, mi, ps, alphaTex,
+                                           &areaLightEntity.loc, alloc);
+            if (area) {
+                if (!discretized) {
                     lights.push_back(area);
-                    shapeLights->push_back(area);
                 }
+                shapeLights->push_back(area);
             }
-
-            (*shapeIndexToAreaLights)[i] = shapeLights;
         }
+
+        (*shapeIndexToAreaLights)[i] = shapeLights;
     }
 
     LOG_VERBOSE("Finished area lights");
