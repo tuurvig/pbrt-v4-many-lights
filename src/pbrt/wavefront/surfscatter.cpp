@@ -67,7 +67,7 @@ void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQue
     RayQueue *nextRayQueue = NextRayQueue(wavefrontDepth);
     auto queue = evalQueue->Get<MaterialEvalWorkItem<ConcreteMaterial>>();
     ForAllQueued(
-        desc.c_str(), queue, maxQueueSize,
+        desc.c_str(), ProfilerKernelGroup::WAVEFRONT, queue, maxQueueSize,
         PBRT_CPU_GPU_LAMBDA(const MaterialEvalWorkItem<ConcreteMaterial> w) {
             // Evaluate material and BSDF for ray intersection
             TextureEvaluator texEval;

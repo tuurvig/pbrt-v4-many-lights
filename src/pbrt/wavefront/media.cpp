@@ -25,8 +25,8 @@ void WavefrontPathIntegrator::SampleMediumInteraction(int wavefrontDepth) {
 
     RayQueue *nextRayQueue = NextRayQueue(wavefrontDepth);
     ForAllQueued(
-        "Sample medium interaction", mediumSampleQueue, maxQueueSize,
-        PBRT_CPU_GPU_LAMBDA(MediumSampleWorkItem w) {
+        "Sample medium interaction", ProfilerKernelGroup::WAVEFRONT, mediumSampleQueue,
+        maxQueueSize, PBRT_CPU_GPU_LAMBDA(MediumSampleWorkItem w) {
             Ray ray = w.ray;
             Float tMax = w.tMax;
 
@@ -264,7 +264,7 @@ void WavefrontPathIntegrator::SampleMediumScattering(int wavefrontDepth) {
     std::string desc =
         std::string("Sample direct/indirect - ") + ConcretePhaseFunction::Name();
     ForAllQueued(
-        desc.c_str(),
+        desc.c_str(), ProfilerKernelGroup::WAVEFRONT,
         mediumScatterQueue->Get<MediumScatterWorkItem<ConcretePhaseFunction>>(),
         maxQueueSize,
         PBRT_CPU_GPU_LAMBDA(const MediumScatterWorkItem<ConcretePhaseFunction> w) {

@@ -70,7 +70,7 @@ void UpdatePowerSpectrum(const std::vector<Point2f> &points, Image *pspec) {
 
     int nPoints = points.size();
 
-    GPUParallelFor("Fourier transform", pspec->Resolution().x * pspec->Resolution().y,
+    GPUParallelFor("Fourier transform", ProfilerKernelGroup::WAVEFRONT, pspec->Resolution().x * pspec->Resolution().y,
                    [=] PBRT_GPU(int tid) {
                        int res = pspec->Resolution().x;
                        Point2i p(tid % res, tid / res);

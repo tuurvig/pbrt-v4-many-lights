@@ -305,7 +305,8 @@ std::map<int, TriQuadMesh> OptiXAggregate::PreparePLYMeshes(
                         std::memcpy(uv, uvCPU, nVertices * sizeof(Point2f));
 
                         GPUParallelFor(
-                            "Evaluate Displacement", nVertices, [=] PBRT_GPU(int i) {
+                            "Evaluate Displacement", ProfilerKernelGroup::WAVEFRONT,
+                            nVertices, [=] PBRT_GPU(int i) {
                                 TextureEvalContext ctx;
                                 ctx.p = p[i];
                                 ctx.uv = uv[i];
@@ -1690,7 +1691,7 @@ void OptiXAggregate::IntersectClosest(int maxRays, const RayQueue *rayQueue,
                                       MediumSampleQueue *mediumSampleQueue,
                                       RayQueue *nextRayQueue) const {
     std::pair<cudaEvent_t, cudaEvent_t> events =
-        GetProfilerEvents("Trace closest hit rays");
+        GetProfilerEvents("Trace closest hit rays", ProfilerKernelGroup::WAVEFRONT);
 
     cudaEventRecord(events.first);
 
@@ -1733,7 +1734,7 @@ void OptiXAggregate::IntersectClosest(int maxRays, const RayQueue *rayQueue,
 
 void OptiXAggregate::IntersectShadow(int maxRays, ShadowRayQueue *shadowRayQueue,
                                      SOA<PixelSampleState> *pixelSampleState) const {
-    std::pair<cudaEvent_t, cudaEvent_t> events = GetProfilerEvents("Trace shadow rays");
+    std::pair<cudaEvent_t, cudaEvent_t> events = GetProfilerEvents("Trace shadow rays", ProfilerKernelGroup::WAVEFRONT);
 
     cudaEventRecord(events.first);
 
@@ -1772,7 +1773,7 @@ void OptiXAggregate::IntersectShadow(int maxRays, ShadowRayQueue *shadowRayQueue
 void OptiXAggregate::IntersectShadowTr(int maxRays, ShadowRayQueue *shadowRayQueue,
                                        SOA<PixelSampleState> *pixelSampleState) const {
     std::pair<cudaEvent_t, cudaEvent_t> events =
-        GetProfilerEvents("Tracing shadow Tr rays");
+        GetProfilerEvents("Tracing shadow Tr rays", ProfilerKernelGroup::WAVEFRONT);
 
     cudaEventRecord(events.first);
 
@@ -1811,7 +1812,7 @@ void OptiXAggregate::IntersectShadowTr(int maxRays, ShadowRayQueue *shadowRayQue
 void OptiXAggregate::IntersectOneRandom(
     int maxRays, SubsurfaceScatterQueue *subsurfaceScatterQueue) const {
     std::pair<cudaEvent_t, cudaEvent_t> events =
-        GetProfilerEvents("Tracing subsurface scattering probe rays");
+        GetProfilerEvents("Tracing subsurface scattering probe rays", ProfilerKernelGroup::WAVEFRONT);
 
     cudaEventRecord(events.first);
 

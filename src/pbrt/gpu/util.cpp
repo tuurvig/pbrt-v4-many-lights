@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <vector>
+#include <array>
 
 #ifdef NVTX
 #ifdef PBRT_IS_WINDOWS
@@ -135,7 +136,7 @@ struct KernelStats {
 
 // Store pointers so that reallocs don't mess up held KernelStats pointers
 // in ProfilerEvent..
-static std::vector<KernelStats *> kernelStats;
+static std::array<std::vector<KernelStats *>, ProfilerKernelGroup::END> kernelStats;
 
 struct ProfilerEvent {
     ProfilerEvent() {
@@ -172,7 +173,7 @@ struct ProfilerEvent {
 static std::vector<ProfilerEvent> eventPool;
 static size_t eventPoolOffset = 0;
 
-std::pair<cudaEvent_t, cudaEvent_t> GetProfilerEvents(const char *description) {
+std::pair<cudaEvent_t, cudaEvent_t> GetProfilerEvents(const char *description, ProfilerKernelGroup group) {
     if (eventPool.empty())
         eventPool.resize(1024);  // how many? This is probably more than we need...
 
@@ -185,16 +186,17 @@ std::pair<cudaEvent_t, cudaEvent_t> GetProfilerEvents(const char *description) {
 
     pe.active = true;
     pe.stats = nullptr;
-
-    for (size_t i = 0; i < kernelStats.size(); ++i) {
-        if (kernelStats[i]->description == description) {
-            pe.stats = kernelStats[i];
+    auto &groupKernelStats = kernelStats[group];
+    for (size_t i = 0; i < groupKernelStats.size(); ++i) {
+        KernelStats *kStats = groupKernelStats[i];
+        if (kStats->description == description) {
+            pe.stats = groupKernelStats[i];
             break;
         }
     }
     if (!pe.stats) {
-        kernelStats.push_back(new KernelStats(description));
-        pe.stats = kernelStats.back();
+        groupKernelStats.push_back(new KernelStats(description));
+        pe.stats = groupKernelStats.back();
     }
 
     return {pe.start, pe.stop};
@@ -208,7 +210,7 @@ void GPUMemset(void *ptr, int byte, size_t bytes) {
     CUDA_CHECK(cudaMemset(ptr, byte, bytes));
 }
 
-void ReportKernelStats() {
+void ReportKernelStats(ProfilerKernelGroup group) {
     CUDA_CHECK(cudaDeviceSynchronize());
 
     // Drain active profiler events
@@ -218,29 +220,36 @@ void ReportKernelStats() {
 
     // Compute total milliseconds over all kernels and launches
     float totalMS = 0;
-    for (size_t i = 0; i < kernelStats.size(); ++i)
-        totalMS += kernelStats[i]->sumMS;
+    auto &groupKernelStats = kernelStats[group];
+    for (size_t i = 0; i < groupKernelStats.size(); ++i) {
+        totalMS += groupKernelStats[i]->sumMS;
+    }
 
-    printf("Wavefront Kernel Profile:\n");
+    if (group == ProfilerKernelGroup::WAVEFRONT) {
+        printf("Wavefront Kernel Profile:\n");
+    } else if (group == ProfilerKernelGroup::HPLOC) {
+        printf("HPLOC Kernel Profile:\n");
+    }
+    
     int otherLaunches = 0;
     float otherMS = 0;
-    const float otherCutoff = 0.001f * totalMS;
-    for (size_t i = 0; i < kernelStats.size(); ++i) {
-        KernelStats *stats = kernelStats[i];
-        if (stats->sumMS > otherCutoff)
-            Printf("  %-49s %5d launches %9.2f ms / %5.1f%s (avg %6.3f, min "
-                   "%6.3f, max %7.3f)\n",
-                   stats->description, stats->numLaunches, stats->sumMS,
-                   100.f * stats->sumMS / totalMS, "%", stats->sumMS / stats->numLaunches,
-                   stats->minMS, stats->maxMS);
-        else {
-            otherMS += stats->sumMS;
-            otherLaunches += stats->numLaunches;
-        }
+    //const float otherCutoff = 0.001f * totalMS;
+    for (size_t i = 0; i < groupKernelStats.size(); ++i) {
+        KernelStats *stats = groupKernelStats[i];
+        Printf("  %-49s %5d launches %9.2f ms / %5.1f%s (avg %6.3f, min "
+               "%6.3f, max %7.3f)\n",
+               stats->description, stats->numLaunches, stats->sumMS,
+               100.f * stats->sumMS / totalMS, "%", stats->sumMS / stats->numLaunches,
+               stats->minMS, stats->maxMS);
+        // if (stats->sumMS > otherCutoff)    
+        // else {
+        //     otherMS += stats->sumMS;
+        //     otherLaunches += stats->numLaunches;
+        // }
     }
-    Printf("  %-49s %5d launches %9.2f ms / %5.1f%s (avg %6.3f)\n", "Other",
-           otherLaunches, otherMS, 100.f * otherMS / totalMS, "%",
-           otherMS / otherLaunches);
+    //Printf("  %-49s %5d launches %9.2f ms / %5.1f%s (avg %6.3f)\n", "Other",
+    //       otherLaunches, otherMS, 100.f * otherMS / totalMS, "%",
+    //       otherMS / otherLaunches);
     Printf("\nTotal rendering time: %9.2f ms\n", totalMS);
     Printf("\n");
 }

@@ -116,12 +116,13 @@ class WorkQueue : public SOA<WorkItem> {
 
 // WorkQueue Inline Functions
 template <typename F, typename WorkItem>
-void ForAllQueued(const char *desc, const WorkQueue<WorkItem> *q, int maxQueued,
+void ForAllQueued(const char *desc, ProfilerKernelGroup group, const WorkQueue<WorkItem> *q, int maxQueued,
                   F &&func) {
     if (Options->useGPU) {
         // Launch GPU threads to process _q_ using _func_
 #ifdef PBRT_BUILD_GPU_RENDERER
-        GPUParallelFor(desc, maxQueued, [=] PBRT_GPU(int index) mutable {
+        GPUParallelFor(desc, group, maxQueued,
+                       [=] PBRT_GPU(int index) mutable {
             if (index >= q->Size())
                 return;
             func((*q)[index]);
