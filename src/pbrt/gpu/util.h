@@ -50,7 +50,11 @@
 
 namespace pbrt {
 
-std::pair<cudaEvent_t, cudaEvent_t> GetProfilerEvents(const char *description);
+enum ProfilerKernelGroup {
+    WAVEFRONT, HPLOC, END
+};
+
+std::pair<cudaEvent_t, cudaEvent_t> GetProfilerEvents(const char *description, ProfilerKernelGroup group);
 
 template <typename F>
 inline int GetBlockSize(const char *description, F kernel) {
@@ -84,17 +88,18 @@ __global__ void Kernel(F func, int nItems) {
 
 // GPU Launch Function Declarations
 template <typename F>
-void GPUParallelFor(const char *description, int nItems, F func);
+void GPUParallelFor(const char *description, ProfilerKernelGroup group, int nItems, F func);
 
 template <typename F>
-void GPUParallelFor(const char *description, int nItems, F func) {
+void GPUParallelFor(const char *description, ProfilerKernelGroup group, int nItems,
+                    F func) {
 #ifdef NVTX
     nvtxRangePush(description);
 #endif
     auto kernel = &Kernel<F>;
 
     int blockSize = GetBlockSize(description, kernel);
-    std::pair<cudaEvent_t, cudaEvent_t> events = GetProfilerEvents(description);
+    std::pair<cudaEvent_t, cudaEvent_t> events = GetProfilerEvents(description, group);
 
 #ifdef PBRT_DEBUG_BUILD
     LOG_VERBOSE("Launching %s", description);
@@ -118,7 +123,7 @@ void GPUParallelFor(const char *description, int nItems, F func) {
 // GPU Synchronization Function Declarations
 void GPUWait();
 
-void ReportKernelStats();
+void ReportKernelStats(ProfilerKernelGroup group);
 
 void GPUInit();
 void GPUThreadInit();

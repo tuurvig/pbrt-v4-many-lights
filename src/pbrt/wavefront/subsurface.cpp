@@ -22,8 +22,8 @@ void WavefrontPathIntegrator::SampleSubsurface(int wavefrontDepth) {
     RayQueue *nextRayQueue = NextRayQueue(wavefrontDepth);
 
     ForAllQueued(
-        "Get BSSRDF and enqueue probe ray", bssrdfEvalQueue, maxQueueSize,
-        PBRT_CPU_GPU_LAMBDA(const GetBSSRDFAndProbeRayWorkItem w) {
+        "Get BSSRDF and enqueue probe ray", ProfilerKernelGroup::WAVEFRONT,
+        bssrdfEvalQueue, maxQueueSize, PBRT_CPU_GPU_LAMBDA(const GetBSSRDFAndProbeRayWorkItem w) {
             const SubsurfaceMaterial *material = w.material.Cast<SubsurfaceMaterial>();
             MaterialEvalContext ctx = w.GetMaterialEvalContext();
             SampledWavelengths lambda = w.lambda;
@@ -44,8 +44,8 @@ void WavefrontPathIntegrator::SampleSubsurface(int wavefrontDepth) {
     aggregate->IntersectOneRandom(maxQueueSize, subsurfaceScatterQueue);
 
     ForAllQueued(
-        "Handle out-scattering after SSS", subsurfaceScatterQueue, maxQueueSize,
-        PBRT_CPU_GPU_LAMBDA(SubsurfaceScatterWorkItem w) {
+        "Handle out-scattering after SSS", ProfilerKernelGroup::WAVEFRONT,
+        subsurfaceScatterQueue, maxQueueSize, PBRT_CPU_GPU_LAMBDA(SubsurfaceScatterWorkItem w) {
             if (w.reservoirPDF == 0)
                 return;
 

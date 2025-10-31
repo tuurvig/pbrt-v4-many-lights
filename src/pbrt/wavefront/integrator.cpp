@@ -496,7 +496,7 @@ void WavefrontPathIntegrator::HandleEscapedRays() {
     if (!escapedRayQueue)
         return;
     ForAllQueued(
-        "Handle escaped rays", escapedRayQueue, maxQueueSize,
+        "Handle escaped rays", ProfilerKernelGroup::WAVEFRONT, escapedRayQueue, maxQueueSize,
         PBRT_CPU_GPU_LAMBDA(const EscapedRayWorkItem w) {
             // Compute weighted radiance for escaped ray
             SampledSpectrum L(0.f);
@@ -538,8 +538,8 @@ void WavefrontPathIntegrator::HandleEscapedRays() {
 
 void WavefrontPathIntegrator::HandleEmissiveIntersection() {
     ForAllQueued(
-        "Handle emitters hit by indirect rays", hitAreaLightQueue, maxQueueSize,
-        PBRT_CPU_GPU_LAMBDA(const HitAreaLightWorkItem w) {
+        "Handle emitters hit by indirect rays", ProfilerKernelGroup::WAVEFRONT,
+        hitAreaLightQueue, maxQueueSize, PBRT_CPU_GPU_LAMBDA(const HitAreaLightWorkItem w) {
             // Find emitted radiance from surface that ray hit
             SampledSpectrum Le = w.areaLight.L(w.p, w.n, w.uv, w.wo, w.lambda);
             if (!Le)
@@ -722,8 +722,8 @@ void WavefrontPathIntegrator::UpdateDisplayRGBFromFilm(Bounds2i pixelBounds) {
 #ifdef PBRT_BUILD_GPU_RENDERER
     Vector2i resolution = pixelBounds.Diagonal();
     GPUParallelFor(
-        "Update Display RGB Buffer", resolution.x * resolution.y,
-        PBRT_CPU_GPU_LAMBDA(int index) {
+        "Update Display RGB Buffer", ProfilerKernelGroup::WAVEFRONT,
+        resolution.x * resolution.y, PBRT_CPU_GPU_LAMBDA(int index) {
             Point2i p(index % resolution.x, index / resolution.x);
             displayRGB[index] = film.GetPixelRGB(p + pixelBounds.pMin);
         });

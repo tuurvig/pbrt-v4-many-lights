@@ -92,7 +92,7 @@ class WavefrontPathIntegrator {
     void ParallelFor(const char *description, int nItems, F &&func) {
         if (Options->useGPU)
 #ifdef PBRT_BUILD_GPU_RENDERER
-            GPUParallelFor(description, nItems, func);
+            GPUParallelFor(description, ProfilerKernelGroup::WAVEFRONT, nItems, func);
 #else
             LOG_FATAL("Options->useGPU was set without PBRT_BUILD_GPU_RENDERER enabled");
 #endif
@@ -104,7 +104,8 @@ class WavefrontPathIntegrator {
     void Do(const char *description, F &&func) {
         if (Options->useGPU)
 #ifdef PBRT_BUILD_GPU_RENDERER
-            GPUParallelFor(description, 1, [=] PBRT_GPU(int) mutable { func(); });
+            GPUParallelFor(description, ProfilerKernelGroup::WAVEFRONT, 1,
+                           [=] PBRT_GPU(int) mutable { func(); });
 #else
             LOG_FATAL("Options->useGPU was set without PBRT_BUILD_GPU_RENDERER enabled");
 #endif
