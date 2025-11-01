@@ -29,8 +29,14 @@ BVHLightSampler::BVHLightSampler(pstd::span<const Light> lights, Allocator alloc
             m_allLightBounds = Union(m_allLightBounds, lightBounds->bounds);
         }
     }
-    if (!bvhLights.empty())
-        buildBVH(bvhLights, 0, bvhLights.size(), 0, 0);
+    if (!bvhLights.empty()) {
+#ifdef PBRT_BUILD_GPU_RENDERER
+        bool buildOnGPU = buildBVHGPU(bvhLights);
+        if (!buildOnGPU)
+#endif
+            buildBVH(bvhLights, 0, bvhLights.size(), 0, 0);
+    }
+        
     lightBVHBytes += m_nodes.size() * sizeof(LightBVHNode) +
                      m_lightToBitTrail.capacity() * (sizeof(Light) + sizeof(uint32_t)) +
                      lights.size() * sizeof(Light) +

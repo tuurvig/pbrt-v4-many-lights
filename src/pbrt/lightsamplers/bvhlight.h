@@ -170,7 +170,11 @@ class BVHLightSampler {
         std::vector<std::pair<int, LightBounds>> &bvhLights, int start, int end,
         uint32_t bitTrail, int depth);
 
-    Float EvaluateCost(const LightBounds &b, const Bounds3f &bounds, int dim) const {
+#ifdef PBRT_BUILD_GPU_RENDERER
+    bool buildBVHGPU(std::vector<std::pair<int, LightBounds>> &bvhLights);
+#endif
+
+    PBRT_CPU_GPU Float EvaluateCost(const LightBounds &b, const Bounds3f &bounds, int dim) const {
         // Evaluate direction bounds measure for _LightBounds_
         Float theta_o = std::acos(b.cosTheta_o), theta_e = std::acos(b.cosTheta_e);
         Float theta_w = std::min(theta_o + theta_e, Pi);
