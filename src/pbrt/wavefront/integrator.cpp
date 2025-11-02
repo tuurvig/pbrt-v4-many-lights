@@ -646,8 +646,8 @@ void WavefrontPathIntegrator::StartDisplayThread() {
     if (Options->useGPU) {
         // Allocate staging memory on the GPU to store the current WIP
         // image.
-        CUDA_CHECK(cudaMalloc(&displayRGB, resolution.x * resolution.y * sizeof(RGB)));
-        CUDA_CHECK(cudaMemset(displayRGB, 0, resolution.x * resolution.y * sizeof(RGB)));
+        displayRGB = GPUAllocate<RGB>(resolution.x * resolution.y);
+        GPUMemset(displayRGB, 0, resolution.x * resolution.y * sizeof(RGB));
 
         // Host-side memory for the WIP Image.  We'll just let this leak so
         // that the lambda passed to DisplayDynamic below doesn't access
@@ -672,19 +672,14 @@ void WavefrontPathIntegrator::StartDisplayThread() {
             // Copy back to the host from the GPU buffer, without any
             // synthronization.
             while (!*exitCopyThread) {
-                CUDA_CHECK(cudaMemcpyAsync(displayRGBHost, displayRGB,
-                                           resolution.x * resolution.y * sizeof(RGB),
-                                           cudaMemcpyDeviceToHost, memcpyStream));
+                GPUCopyAsyncToHost<RGB>(displayRGBHost, displayRGB, resolution.x * resolution.y, memcpyStream);
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-                CUDA_CHECK(cudaStreamSynchronize(memcpyStream));
+                GPUWait(memcpyStream);
             }
 
             // Copy one more time to get the final image before exiting.
-            CUDA_CHECK(cudaMemcpy(displayRGBHost, displayRGB,
-                                  resolution.x * resolution.y * sizeof(RGB),
-                                  cudaMemcpyDeviceToHost));
-            CUDA_CHECK(cudaDeviceSynchronize());
+            GPUCopyToHost<RGB>(displayRGBHost, displayRGB, resolution.x * resolution.y);
+            GPUWait();
         });
 
         // Now on the CPU side, give the display system a lambda that

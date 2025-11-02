@@ -374,7 +374,7 @@ CUDAOutputBuffer<PIXEL_FORMAT>::CUDAOutputBuffer(int32_t width, int32_t height) 
                                             cudaGraphicsMapFlagsWriteDiscard));
 
     CUDA_CHECK(cudaEventCreate(&readbackFinishedEvent));
-    CUDA_CHECK(cudaMallocHost(&m_host_pixels, m_width * m_height * sizeof(PIXEL_FORMAT)));
+    m_host_pixels = GPUAllocHostAsync<PIXEL_FORMAT>(m_width * m_height);
 
     display = new BufferDisplay(BufferImageFormat::FLOAT3);
 }
@@ -430,9 +430,8 @@ void CUDAOutputBuffer<PIXEL_FORMAT>::StartAsynchronousReadback() {
 
     makeCurrent();
 
-    CUDA_CHECK(cudaMemcpyAsync(m_host_pixels, m_device_pixels,
-                               m_width * m_height * sizeof(PIXEL_FORMAT),
-                               cudaMemcpyDeviceToHost));
+    GPUCopyAsyncToHost<PIXEL_FORMAT>(m_host_pixels, m_device_pixels, m_width * m_height);
+    
     CUDA_CHECK(cudaEventRecord(readbackFinishedEvent));
     readbackActive = true;
 }
@@ -444,7 +443,7 @@ const PIXEL_FORMAT *CUDAOutputBuffer<PIXEL_FORMAT>::GetReadbackPixels() {
 
     makeCurrent();
 
-    CUDA_CHECK(cudaEventSynchronize(readbackFinishedEvent));
+    GPUWait(readbackFinishedEvent);
     readbackActive = false;
     return m_host_pixels;
 }

@@ -146,8 +146,8 @@ struct ProfilerEvent {
 
     void Sync() {
         CHECK(active);
-        CUDA_CHECK(cudaEventSynchronize(start));
-        CUDA_CHECK(cudaEventSynchronize(stop));
+        GPUWait(start);
+        GPUWait(stop);
 
         float ms = 0;
         CUDA_CHECK(cudaEventElapsedTime(&ms, start, stop));
@@ -202,16 +202,8 @@ std::pair<cudaEvent_t, cudaEvent_t> GetProfilerEvents(const char *description, P
     return {pe.start, pe.stop};
 }
 
-void GPUWait() {
-    CUDA_CHECK(cudaDeviceSynchronize());
-}
-
-void GPUMemset(void *ptr, int byte, size_t bytes) {
-    CUDA_CHECK(cudaMemset(ptr, byte, bytes));
-}
-
 void ReportKernelStats(ProfilerKernelGroup group) {
-    CUDA_CHECK(cudaDeviceSynchronize());
+    GPUWait();
 
     // Drain active profiler events
     for (size_t i = 0; i < eventPool.size(); ++i)

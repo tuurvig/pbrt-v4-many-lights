@@ -121,17 +121,103 @@ void GPUParallelFor(const char *description, ProfilerKernelGroup group, int nIte
 #endif  // __NVCC__
 
 // GPU Synchronization Function Declarations
-void GPUWait();
-
-void ReportKernelStats(ProfilerKernelGroup group);
-
 void GPUInit();
 void GPUThreadInit();
 
-void GPUMemset(void *ptr, int byte, size_t bytes);
+static void GPUWait() {
+    CUDA_CHECK(cudaDeviceSynchronize());
+}
+
+static void GPUWait(cudaEvent_t event) {
+    CUDA_CHECK(cudaEventSynchronize(event));
+}
+
+static void GPUWait(cudaStream_t stream) {
+    CUDA_CHECK(cudaStreamSynchronize(stream));
+}
+
+template<typename T>
+static T* GPUAllocate(size_t count) {
+    T* ptr;
+    CUDA_CHECK(cudaMalloc((void**)&ptr, sizeof(T) * count));
+    return ptr;
+}
+
+template<typename T>
+static T* GPUAllocHostAsync(size_t count) {
+    T* ptr;
+    CUDA_CHECK(cudaMallocHost((void**)&ptr, sizeof(T) * count));
+    return ptr;
+}
+
+template<typename T>
+static T* GPUAllocUnified(size_t count) {
+    T* ptr;
+    CUDA_CHECK(cudaMallocManaged((void**)&ptr, sizeof(T) * count));
+    return ptr;
+}
+
+template<typename T>
+static void GPUCopyToDevice(T* dst, const T* src, size_t count) {
+    CUDA_CHECK(cudaMemcpy((void*)dst, (const void*)src, sizeof(T) * count, cudaMemcpyHostToDevice));
+}
+
+template<typename T>
+static void GPUCopyAsyncToDevice(T* dst, const T* src, size_t count, cudaStream_t stream = 0) {
+    CUDA_CHECK(cudaMemcpyAsync((void*)dst, (const void*)src, sizeof(T) * count, cudaMemcpyHostToDevice, stream));
+}
+
+template<typename T>
+static void GPUCopyToHost(T* dst, const T* src, size_t count) {
+    CUDA_CHECK(cudaMemcpy((void*)dst, (const void*)src, sizeof(T) * count, cudaMemcpyDeviceToHost));
+}
+
+template<typename T>
+static void GPUCopyAsyncToHost(T* dst, const T* src, size_t count, cudaStream_t stream = 0) {
+    CUDA_CHECK(cudaMemcpyAsync((void*)dst, (const void*)src, sizeof(T) * count, cudaMemcpyDeviceToHost, stream));
+}
+
+static void GPUMemset(void *ptr, int32_t byte, size_t bytes) {
+    CUDA_CHECK(cudaMemset(ptr, byte, bytes));
+}
+
+static void GPUMemsetAsync(void* ptr, int32_t byte, size_t bytes)
+{
+    CUDA_CHECK(cudaMemsetAsync(ptr, byte, bytes));
+}
+
+static void GPUFree(void* ptr)
+{
+    CUDA_CHECK(cudaFree(ptr));
+}
+
+static void GPUFreeAsync(void* ptr)
+{
+    CUDA_CHECK(cudaFreeAsync(ptr, 0));
+}
+
+void ReportKernelStats(ProfilerKernelGroup group);
 
 void GPURegisterThread(const char *name);
 void GPUNameStream(cudaStream_t stream, const char *name);
+
+struct BufferGPU {
+    void Init(size_t size) {
+        // GPU-side memory for sample points
+        ptr = (CUdeviceptr)GPUAllocate<uint8_t>(size);
+
+        // Event to keep track of when the buffer has been processed on the GPU.
+        CUDA_CHECK(cudaEventCreate(&finishedEvent));
+
+        // Host-side staging buffer for async memcpy in pinned host memory.
+        hostPtr = GPUAllocHostAsync<uint8_t>(size);
+    }
+
+    bool used = false;
+    cudaEvent_t finishedEvent;
+    CUdeviceptr ptr = 0;
+    void *hostPtr = nullptr;
+};
 
 }  // namespace pbrt
 
