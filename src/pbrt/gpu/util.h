@@ -144,6 +144,13 @@ static T* GPUAllocate(size_t count) {
 }
 
 template<typename T>
+static T* GPUAllocAsync(size_t count, cudaStream_t stream = 0) {
+    T* ptr;
+    CUDA_CHECK(cudaMallocAsync((void**)&ptr, sizeof(T) * count, 0));
+    return ptr;
+}
+
+template<typename T>
 static T* GPUAllocHostAsync(size_t count) {
     T* ptr;
     CUDA_CHECK(cudaMallocHost((void**)&ptr, sizeof(T) * count));
@@ -219,6 +226,14 @@ struct BufferGPU {
     void *hostPtr = nullptr;
 };
 
+class KernelTimerWrapper{
+public:
+    KernelTimerWrapper(cudaEvent_t start, cudaEvent_t end) : m_start(start), m_end(end) { cudaEventRecord(m_start); }
+    KernelTimerWrapper(const std::pair<cudaEvent_t, cudaEvent_t>& e) : KernelTimerWrapper(e.first, e.second) {}
+    ~KernelTimerWrapper() { cudaEventRecord(m_end); }
+private:
+    cudaEvent_t m_start, m_end;
+};
 }  // namespace pbrt
 
 #endif  // PBRT_GPU_UTIL_H
