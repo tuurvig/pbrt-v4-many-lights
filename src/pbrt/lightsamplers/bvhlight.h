@@ -46,6 +46,13 @@ struct alignas(32) LightBVHNode {
     };
 };
 
+struct LightBVHBuildContainer{
+    LightBVHBuildContainer(const LightBounds& bounds, int index) 
+        : bounds(bounds), index(index) {}
+    LightBounds bounds;
+    int index;
+};
+
 // BVHLightSampler Definition
 class BVHLightSampler {
   public:
@@ -166,12 +173,12 @@ class BVHLightSampler {
 
   private:
     // BVHLightSampler Private Methods
-    std::pair<int, LightBounds> buildBVH(
-        std::vector<std::pair<int, LightBounds>> &bvhLights, int start, int end,
+    LightBVHBuildContainer buildBVH(
+        std::vector<LightBVHBuildContainer> &bvhLights, int start, int end,
         uint32_t bitTrail, int depth);
 
 #ifdef PBRT_BUILD_GPU_RENDERER
-    bool buildBVHGPU(std::vector<std::pair<int, LightBounds>> &bvhLights);
+    bool buildBVHGPU(std::vector<LightBVHBuildContainer> &bvhLights);
 #endif
 
     PBRT_CPU_GPU Float EvaluateCost(const LightBounds &b, const Bounds3f &bounds, int dim) const {
