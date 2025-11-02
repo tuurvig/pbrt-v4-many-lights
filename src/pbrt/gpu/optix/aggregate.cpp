@@ -1668,10 +1668,7 @@ void OptiXAggregate::IntersectClosest(int maxRays, const RayQueue *rayQueue,
                                       MaterialEvalQueue *universalEvalMaterialQueue,
                                       MediumSampleQueue *mediumSampleQueue,
                                       RayQueue *nextRayQueue) const {
-    std::pair<cudaEvent_t, cudaEvent_t> events =
-        GetProfilerEvents("Trace closest hit rays", ProfilerKernelGroup::WAVEFRONT);
-
-    cudaEventRecord(events.first);
+    KernelTimerWrapper timer(GetProfilerEvents("Trace closest hit rays", ProfilerKernelGroup::WAVEFRONT));
 
     if (rootTraversable) {
         RayIntersectParameters params;
@@ -1702,19 +1699,15 @@ void OptiXAggregate::IntersectClosest(int maxRays, const RayQueue *rayQueue,
         nvtxRangePop();
 #endif
 #ifndef NDEBUG
-        CUDA_CHECK(cudaDeviceSynchronize());
+        GPUWait();
         LOG_VERBOSE("Post-sync triangle intersect closest");
 #endif
     }
-
-    cudaEventRecord(events.second);
 };
 
 void OptiXAggregate::IntersectShadow(int maxRays, ShadowRayQueue *shadowRayQueue,
                                      SOA<PixelSampleState> *pixelSampleState) const {
-    std::pair<cudaEvent_t, cudaEvent_t> events = GetProfilerEvents("Trace shadow rays", ProfilerKernelGroup::WAVEFRONT);
-
-    cudaEventRecord(events.first);
+    KernelTimerWrapper timer(GetProfilerEvents("Trace shadow rays", ProfilerKernelGroup::WAVEFRONT));
 
     if (rootTraversable) {
         RayIntersectParameters params;
@@ -1744,16 +1737,11 @@ void OptiXAggregate::IntersectShadow(int maxRays, ShadowRayQueue *shadowRayQueue
         LOG_VERBOSE("Post-sync intersect shadow");
 #endif
     }
-
-    cudaEventRecord(events.second);
 }
 
 void OptiXAggregate::IntersectShadowTr(int maxRays, ShadowRayQueue *shadowRayQueue,
                                        SOA<PixelSampleState> *pixelSampleState) const {
-    std::pair<cudaEvent_t, cudaEvent_t> events =
-        GetProfilerEvents("Tracing shadow Tr rays", ProfilerKernelGroup::WAVEFRONT);
-
-    cudaEventRecord(events.first);
+    KernelTimerWrapper timer(GetProfilerEvents("Tracing shadow Tr rays", ProfilerKernelGroup::WAVEFRONT));
 
     if (rootTraversable) {
         RayIntersectParameters params;
@@ -1783,16 +1771,12 @@ void OptiXAggregate::IntersectShadowTr(int maxRays, ShadowRayQueue *shadowRayQue
         LOG_VERBOSE("Post-sync intersect shadow Tr");
 #endif
     }
-
-    cudaEventRecord(events.second);
 }
 
 void OptiXAggregate::IntersectOneRandom(
     int maxRays, SubsurfaceScatterQueue *subsurfaceScatterQueue) const {
-    std::pair<cudaEvent_t, cudaEvent_t> events =
-        GetProfilerEvents("Tracing subsurface scattering probe rays", ProfilerKernelGroup::WAVEFRONT);
-
-    cudaEventRecord(events.first);
+    KernelTimerWrapper timer(GetProfilerEvents(
+        "Tracing subsurface scattering probe rays", ProfilerKernelGroup::WAVEFRONT));
 
     if (rootTraversable) {
         RayIntersectParameters params;
@@ -1821,8 +1805,6 @@ void OptiXAggregate::IntersectOneRandom(
         LOG_VERBOSE("Post-sync intersect random");
 #endif
     }
-
-    cudaEventRecord(events.second);
 }
 
 }  // namespace pbrt
