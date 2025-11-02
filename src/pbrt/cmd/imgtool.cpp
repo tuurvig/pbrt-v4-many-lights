@@ -2246,7 +2246,7 @@ int denoise_optix(std::vector<std::string> args) {
     ImageAndMetadata im = Image::Read(inFilename);
     Image &image = im.image;
 
-    CUDA_CHECK(cudaFree(nullptr));
+    GPUFree(nullptr);
 
     int nLayers = 3;
     bool oldNormalNaming = false;
@@ -2279,12 +2279,12 @@ int denoise_optix(std::vector<std::string> args) {
 
     Denoiser denoiser((Vector2i)image.Resolution(), nLayers == 3);
 
-    size_t imageBytes = 3 * image.Resolution().x * image.Resolution().y * sizeof(float);
+    size_t imagePixels = image.Resolution().x * image.Resolution().y;
+    size_t imageValues = 3 * imagePixels;
 
     auto copyChannelsToGPU = [&](std::array<std::string, 3> ch, bool flipZ = false) {
-        void *bufGPU;
-        CUDA_CHECK(cudaMalloc(&bufGPU, imageBytes));
-        std::vector<float> hostStaging(imageBytes / sizeof(float));
+        float* bufGPU = GPUAllocate<float>(imageValues);
+        std::vector<float> hostStaging(imageValues);
 
         ImageChannelDesc desc = image.GetChannelDesc(ch);
         CHECK(desc);
@@ -2297,8 +2297,7 @@ int denoise_optix(std::vector<std::string> args) {
                 for (int c = 0; c < 3; ++c)
                     hostStaging[offset++] = v[c];
             }
-        CUDA_CHECK(
-            cudaMemcpy(bufGPU, hostStaging.data(), imageBytes, cudaMemcpyHostToDevice));
+        GPUCopyToDevice<float>(bufGPU, hostStaging.data(), imageValues);
         return bufGPU;
     };
     RGB *rgbGPU = (RGB *)copyChannelsToGPU({"R", "G", "B"});
@@ -2313,16 +2312,14 @@ int denoise_optix(std::vector<std::string> args) {
             normalGPU = (Normal3f *)copyChannelsToGPU({"Ns.X", "Ns.Y", "Ns.Z"}, true);
     }
 
-    RGB *rgbResultGPU;
-    CUDA_CHECK(cudaMalloc(&rgbResultGPU, imageBytes));
+    RGB *rgbResultGPU = GPUAllocate<RGB>(imagePixels);
 
     denoiser.Denoise(rgbGPU, normalGPU, albedoGPU, rgbResultGPU);
 
-    CUDA_CHECK(cudaDeviceSynchronize());
+    GPUWait();
 
     Image result(PixelFormat::Float, image.Resolution(), {"R", "G", "B"});
-    CUDA_CHECK(cudaMemcpy(result.RawPointer({0, 0}), (const void *)rgbResultGPU,
-                          imageBytes, cudaMemcpyDeviceToHost));
+    GPUCopyToHost<float>(reinterpret_cast<float*>(result.RawPointer({0, 0})), reinterpret_cast<float*>(rgbResultGPU), imageValues);
 
     ImageMetadata outMetadata;
     outMetadata.cameraFromWorld = im.metadata.cameraFromWorld;

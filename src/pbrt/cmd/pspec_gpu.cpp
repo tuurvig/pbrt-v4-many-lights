@@ -23,37 +23,19 @@
 
 namespace pbrt {
 
-struct Buffer {
-    bool used = false;
-    cudaEvent_t finishedEvent;
-    CUdeviceptr ptr = 0;
-    void *hostPtr = nullptr;
-};
-
 // Ring-buffer of Buffers that hold sets of sample Points
-static std::vector<Buffer> bufferPool;
+static std::vector<BufferGPU> bufferPool;
 static int nextBufferOffset;
 
 void UPSInit(int nPoints) {
     bufferPool.resize(16);  // should be plenty
-    for (Buffer &b : bufferPool) {
-        void *ptr;
-        size_t sz = nPoints * sizeof(Point2f);
-        // GPU-side memory for sample points
-        CUDA_CHECK(cudaMalloc(&ptr, sz));
-        b.ptr = (CUdeviceptr)ptr;
-
-        // Event to keep track of when the buffer has been processed on the
-        // GPU.
-        CUDA_CHECK(cudaEventCreate(&b.finishedEvent));
-
-        // Host-side staging buffer for async memcpy in pinned host memory.
-        CUDA_CHECK(cudaMallocHost(&b.hostPtr, sz));
+    for (BufferGPU &b : bufferPool) {
+        b.Init(nPoints * sizeof(Point2f));
     }
 }
 
 void UpdatePowerSpectrum(const std::vector<Point2f> &points, Image *pspec) {
-    Buffer &b = bufferPool[nextBufferOffset];
+    BufferGPU &b = bufferPool[nextBufferOffset];
     if (++nextBufferOffset == bufferPool.size())
         nextBufferOffset = 0;
     if (!b.used)
@@ -61,12 +43,11 @@ void UpdatePowerSpectrum(const std::vector<Point2f> &points, Image *pspec) {
     else
         // If it's been used previously, make sure that the kernel that
         // consumed it has completed.
-        CUDA_CHECK(cudaEventSynchronize(b.finishedEvent));
+        GPUWait(b.finishedEvent);
 
     // Copy the sample points to host-side pinned memory
     memcpy(b.hostPtr, points.data(), points.size() * sizeof(Point2f));
-    CUDA_CHECK(cudaMemcpyAsync((void *)b.ptr, b.hostPtr, points.size() * sizeof(Point2f),
-                               cudaMemcpyHostToDevice));
+    GPUCopyAsyncToDevice<Point2f>(reinterpret_cast<Point2f*>(b.ptr), reinterpret_cast<Point2f*>(b.hostPtr), points.size());
 
     int nPoints = points.size();
 
