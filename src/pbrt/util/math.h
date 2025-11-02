@@ -118,6 +118,8 @@ PBRT_CPU_GPU inline uint32_t EncodeMorton3(float x, float y, float z) {
     return (LeftShift3(z) << 2) | (LeftShift3(y) << 1) | LeftShift3(x);
 }
 
+PBRT_CPU_GPU inline uint64_t EncodeExtendedMorton5(Point3f position, Bounds3f bounds, Vector3f normal);
+
 PBRT_CPU_GPU
 inline uint32_t Compact1By1(uint64_t x) {
     // TODO: as of Haswell, the PEXT instruction could do all this in a
