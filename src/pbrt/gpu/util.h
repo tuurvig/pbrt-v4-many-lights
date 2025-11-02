@@ -56,6 +56,34 @@ enum ProfilerKernelGroup {
 
 std::pair<cudaEvent_t, cudaEvent_t> GetProfilerEvents(const char *description, ProfilerKernelGroup group);
 
+void ReportKernelStats(ProfilerKernelGroup group);
+
+// Neat timer wrapper class to used RAII to measure time for kernel execution time.
+class KernelTimerWrapper{
+public:
+    KernelTimerWrapper(cudaEvent_t start, cudaEvent_t end) : m_start(start), m_end(end) { cudaEventRecord(m_start); }
+    KernelTimerWrapper(const std::pair<cudaEvent_t, cudaEvent_t>& e) : KernelTimerWrapper(e.first, e.second) {}
+    ~KernelTimerWrapper() { cudaEventRecord(m_end); }
+private:
+    cudaEvent_t m_start, m_end;
+};
+
+// GPU Synchronization Function Declarations
+void GPUInit();
+void GPUThreadInit();
+
+static void GPUWait() {
+    CUDA_CHECK(cudaDeviceSynchronize());
+}
+
+static void GPUWait(cudaEvent_t event) {
+    CUDA_CHECK(cudaEventSynchronize(event));
+}
+
+static void GPUWait(cudaStream_t stream) {
+    CUDA_CHECK(cudaStreamSynchronize(stream));
+}
+
 template <typename F>
 inline int GetBlockSize(const char *description, F kernel) {
     // Note: this isn't reentrant, but that's fine for our purposes...
@@ -97,20 +125,19 @@ void GPUParallelFor(const char *description, ProfilerKernelGroup group, int nIte
     nvtxRangePush(description);
 #endif
     auto kernel = &Kernel<F>;
-
     int blockSize = GetBlockSize(description, kernel);
-    std::pair<cudaEvent_t, cudaEvent_t> events = GetProfilerEvents(description, group);
 
 #ifdef PBRT_DEBUG_BUILD
     LOG_VERBOSE("Launching %s", description);
 #endif
-    cudaEventRecord(events.first);
-    int gridSize = (nItems + blockSize - 1) / blockSize;
-    kernel<<<gridSize, blockSize>>>(func, nItems);
-    cudaEventRecord(events.second);
+    {
+        KernelTimerWrapper timer(GetProfilerEvents(description, group));
+        int gridSize = (nItems + blockSize - 1) / blockSize;
+        kernel<<<gridSize, blockSize>>>(func, nItems);
+    }
 
 #ifdef PBRT_DEBUG_BUILD
-    CUDA_CHECK(cudaDeviceSynchronize());
+    GPUWait();
     LOG_VERBOSE("Post-sync %s", description);
 #endif
 #ifdef NVTX
@@ -120,22 +147,7 @@ void GPUParallelFor(const char *description, ProfilerKernelGroup group, int nIte
 
 #endif  // __NVCC__
 
-// GPU Synchronization Function Declarations
-void GPUInit();
-void GPUThreadInit();
-
-static void GPUWait() {
-    CUDA_CHECK(cudaDeviceSynchronize());
-}
-
-static void GPUWait(cudaEvent_t event) {
-    CUDA_CHECK(cudaEventSynchronize(event));
-}
-
-static void GPUWait(cudaStream_t stream) {
-    CUDA_CHECK(cudaStreamSynchronize(stream));
-}
-
+// GPU Allocation function definition
 template<typename T>
 static T* GPUAllocate(size_t count) {
     T* ptr;
@@ -203,8 +215,6 @@ static void GPUFreeAsync(void* ptr)
     CUDA_CHECK(cudaFreeAsync(ptr, 0));
 }
 
-void ReportKernelStats(ProfilerKernelGroup group);
-
 void GPURegisterThread(const char *name);
 void GPUNameStream(cudaStream_t stream, const char *name);
 
@@ -226,14 +236,6 @@ struct BufferGPU {
     void *hostPtr = nullptr;
 };
 
-class KernelTimerWrapper{
-public:
-    KernelTimerWrapper(cudaEvent_t start, cudaEvent_t end) : m_start(start), m_end(end) { cudaEventRecord(m_start); }
-    KernelTimerWrapper(const std::pair<cudaEvent_t, cudaEvent_t>& e) : KernelTimerWrapper(e.first, e.second) {}
-    ~KernelTimerWrapper() { cudaEventRecord(m_end); }
-private:
-    cudaEvent_t m_start, m_end;
-};
 }  // namespace pbrt
 
 #endif  // PBRT_GPU_UTIL_H

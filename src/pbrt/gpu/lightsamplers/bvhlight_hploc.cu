@@ -47,25 +47,20 @@ uint64_t* GetSortedMortonCodes(BuildStateContainer& buildState) {
     void* tempStorage = nullptr;
     size_t tempStorageBytes = 0;
     uint32_t beginBit = 1, endBit = 64;
-    std::pair<cudaEvent_t, cudaEvent_t> events = GetProfilerEvents(, ProfilerKernelGroup::HPLOC);
-
     const char* radixSortDescription = "Radix Sort Morton keys";
-    cudaEventRecord(events.first);
     {
         KernelTimerWrapper timer(GetProfilerEvents(radixSortDescription, ProfilerKernelGroup::HPLOC));
         cub::DeviceRadixSort::SortPairs(tempStorage, tempStorageBytes, 
-        deviceMortonCodes, deviceMortonCodesSorted,
-        localState.clusterIndices, deviceClusterIndicesSorted, localState.nLights, beginBit, endBit);
+            deviceMortonCodes, deviceMortonCodesSorted,
+            localState.clusterIndices, deviceClusterIndicesSorted, localState.nLights, beginBit, endBit);
     }
-    
-
     tempStorage = GPUAllocate<uint8_t>(tempStorageBytes);
-
-    cub::DeviceRadixSort::SortPairs(tempStorage, tempStorageBytes, 
-        deviceMortonCodes, deviceMortonCodesSorted,
-        localState.clusterIndices, deviceClusterIndicesSorted, localState.nLights, beginBit, endBit);
-
-    cudaEventRecord(events.second);
+    {
+        KernelTimerWrapper timer(GetProfilerEvents(radixSortDescription, ProfilerKernelGroup::HPLOC));
+        cub::DeviceRadixSort::SortPairs(tempStorage, tempStorageBytes, 
+            deviceMortonCodes, deviceMortonCodesSorted,
+            localState.clusterIndices, deviceClusterIndicesSorted, localState.nLights, beginBit, endBit);
+    }
 
     GPUFreeAsync(deviceMortonCodes);
     GPUFreeAsync(tempStorage);
