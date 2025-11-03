@@ -47,16 +47,13 @@ uint64_t* GetSortedMortonCodes(BuildStateContainer& buildState) {
     void* tempStorage = nullptr;
     size_t tempStorageBytes = 0;
     uint32_t beginBit = 1, endBit = 64;
-    const char* radixSortDescription = "Radix Sort Morton keys";
     {
-        KernelTimerWrapper timer(GetProfilerEvents(radixSortDescription, ProfilerKernelGroup::HPLOC));
+        KernelTimerWrapper timer(GetProfilerEvents("Radix Sort Morton keys", ProfilerKernelGroup::HPLOC));
         cub::DeviceRadixSort::SortPairs(tempStorage, tempStorageBytes, 
             deviceMortonCodes, deviceMortonCodesSorted,
             localState.clusterIndices, deviceClusterIndicesSorted, localState.nLights, beginBit, endBit);
-    }
-    tempStorage = GPUAllocate<uint8_t>(tempStorageBytes);
-    {
-        KernelTimerWrapper timer(GetProfilerEvents(radixSortDescription, ProfilerKernelGroup::HPLOC));
+
+        tempStorage = GPUAllocAsync<uint8_t>(tempStorageBytes);
         cub::DeviceRadixSort::SortPairs(tempStorage, tempStorageBytes, 
             deviceMortonCodes, deviceMortonCodesSorted,
             localState.clusterIndices, deviceClusterIndicesSorted, localState.nLights, beginBit, endBit);
