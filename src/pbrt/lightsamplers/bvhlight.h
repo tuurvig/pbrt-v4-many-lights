@@ -171,6 +171,20 @@ class BVHLightSampler {
 
     std::string ToString() const;
 
+    static PBRT_CPU_GPU Float EvaluateCost(const LightBounds& b) {
+        // Evaluate direction bounds measure for _LightBounds_
+        Float theta_o = std::acos(b.cosTheta_o);
+        Float theta_e = std::acos(b.cosTheta_e);
+        Float theta_w = std::min(theta_o + theta_e, Pi);
+        Float sinTheta_o = SafeSqrt(1 - Sqr(b.cosTheta_o));
+        Float M_omega = 2 * Pi * (1 - b.cosTheta_o) +
+                        Pi / 2 *
+                            (2 * theta_w * sinTheta_o - std::cos(theta_o - 2 * theta_w) -
+                             2 * theta_o * sinTheta_o + b.cosTheta_o);
+
+        return b.phi * M_omega * b.bounds.SurfaceArea();
+    }
+
   private:
     // BVHLightSampler Private Methods
     LightBVHBuildContainer buildBVH(
@@ -182,18 +196,9 @@ class BVHLightSampler {
 #endif
 
     PBRT_CPU_GPU Float EvaluateCost(const LightBounds &b, const Bounds3f &bounds, int dim) const {
-        // Evaluate direction bounds measure for _LightBounds_
-        Float theta_o = std::acos(b.cosTheta_o), theta_e = std::acos(b.cosTheta_e);
-        Float theta_w = std::min(theta_o + theta_e, Pi);
-        Float sinTheta_o = SafeSqrt(1 - Sqr(b.cosTheta_o));
-        Float M_omega = 2 * Pi * (1 - b.cosTheta_o) +
-                        Pi / 2 *
-                            (2 * theta_w * sinTheta_o - std::cos(theta_o - 2 * theta_w) -
-                             2 * theta_o * sinTheta_o + b.cosTheta_o);
-
         // Return complete cost estimate for _LightBounds_
         Float Kr = MaxComponentValue(bounds.Diagonal()) / bounds.Diagonal()[dim];
-        return b.phi * M_omega * Kr * b.bounds.SurfaceArea();
+        return EvaluateCost(b) * Kr;
     }
 
     // BVHLightSampler Private Members

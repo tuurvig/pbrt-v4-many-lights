@@ -28,6 +28,7 @@
 #endif
 #define PBRT_CPU_GPU __host__ __device__
 #define PBRT_GPU __device__
+#define PBRT_GPU_INLINE __forceinline__ __device__ 
 #if defined(PBRT_IS_GPU_CODE)
 #define PBRT_CONST __device__ const
 #else
@@ -37,6 +38,7 @@
 #define PBRT_CONST const
 #define PBRT_CPU_GPU
 #define PBRT_GPU
+#define PBRT_GPU_INLINE
 #endif
 
 #ifdef PBRT_IS_WINDOWS
