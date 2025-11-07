@@ -105,6 +105,7 @@ class LightBounds {
   public:
     // LightBounds Public Methods
     LightBounds() = default;
+    PBRT_CPU_GPU
     LightBounds(const Bounds3f &b, Vector3f w, Float phi, Float cosTheta_o,
                 Float cosTheta_e, bool twoSided);
 
@@ -125,7 +126,8 @@ class LightBounds {
 };
 
 // LightBounds Inline Methods
-inline LightBounds::LightBounds(const Bounds3f &b, Vector3f w, Float phi,
+inline PBRT_CPU_GPU
+LightBounds::LightBounds(const Bounds3f &b, Vector3f w, Float phi,
                                 Float cosTheta_o, Float cosTheta_e, bool twoSided)
     : bounds(b),
       w(Normalize(w)),
@@ -134,7 +136,7 @@ inline LightBounds::LightBounds(const Bounds3f &b, Vector3f w, Float phi,
       cosTheta_e(cosTheta_e),
       twoSided(twoSided) {}
 
-inline LightBounds Union(const LightBounds &a, const LightBounds &b) {
+inline PBRT_CPU_GPU LightBounds Union(const LightBounds &a, const LightBounds &b) {
     // If one _LightBounds_ has zero power, return the other
     if (a.phi == 0)
         return b;
