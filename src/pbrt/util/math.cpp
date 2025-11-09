@@ -7,6 +7,7 @@
 #include <pbrt/util/check.h>
 #include <pbrt/util/print.h>
 #include <pbrt/util/vecmath.h>
+#include <pbrt/util/sampling.h>
 
 #include <cmath>
 #include <iostream>
@@ -378,74 +379,54 @@ PBRT_CPU_GPU Point2f WrapEqualAreaSquare(Point2f uv) {
     return uv;
 }
 
-PBRT_CPU_GPU uint64_t EncodeExtendedMorton5(Point3f position, Bounds3f bounds, Vector3f normal) {
+PBRT_CPU_GPU uint64_t EncodeExtendedMorton5(Point3f position, Vector3f direction) {
     constexpr int positionBits = 18;
     constexpr int normalBits = 5;
-    if (bounds.IsEmpty())
-        return 0;
 
-    auto quantize = [](Float value, int bits) -> uint32_t {
-        uint32_t maxValue = (1u << bits) - 1;
-        Float scaled = value * maxValue;
-        uint32_t q = static_cast<uint32_t>(std::round(scaled));
-        return std::min<uint32_t>(maxValue, q);
-    };
+    uint32_t qPos[3] = {
+        QuantizeUnitToBitRange(position[0], positionBits),
+        QuantizeUnitToBitRange(position[1], positionBits),
+        QuantizeUnitToBitRange(position[2], positionBits - 1)};
 
-    Vector3f normalized = bounds.Offset(position);
-    uint32_t quantizedPosition[3] = {
-        quantize(normalized.x, positionBits),
-        quantize(normalized.y, positionBits),
-        quantize(normalized.z, positionBits)};
-
-    uint8_t axisOrder[3] = {0, 1, 2};
-    Vector3f diagonal = bounds.Diagonal();
-
-    if (diagonal[axisOrder[0]] < diagonal[axisOrder[1]])
-        pstd::swap(axisOrder[0], axisOrder[1]);
-    if (diagonal[axisOrder[1]] < diagonal[axisOrder[2]])
-        pstd::swap(axisOrder[1], axisOrder[2]);
-    if (diagonal[axisOrder[0]] < diagonal[axisOrder[1]])
-        pstd::swap(axisOrder[0], axisOrder[1]);
-
-    uint32_t sortedPosition[3] = {
-        quantizedPosition[axisOrder[0]],
-        quantizedPosition[axisOrder[1]],
-        quantizedPosition[axisOrder[2]]};
-
-    Float octSum = pstd::abs(normal.x) + pstd::abs(normal.y) + pstd::abs(normal.z);
-    if (octSum == 0) {
-        normal = Vector3f(0, 0, 1);
-        octSum = 1;
+    Point2f sphereSample = InvertUniformDiskConcentricSample({direction.x, direction.y});
+    if (direction.z < 0) {
+        sphereSample.x = 2 - sphereSample.x;
     }
-    normal /= octSum;
-    Float nu, nv;
-    if (normal.z >= 0) {
-        nu = normal.x;
-        nv = normal.y;
-    } else {
-        nu = (1 - pstd::abs(normal.y)) * pstd::copysign(1.f, normal.x);
-        nv = (1 - pstd::abs(normal.x)) * pstd::copysign(1.f, normal.y);
-    }
+    sphereSample.x *= 0.5;
 
-    auto toUnitInterval = [](Float v) { return 0.5f * (v + 1); };
-    uint32_t uQuant = quantize(toUnitInterval(nu), normalBits);
-    uint32_t vQuant = quantize(toUnitInterval(nv), normalBits);
+    uint32_t uQuant = QuantizeUnitToBitRange(sphereSample.x, normalBits + 1);
+    uint32_t vQuant = QuantizeUnitToBitRange(sphereSample.y, normalBits);
 
     uint64_t mortonCode = 0;
-    for (int i = 0; i < 18; ++i) {
-        int pBit = positionBits - i - 1;
-        mortonCode = (mortonCode << 1) | ((sortedPosition[0] >> pBit) & 1u);
-        mortonCode = (mortonCode << 1) | ((sortedPosition[1] >> pBit) & 1u);
-        mortonCode = (mortonCode << 1) | ((sortedPosition[2] >> pBit) & 1u);
 
-        if (i < 5) {
-            int nBit = normalBits - i - 1;
-            mortonCode = (mortonCode << 1) | ((uQuant >> nBit) & 1u);
-            mortonCode = (mortonCode << 1) | ((vQuant >> nBit) & 1u);
-        }
+    int pBit = 0;
+    for (int i = 0; i < 5; ++i) {
+        pBit = positionBits - i - 1;
+        const int pBitLast = pBit - 1;
+        mortonCode = (mortonCode << 1) | ((qPos[0] >> pBit) & 1u);
+        mortonCode = (mortonCode << 1) | ((qPos[1] >> pBit) & 1u);
+        mortonCode = (mortonCode << 1) | ((qPos[2] >> pBitLast) & 1u);
+
+        const int uBit = normalBits - i;
+        const int vBit = uBit - 1;
+        mortonCode = (mortonCode << 1) | ((uQuant >> uBit) & 1u);
+        mortonCode = (mortonCode << 1) | ((vQuant >> vBit) & 1u);
+    }
+
+    pBit = positionBits - 6;
+    mortonCode = (mortonCode << 1) | ((qPos[0] >> pBit) & 1u);
+    mortonCode = (mortonCode << 1) | ((qPos[1] >> pBit) & 1u);
+    mortonCode = (mortonCode << 1) | (uQuant & 1u);
+    
+    for (int i = 6; i < 18; ++i) {
+        pBit = positionBits - i - 1;
+        mortonCode = (mortonCode << 1) | ((qPos[0] >> pBit) & 1u);
+        mortonCode = (mortonCode << 1) | ((qPos[1] >> pBit) & 1u);
+        mortonCode = (mortonCode << 1) | ((qPos[2] >> pBit) & 1u);
     }
 
     return mortonCode;
 }
+
 
 }  // namespace pbrt

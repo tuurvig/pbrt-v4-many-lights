@@ -340,34 +340,31 @@ PBRT_CPU_GPU inline Point2f SampleUniformDiskConcentric(Point2f u) {
     return r * Point2f(std::cos(theta), std::sin(theta));
 }
 
+// https://jojendersie.de/wp-content/uploads/2013/06/sfcsurvey.pdf
 PBRT_CPU_GPU
 inline Point2f InvertUniformDiskConcentricSample(Point2f p) {
-    Float theta = std::atan2(p.y, p.x);  // -pi -> pi
+    Float phi = std::atan2(p.y, p.x);  // -pi -> pi
     Float r = std::sqrt(Sqr(p.x) + Sqr(p.y));
 
+    if (phi < -PiOver4)
+        phi += 2 * Pi;
+
     Point2f uo;
-    // TODO: can we make this less branchy?
-    if (std::abs(theta) < PiOver4 || std::abs(theta) > 3 * PiOver4) {
-        uo.x = r = pstd::copysign(r, p.x);
-        if (p.x < 0) {
-            if (p.y < 0) {
-                uo.y = (Pi + theta) * r / PiOver4;
-            } else {
-                uo.y = (theta - Pi) * r / PiOver4;
-            }
-        } else {
-            uo.y = (theta * r) / PiOver4;
-        }
+    if (phi < PiOver4) {
+        uo.x = r;
+        uo.y = 4 * InvPi * r * phi;
+    } else if (phi < 3 * PiOver4) {
+        uo.x = 4 * InvPi * r * (PiOver2 - phi);
+        uo.y = r;
+    } else if (phi < 5 * PiOver4) {
+        uo.x = -r;
+        uo.y = 4 * InvPi * r * (Pi - phi);
     } else {
-        uo.y = r = pstd::copysign(r, p.y);
-        if (p.y < 0) {
-            uo.x = -(PiOver2 + theta) * r / PiOver4;
-        } else {
-            uo.x = (PiOver2 - theta) * r / PiOver4;
-        }
+        uo.x = 4 * InvPi * r * (phi - 3 * PiOver2);
+        uo.y = -r;
     }
 
-    return {(uo.x + 1) / 2, (uo.y + 1) / 2};
+    return {(uo.x + 1.f) * 0.5f, (uo.y + 1.f) * 0.5f};
 }
 
 PBRT_CPU_GPU inline Vector3f SampleUniformHemisphere(Point2f u) {

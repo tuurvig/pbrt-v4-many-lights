@@ -31,7 +31,7 @@ struct LightBVHConstructionNode {
 };
 
 struct BuildStateContainer {
-    Bounds3f allLightsBounds;
+    Bounds3f allLightBounds;
     uint32_t nLights;
 
     LightBVHConstructionNode* dNodes;
@@ -316,17 +316,29 @@ void Initialize(BuildStateContainer& buildState, LightBVHBuildContainer* dLights
     uint64_t* dMortonCodesSorted = GPUAllocAsync<uint64_t>(localState.nLights);
     uint32_t* dClusterIndicesSorted = GPUAllocAsync<uint32_t>(localState.nLights);
 
+    uint8_t axisOrder[3] = {0, 1, 2};
+    const Vector3f diagonal = localState.allLightBounds.Diagonal();
+
+    if (diagonal[axisOrder[0]] < diagonal[axisOrder[1]])
+        pstd::swap(axisOrder[0], axisOrder[1]);
+    if (diagonal[axisOrder[1]] < diagonal[axisOrder[2]])
+        pstd::swap(axisOrder[1], axisOrder[2]);
+    if (diagonal[axisOrder[0]] < diagonal[axisOrder[1]])
+        pstd::swap(axisOrder[0], axisOrder[1]);
+
     GPUParallelFor("Assign Morton Codes", ProfilerKernelGroup::HPLOC, localState.nLights,
     [=] PBRT_GPU(int idx) {
         LightBVHBuildContainer cont = dLightsContainer[idx];
-
         LightBVHConstructionNode leaf{cont.bounds, kInvalidIndex, cont.index};
 
-        Point3f centroid = cont.bounds.Centroid();
-        Vector3f normal = cont.bounds.w;
+        Vector3f offset = localState.allLightBounds.Offset(cont.bounds.Centroid());
+        Vector3f normalized = Normalize(offset);
+
+        Point3f position = {normalized[axisOrder[0]], normalized[axisOrder[1]], normalized[axisOrder[2]]};
+        Vector3f direction = Normalize(cont.bounds.w);
 
         localState.dClusterIndices[idx] = idx;
-        localState.dMortonCodes[idx] = EncodeExtendedMorton5(centroid, localState.allLightsBounds, normal);
+        localState.dMortonCodes[idx] = EncodeExtendedMorton5(position, direction);
         localState.dNodes[idx] = leaf;
     });
 
@@ -363,7 +375,7 @@ bool BVHLightSampler::buildBVHGPU(std::vector<LightBVHBuildContainer>& bvhLights
     BuildStateContainer buildState;
     buildState.nLights = static_cast<uint32_t>(bvhLights.size());
     buildState.nMergedClusters = 0;
-    buildState.allLightsBounds = m_allLightBounds;
+    buildState.allLightBounds = m_allLightBounds;
     buildState.dNodes = GPUAllocAsync<LightBVHConstructionNode>(nNodes);
     buildState.dClusterIndices = GPUAllocAsync<uint32_t>(buildState.nLights);
     buildState.dParentIndices = GPUAllocAsync<uint32_t>(buildState.nLights);
@@ -375,22 +387,37 @@ bool BVHLightSampler::buildBVHGPU(std::vector<LightBVHBuildContainer>& bvhLights
     GPUCopyToDevice(buildState.nMergedClusters, &buildState.nLights, 1);
     GPUMemsetAsync(buildState.dParentIndices, kInvalidIndex, sizeof(uint32_t) * buildState.nLights);
 
+    // uint8_t axisOrder[3] = {0, 1, 2};
+    // const Vector3f diagonal = m_allLightBounds.Diagonal();
+    // 
+    // if (diagonal[axisOrder[0]] < diagonal[axisOrder[1]])
+    //     pstd::swap(axisOrder[0], axisOrder[1]);
+    // if (diagonal[axisOrder[1]] < diagonal[axisOrder[2]])
+    //     pstd::swap(axisOrder[1], axisOrder[2]);
+    // if (diagonal[axisOrder[0]] < diagonal[axisOrder[1]])
+    //     pstd::swap(axisOrder[0], axisOrder[1]);
+    // 
+    // std::vector<uint64_t> mortonCodesCPU(bvhLights.size());
+    // for (size_t i = 0; i < bvhLights.size(); ++i) {
+    //     const LightBVHBuildContainer& cont(bvhLights[i]);
+    //     Vector3f offset = m_allLightBounds.Offset(cont.bounds.Centroid());
+    //     Vector3f normalized = Normalize(offset);
+    // 
+    //     Point3f position = {normalized[axisOrder[0]], normalized[axisOrder[1]], normalized[axisOrder[2]]};
+    //     Vector3f direction = Normalize(cont.bounds.w);
+    // 
+    //     mortonCodesCPU[i] = EncodeExtendedMorton5(position, direction);
+    // }
+    // std::sort(mortonCodesCPU.begin(), mortonCodesCPU.end());
+
     Initialize(buildState, dLightsContainer);
     GPUFreeAsync(dLightsContainer);
     dLightsContainer = nullptr;
 
+    std::vector<uint64_t> mortonCodes(bvhLights.size());
+    GPUCopyToHost(mortonCodes.data(), buildState.dMortonCodes, bvhLights.size()); 
+
     BuildNodes(buildState);
-    // std::vector<uint64_t> mortonCodesCPU(bvhLights.size());
-    // for (size_t i = 0; i < bvhLights.size(); ++i) {
-    //     const LightBVHBuildContainer& cont(bvhLights[i]);
-    //     Point3f centroid = cont.bounds.Centroid();
-    //     Vector3f normal = cont.bounds.w;
-    //     mortonCodesCPU[i] = EncodeExtendedMorton5(centroid, m_allLightBounds, normal);
-    // }
-    // std::sort(mortonCodesCPU.begin(), mortonCodesCPU.end());
-    // 
-    //std::vector<uint64_t> mortonCodes(bvhLights.size());
-    //GPUCopyToHost(mortonCodes.data(), deviceSortedMortonCodes, bvhLights.size());    
 
     GPUFreeAsync(buildState.dMortonCodes);
     GPUFreeAsync(buildState.dClusterIndices);

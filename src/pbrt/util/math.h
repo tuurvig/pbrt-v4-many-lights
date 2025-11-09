@@ -118,7 +118,14 @@ PBRT_CPU_GPU inline uint32_t EncodeMorton3(float x, float y, float z) {
     return (LeftShift3(z) << 2) | (LeftShift3(y) << 1) | LeftShift3(x);
 }
 
-PBRT_CPU_GPU uint64_t EncodeExtendedMorton5(Point3f position, Bounds3f bounds, Vector3f normal);
+PBRT_CPU_GPU inline uint32_t QuantizeUnitToBitRange(Float unit, int bits) {
+    uint32_t maxValue = (1u << bits) - 1;
+    Float scaled = unit * maxValue;
+    uint32_t q = static_cast<uint32_t>(std::round(scaled));
+    return std::min<uint32_t>(maxValue, q);
+}
+
+PBRT_CPU_GPU uint64_t EncodeExtendedMorton5(Point3f position, Vector3f direction);
 
 PBRT_CPU_GPU
 inline uint32_t Compact1By1(uint64_t x) {
