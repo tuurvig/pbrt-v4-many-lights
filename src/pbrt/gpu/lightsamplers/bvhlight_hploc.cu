@@ -80,38 +80,52 @@ static PBRT_GPU_INLINE uint32_t DecodeRelativeOffset(const uint32_t idx, const u
 }
 
 PBRT_GPU uint32_t FindNearestNeighbor(uint32_t nLights, uint32_t clusterIdx,
-    const LightBounds& clusterBounds, uint8_t laneWarpIdx) {
+    uint8_t laneWarpIdx, const BuildStateContainer& buildState) {
 
-    __shared__ LightBounds shBounds[kWarpSize];
-    __shared__ uint32_t shMinIdx[kWarpSize];
-    shBounds[laneWarpIdx] = clusterBounds;
-    shMinIdx[laneWarpIdx] = kInvalidIndex;
-    __syncwarp();
-    
+    LightBounds clusterBounds;
+    if (laneWarpIdx < nLights && clusterIdx != kInvalidIndex) {
+        clusterBounds = buildState.dNodes[clusterIdx].bounds;
+    }
+
+    const bool active = laneWarpIdx < nLights && clusterIdx != kInvalidIndex; 
+
     uint32_t minCostIdx = kInvalidIndex;
     for (uint32_t r = 1; r <= kSearchRadius; ++r) {
         uint32_t neighborIdx = laneWarpIdx + r;
+        uint32_t neighborClusterIdx = __shfl_sync(kFullMask, clusterIdx, neighborIdx);
+
+        uint32_t newCostIdx0 = kInvalidIndex;
+        uint32_t newCostIdx1 = kInvalidIndex;
         if (neighborIdx < nLights) {
-            LightBounds neighborBounds = shBounds[neighborIdx];
+            LightBounds neighborBounds = buildState.dNodes[clusterIdx].bounds;
             neighborBounds = Union(neighborBounds, clusterBounds);
 
-            float newCost = BVHLightSampler::EvaluateCost(neighborBounds);
-            uint32_t newCostInt = (__float_as_uint(newCost) << 1) & kEncodeMask;
+            const float newCost = BVHLightSampler::EvaluateCost(neighborBounds);
+            uint32_t newCostInt = __float_as_uint(newCost);
+            //if (newCostInt == 0) ++newCostInt;
 
             const uint32_t encode0 = EncodeRelativeOffset(laneWarpIdx, neighborIdx);
-            const uint32_t newCostIdx0 = newCostInt | encode0 | (laneWarpIdx & 1);
-            const uint32_t newCostIdx1 = newCostInt | encode0 | ((neighborIdx & 1) ^ 1);
-
-            minCostIdx = std::min(minCostIdx, newCostIdx0);
-            atomicMin(shMinIdx + neighborIdx, newCostIdx1);
+            const uint32_t encode1 = (newCostInt << 1) & kEncodeMask;
+            newCostIdx0 = encode1 | encode0 | (laneWarpIdx & 1);
+            newCostIdx1 = encode1 | encode0 | ((neighborIdx & 1) ^ 1);
         }
+        
+        minCostIdx = std::min(minCostIdx, newCostIdx0);
+
+        uint32_t neighborMinCostIdx = __shfl_sync(kFullMask, minCostIdx, neighborIdx);
+        neighborMinCostIdx = std::min(neighborMinCostIdx, newCostIdx1);
+
+        minCostIdx = __shfl_sync(kFullMask, neighborMinCostIdx, laneWarpIdx - r);
     }
 
-    atomicMin(shMinIdx + laneWarpIdx, minCostIdx);
-    __syncwarp(); 
-
-    uint32_t unmasked = shMinIdx[laneWarpIdx] & kDecodeMask;
-    uint32_t decodedNN = DecodeRelativeOffset(laneWarpIdx, unmasked);
+    uint32_t decodedNN = kInvalidIndex;
+    if (active && minCostIdx != kInvalidIndex) {
+        uint32_t unmasked = minCostIdx & kDecodeMask;
+        decodedNN = DecodeRelativeOffset(laneWarpIdx, unmasked);
+        decodedNN = decodedNN;
+        //DCHECK_LT(decodedNN, nLights);
+    }
+    
     return decodedNN;
 }
 
@@ -121,19 +135,13 @@ struct ClusterPack {
 };
 
 PBRT_GPU uint32_t MergeClusters(uint32_t nLights, uint32_t nearestNeighborIdx, uint32_t& clusterIdx,
-    LightBounds& clusterBounds, const uint8_t laneWarpIdx, const BuildStateContainer& buildState) {
-    
-    __shared__ ClusterPack shPack[kWarpSize];
-    __shared__ LightBounds shBounds[kWarpSize];
-    shPack[laneWarpIdx] = {nearestNeighborIdx, clusterIdx};
-    shBounds[laneWarpIdx] = clusterBounds;
-    __syncwarp();
+    const uint8_t laneWarpIdx, const BuildStateContainer& buildState) {
 
-    const uint32_t shIndex = nearestNeighborIdx < nLights ? nearestNeighborIdx : laneWarpIdx; 
-    ClusterPack neighborsPack = shPack[shIndex];
+    uint32_t neighborNNIdx = __shfl_sync(kFullMask, nearestNeighborIdx, nearestNeighborIdx);
+    uint32_t neighborClusterIdx = __shfl_sync(kFullMask, clusterIdx, nearestNeighborIdx); 
     
     const bool laneActive = laneWarpIdx < nLights;
-    const bool mutual = laneActive && laneWarpIdx == neighborsPack.NNidx;
+    const bool mutual = laneActive && laneWarpIdx == neighborNNIdx;
     const bool merge = mutual && laneWarpIdx < nearestNeighborIdx;
 
     uint32_t mergeMask = __ballot_sync(kFullMask, merge);
@@ -148,31 +156,26 @@ PBRT_GPU uint32_t MergeClusters(uint32_t nLights, uint32_t nearestNeighborIdx, u
     uint32_t relativeIdx = __popc(mergeMask << (kWarpSize - laneWarpIdx));
 
     if (merge) {
-        LightBounds neighborsBounds = shBounds[nearestNeighborIdx];
-        clusterBounds = Union(clusterBounds, neighborsBounds);
+        LightBounds clusterBounds = buildState.dNodes[clusterIdx].bounds;
+        LightBounds neighborBounds = buildState.dNodes[neighborClusterIdx].bounds;
+        clusterBounds = Union(clusterBounds, neighborBounds);
 
         LightBVHConstructionNode node;
         node.bounds = clusterBounds;
         node.left = clusterIdx;
-        node.right = neighborsPack.clusterIdx;
+        node.right = neighborClusterIdx;
         clusterIdx = baseIdx + relativeIdx;
         buildState.dNodes[clusterIdx] = node;
     }
 
-    shPack[laneWarpIdx].clusterIdx = clusterIdx;
-    shBounds[laneWarpIdx] = clusterBounds;
-    __syncwarp();
-
     uint32_t validMask = __ballot_sync(kFullMask, merge || !mutual);
 
-    // Shift = cluster idx before compaction
+    // Compact the clusters by removing duplicate positions of successful merge
     int32_t shift = __fns(validMask, 0, laneWarpIdx + 1);
+
+    clusterIdx = __shfl_sync(kFullMask, clusterIdx, shift);
     if (shift == -1) {
         clusterIdx = kInvalidIndex;
-        clusterBounds = LightBounds();
-    } else {
-        clusterIdx = shPack[shift].clusterIdx;
-        clusterBounds = shBounds[shift];
     }
 
     return nLights - mergeCount;
@@ -181,16 +184,12 @@ PBRT_GPU uint32_t MergeClusters(uint32_t nLights, uint32_t nearestNeighborIdx, u
 PBRT_GPU void PlocMerge(const uint32_t start, const uint32_t nLeft, const uint32_t nRight, const uint32_t threshold,
     uint32_t clusterIdx, const uint8_t laneWarpIdx, const BuildStateContainer& buildState) {
     
-    LightBounds bounds;
     const uint32_t nLightsInCurrentStep = nLeft + nRight;
-    if (laneWarpIdx < nLightsInCurrentStep) {
-        bounds = buildState.dNodes[clusterIdx].bounds;
-    }
 
     uint32_t nLightsToProcess = nLightsInCurrentStep;
     while (nLightsToProcess > threshold) {
-        uint32_t nearestNeighbor = FindNearestNeighbor(nLightsToProcess, clusterIdx, bounds, laneWarpIdx);
-        nLightsToProcess = MergeClusters(nLightsToProcess, nearestNeighbor, clusterIdx, bounds, laneWarpIdx, buildState);
+        uint32_t nearestNeighbor = FindNearestNeighbor(nLightsToProcess, clusterIdx, laneWarpIdx, buildState);
+        nLightsToProcess = MergeClusters(nLightsToProcess, nearestNeighbor, clusterIdx, laneWarpIdx, buildState);
     }
 
     // store indices
@@ -271,11 +270,11 @@ __global__ void HplocOuterLoop(BuildStateContainer buildState) {
                 __shfl_sync(kFullMask, isTreeRoot, selectedLaneIdx) ? 1 : kHalfWarp;
 
             uint32_t clusterIdx = kInvalidIndex;
-            bool isValidIndex = LoadIndex(clusterIdx, startL, endL, 0, buildState.dClusterIndices, laneWarpId);
-            uint32_t nLeftClusters = __popc(__ballot_sync(kFullMask, isValidIndex && clusterIdx != kInvalidIndex));
+            const bool isLeftValidIndex = LoadIndex(clusterIdx, startL, endL, 0, buildState.dClusterIndices, laneWarpId);
+            uint32_t nLeftClusters = __popc(__ballot_sync(kFullMask, isLeftValidIndex && clusterIdx != kInvalidIndex));
 
-            isValidIndex = LoadIndex(clusterIdx, startR, endR, nLeftClusters, buildState.dClusterIndices, laneWarpId);
-            uint32_t nRightClusters = __popc(__ballot_sync(kFullMask, isValidIndex && clusterIdx != kInvalidIndex));
+            const bool isRightValidIndex = LoadIndex(clusterIdx, startR, endR, nLeftClusters, buildState.dClusterIndices, laneWarpId);
+            uint32_t nRightClusters = __popc(__ballot_sync(kFullMask, isRightValidIndex && clusterIdx != kInvalidIndex));
 
             PlocMerge(startL, nLeftClusters, nRightClusters, threshold, clusterIdx, laneWarpId, buildState);
             warpMask &= (warpMask - 1);
@@ -331,10 +330,10 @@ void Initialize(BuildStateContainer& buildState, LightBVHBuildContainer* dLights
         LightBVHBuildContainer cont = dLightsContainer[idx];
         LightBVHConstructionNode leaf{cont.bounds, kInvalidIndex, cont.index};
 
-        Vector3f offset = localState.allLightBounds.Offset(cont.bounds.Centroid());
-        Vector3f normalized = Normalize(offset);
+        Point3f centroid = cont.bounds.Centroid();
+        Vector3f offset = localState.allLightBounds.Offset(centroid);
 
-        Point3f position = {normalized[axisOrder[0]], normalized[axisOrder[1]], normalized[axisOrder[2]]};
+        Point3f position = {offset[axisOrder[0]], offset[axisOrder[1]], offset[axisOrder[2]]};
         Vector3f direction = Normalize(cont.bounds.w);
 
         localState.dClusterIndices[idx] = idx;
