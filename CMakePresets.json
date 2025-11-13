@@ -5,17 +5,24 @@
       "name": "windows-base",
       "hidden": true,
       "generator": "Ninja",
+      //"generator": "Ninja",
       "binaryDir": "${sourceDir}/build/bin-${presetName}",
+      "toolset": "v142",
       //"installDir": "${sourceDir}/build/install-${presetName}",
       "cacheVariables": {
         "CMAKE_C_COMPILER": "cl.exe",
         "CMAKE_CXX_COMPILER": "cl.exe",
+        "CMAKE_CUDA_STANDARD": "17",
+        //"HAS_STD_CXX20": "0",
+        //"CUDA_TOOLKIT_ROOT_DIR": "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.8",
         "CMAKE_CUDA_COMPILER": "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.8/bin/nvcc.exe",
+        //"CMAKE_CUDA_FLAGS": "-allow-unsupported-compiler",
         "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-        // "PBRT_GPU_SHADER_MODEL": "sm_89",
+        "PBRT_GPU_SHADER_MODEL": "sm_89",
         //"CMAKE_CUDA_COMPILER": "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.8/bin/nvcc.exe",
         "PBRT_OPTIX7_PATH": "C:/ProgramData/NVIDIA Corporation/OptiX SDK 7.4.0",
-        "VCPKG_TARGET_TRIPLET": "x64-windows"
+        "VCPKG_TARGET_TRIPLET": "x64-windows",
+        "VCPKG_PLATFORM_TOOLSET": "v142"
       }
       // "condition": {
       //   "type": "equals",
