@@ -397,33 +397,74 @@ PBRT_CPU_GPU uint64_t EncodeExtendedMorton5(Point3f position, Vector3f direction
     uint32_t uQuant = QuantizeUnitToBitRange(sphereSample.x, normalBits + 1);
     uint32_t vQuant = QuantizeUnitToBitRange(sphereSample.y, normalBits);
 
-    uint64_t mortonCode = 0;
+    uint32_t topCode = 0;
 
-    int pBit = 0;
-    for (int i = 0; i < 5; ++i) {
-        pBit = positionBits - i - 1;
-        const int pBitLast = pBit - 1;
-        mortonCode = (mortonCode << 1) | ((qPos[0] >> pBit) & 1u);
-        mortonCode = (mortonCode << 1) | ((qPos[1] >> pBit) & 1u);
-        mortonCode = (mortonCode << 1) | ((qPos[2] >> pBitLast) & 1u);
+    int pBit = positionBits - 1;
+    int uBit = normalBits;
+    int vBit = uBit - 1;
+    topCode = (topCode << 1) | ((qPos[0] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[1] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[2] >> (pBit - 1)) & 1u);
+    topCode = (topCode << 1) | ((uQuant >> uBit) & 1u);
+    topCode = (topCode << 1) | ((vQuant >> vBit) & 1u);
 
-        const int uBit = normalBits - i;
-        const int vBit = uBit - 1;
-        mortonCode = (mortonCode << 1) | ((uQuant >> uBit) & 1u);
-        mortonCode = (mortonCode << 1) | ((vQuant >> vBit) & 1u);
-    }
+    --pBit;
+    --uBit;
+    --vBit;
+    topCode = (topCode << 1) | ((qPos[0] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[1] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[2] >> (pBit - 1)) & 1u);
+    topCode = (topCode << 1) | ((uQuant >> uBit) & 1u);
+    topCode = (topCode << 1) | ((vQuant >> vBit) & 1u);
 
-    pBit = positionBits - 6;
+    --pBit;
+    --uBit;
+    --vBit;
+    topCode = (topCode << 1) | ((qPos[0] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[1] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[2] >> (pBit - 1)) & 1u);
+    topCode = (topCode << 1) | ((uQuant >> uBit) & 1u);
+    topCode = (topCode << 1) | ((vQuant >> vBit) & 1u);
+
+    --pBit;
+    --uBit;
+    --vBit;
+    topCode = (topCode << 1) | ((qPos[0] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[1] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[2] >> (pBit - 1)) & 1u);
+    topCode = (topCode << 1) | ((uQuant >> uBit) & 1u);
+    topCode = (topCode << 1) | ((vQuant >> vBit) & 1u);
+
+    --pBit;
+    --uBit;
+    --vBit;
+    topCode = (topCode << 1) | ((qPos[0] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[1] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[2] >> (pBit - 1)) & 1u);
+    topCode = (topCode << 1) | ((uQuant >> uBit) & 1u);
+    topCode = (topCode << 1) | ((vQuant >> vBit) & 1u);
+
+    --pBit;
+    topCode = (topCode << 1) | ((qPos[0] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[1] >> pBit) & 1u);
+    topCode = (topCode << 1) | (uQuant & 1u);
+    
+    --pBit;
+    topCode = (topCode << 1) | ((qPos[0] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[1] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[2] >> pBit) & 1u);
+    
+    uint64_t mortonCode = topCode;
+    --pBit;
     mortonCode = (mortonCode << 1) | ((qPos[0] >> pBit) & 1u);
     mortonCode = (mortonCode << 1) | ((qPos[1] >> pBit) & 1u);
-    mortonCode = (mortonCode << 1) | (uQuant & 1u);
-    
-    for (int i = 6; i < 18; ++i) {
-        pBit = positionBits - i - 1;
-        mortonCode = (mortonCode << 1) | ((qPos[0] >> pBit) & 1u);
-        mortonCode = (mortonCode << 1) | ((qPos[1] >> pBit) & 1u);
-        mortonCode = (mortonCode << 1) | ((qPos[2] >> pBit) & 1u);
-    }
+    mortonCode = (mortonCode << 1) | ((qPos[2] >> pBit) & 1u);
+
+    mortonCode <<= 30;
+
+    constexpr uint32_t bottomMask = (1 << 10) - 1;
+    uint32_t bottomCode = EncodeMorton3(qPos[2] & bottomMask, qPos[1] & bottomMask, qPos[0] & bottomMask);
+    mortonCode |= bottomCode;
 
     return mortonCode;
 }
