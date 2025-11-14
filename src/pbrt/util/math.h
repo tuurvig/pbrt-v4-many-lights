@@ -111,10 +111,10 @@ inline uint32_t LeftShift3(uint32_t x) {
     return x;
 }
 
-PBRT_CPU_GPU inline uint32_t EncodeMorton3(float x, float y, float z) {
-    DCHECK_GE(x, 0);
-    DCHECK_GE(y, 0);
-    DCHECK_GE(z, 0);
+PBRT_CPU_GPU inline uint32_t EncodeMorton3(uint32_t x, uint32_t y, uint32_t z) {
+    //DCHECK_GE(x, 0);
+    //DCHECK_GE(y, 0);
+    //DCHECK_GE(z, 0);
     return (LeftShift3(z) << 2) | (LeftShift3(y) << 1) | LeftShift3(x);
 }
 

@@ -404,6 +404,9 @@ BVHBuildNode *BVHAggregate::buildHLBVH(Allocator alloc,
         mortonPrims[i].primitiveIndex = bvhPrimitives[i].primitiveIndex;
         Vector3f centroidOffset = bounds.Offset(bvhPrimitives[i].Centroid());
         Vector3f offset = centroidOffset * mortonScale;
+        DCHECK_GE(offset.x, 0);
+        DCHECK_GE(offset.y, 0);
+        DCHECK_GE(offset.z, 0);
         mortonPrims[i].mortonCode = EncodeMorton3(offset.x, offset.y, offset.z);
     });
 
