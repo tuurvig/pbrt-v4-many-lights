@@ -76,16 +76,6 @@ class BSDF {
         return bs;
     }
 
-    PBRT_CPU_GPU
-    Float PDF(Vector3f woRender, Vector3f wiRender,
-              TransportMode mode = TransportMode::Radiance,
-              BxDFReflTransFlags sampleFlags = BxDFReflTransFlags::All) const {
-        Vector3f wo = RenderToLocal(woRender), wi = RenderToLocal(wiRender);
-        if (wo.z == 0)
-            return 0;
-        return bxdf.PDF(wo, wi, mode, sampleFlags);
-    }
-
     template <typename BxDF>
     PBRT_CPU_GPU pstd::optional<BSDFSample> Sample_f(
         Vector3f woRender, Float u, Point2f u2,
@@ -114,6 +104,44 @@ class BSDF {
         bs->wi = LocalToRender(bs->wi);
 
         return bs;
+    }
+
+    template <typename BxDF>
+    PBRT_CPU_GPU SampledSpectrum Max_f(Vector3f woRender, DirectionCone wiConeRender,
+        TransportMode mode = TransportMode::Radiance, 
+        BxDFReflTransFlags flags = BxDFReflTransFlags::All) {
+        Vector3f wo = RenderToLocal(woRender);
+        if (wo.z == 0) {
+            return {};
+        }
+
+        DirectionCone wiCone = wiConeRender;
+        wiCone.w = RenderToLocal(wiCone.w);
+        const BxDF *specificBxDF = bxdf.Cast<BxDF>();
+        return specificBxDF->Max_f(wo, wiCone, mode, flags);
+    }
+
+    PBRT_CPU_GPU SampledSpectrum Max_f(Vector3f woRender, DirectionCone wiConeRender,
+        TransportMode mode = TransportMode::Radiance, 
+        BxDFReflTransFlags flags = BxDFReflTransFlags::All) {
+        Vector3f wo = RenderToLocal(woRender);
+        if (wo.z == 0) {
+            return {};
+        }
+
+        DirectionCone wiCone = wiConeRender;
+        wiCone.w = RenderToLocal(wiCone.w);
+        return bxdf.Max_f(wo, wiCone, mode, flags);
+    }
+
+    PBRT_CPU_GPU
+    Float PDF(Vector3f woRender, Vector3f wiRender,
+              TransportMode mode = TransportMode::Radiance,
+              BxDFReflTransFlags sampleFlags = BxDFReflTransFlags::All) const {
+        Vector3f wo = RenderToLocal(woRender), wi = RenderToLocal(wiRender);
+        if (wo.z == 0)
+            return 0;
+        return bxdf.PDF(wo, wi, mode, sampleFlags);
     }
 
     template <typename BxDF>

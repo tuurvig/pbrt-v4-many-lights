@@ -42,6 +42,12 @@ class DiffuseBxDF {
     }
 
     PBRT_CPU_GPU
+    SampledSpectrum Max_f(Vector3f wo, DirectionCone wiCone,
+        TransportMode mode, BxDFReflTransFlags flags = BxDFReflTransFlags::All) const {
+        return {};
+    }
+
+    PBRT_CPU_GPU
     pstd::optional<BSDFSample> Sample_f(
         Vector3f wo, Float uc, Point2f u, TransportMode mode,
         BxDFReflTransFlags sampleFlags = BxDFReflTransFlags::All) const {
@@ -92,6 +98,12 @@ class DiffuseTransmissionBxDF {
     PBRT_CPU_GPU
     SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode) const {
         return SameHemisphere(wo, wi) ? (R * InvPi) : (T * InvPi);
+    }
+
+    PBRT_CPU_GPU
+    SampledSpectrum Max_f(Vector3f wo, DirectionCone wiCone,
+        TransportMode mode, BxDFReflTransFlags flags = BxDFReflTransFlags::All) const {
+        return {};
     }
 
     PBRT_CPU_GPU
@@ -187,6 +199,11 @@ class DielectricBxDF {
 
     PBRT_CPU_GPU
     SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode) const;
+
+    PBRT_CPU_GPU
+    SampledSpectrum Max_f(Vector3f wo, DirectionCone wiCone,
+        TransportMode mode, BxDFReflTransFlags flags = BxDFReflTransFlags::All) const;
+
     PBRT_CPU_GPU
     Float PDF(Vector3f wo, Vector3f wi, TransportMode mode,
               BxDFReflTransFlags sampleFlags = BxDFReflTransFlags::All) const;
@@ -216,6 +233,12 @@ class ThinDielectricBxDF {
     PBRT_CPU_GPU
     SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode) const {
         return SampledSpectrum(0);
+    }
+
+    PBRT_CPU_GPU
+    SampledSpectrum Max_f(Vector3f wo, DirectionCone wiCone,
+        TransportMode mode, BxDFReflTransFlags flags = BxDFReflTransFlags::All) const {
+        return {};
     }
 
     PBRT_CPU_GPU
@@ -350,6 +373,12 @@ class ConductorBxDF {
     }
 
     PBRT_CPU_GPU
+    SampledSpectrum Max_f(Vector3f wo, DirectionCone wiCone,
+        TransportMode mode, BxDFReflTransFlags flags = BxDFReflTransFlags::All) const {
+        return {};
+    }
+
+    PBRT_CPU_GPU
     Float PDF(Vector3f wo, Vector3f wi, TransportMode mode,
               BxDFReflTransFlags sampleFlags) const {
         if (!(sampleFlags & BxDFReflTransFlags::Reflection))
@@ -410,6 +439,12 @@ class TopOrBottomBxDF {
         BxDFReflTransFlags sampleFlags = BxDFReflTransFlags::All) const {
         return top ? top->Sample_f(wo, uc, u, mode, sampleFlags)
                    : bottom->Sample_f(wo, uc, u, mode, sampleFlags);
+    }
+
+    PBRT_CPU_GPU
+    SampledSpectrum Max_f(Vector3f wo, DirectionCone wiCone,
+        TransportMode mode, BxDFReflTransFlags flags = BxDFReflTransFlags::All) const {
+        return {};
     }
 
     PBRT_CPU_GPU
@@ -775,6 +810,12 @@ class LayeredBxDF {
     }
 
     PBRT_CPU_GPU
+    SampledSpectrum Max_f(Vector3f wo, DirectionCone wiCone,
+        TransportMode mode, BxDFReflTransFlags flags = BxDFReflTransFlags::All) const {
+        return {};
+    }
+
+    PBRT_CPU_GPU
     Float PDF(Vector3f wo, Vector3f wi, TransportMode mode,
               BxDFReflTransFlags sampleFlags = BxDFReflTransFlags::All) const {
         CHECK(sampleFlags == BxDFReflTransFlags::All);  // for now
@@ -931,6 +972,11 @@ class HairBxDF {
     pstd::optional<BSDFSample> Sample_f(Vector3f wo, Float uc, Point2f u,
                                         TransportMode mode,
                                         BxDFReflTransFlags sampleFlags) const;
+
+    PBRT_CPU_GPU
+    SampledSpectrum Max_f(Vector3f wo, DirectionCone wiCone,
+        TransportMode mode, BxDFReflTransFlags flags = BxDFReflTransFlags::All) const;
+
     PBRT_CPU_GPU
     Float PDF(Vector3f wo, Vector3f wi, TransportMode mode,
               BxDFReflTransFlags sampleFlags) const;
@@ -1037,6 +1083,11 @@ class MeasuredBxDF {
     pstd::optional<BSDFSample> Sample_f(Vector3f wo, Float uc, Point2f u,
                                         TransportMode mode,
                                         BxDFReflTransFlags sampleFlags) const;
+
+    PBRT_CPU_GPU
+    SampledSpectrum Max_f(Vector3f wo, DirectionCone wiCone,
+        TransportMode mode, BxDFReflTransFlags flags = BxDFReflTransFlags::All) const;
+
     PBRT_CPU_GPU
     Float PDF(Vector3f wo, Vector3f wi, TransportMode mode,
               BxDFReflTransFlags sampleFlags) const;
@@ -1092,6 +1143,12 @@ class NormalizedFresnelBxDF {
     }
 
     PBRT_CPU_GPU
+    SampledSpectrum Max_f(Vector3f wo, DirectionCone wiCone,
+        TransportMode mode, BxDFReflTransFlags flags = BxDFReflTransFlags::All) const {
+        return {};
+    }
+
+    PBRT_CPU_GPU
     Float PDF(Vector3f wo, Vector3f wi, TransportMode mode,
               BxDFReflTransFlags sampleFlags) const {
         if (!(sampleFlags & BxDFReflTransFlags::Reflection))
@@ -1143,6 +1200,14 @@ PBRT_CPU_GPU inline pstd::optional<BSDFSample> BxDF::Sample_f(Vector3f wo, Float
         return ptr->Sample_f(wo, uc, u, mode, sampleFlags);
     };
     return Dispatch(sample_f);
+}
+
+PBRT_CPU_GPU inline SampledSpectrum BxDF::Max_f(Vector3f wo, DirectionCone wiCone,
+                            TransportMode mode, BxDFReflTransFlags flags) const {
+    auto max_f = [&](auto ptr) -> SampledSpectrum {
+        return ptr->Max_f(wo, wiCone, mode, flags);
+    };
+    return Dispatch(max_f);
 }
 
 PBRT_CPU_GPU inline Float BxDF::PDF(Vector3f wo, Vector3f wi, TransportMode mode,
