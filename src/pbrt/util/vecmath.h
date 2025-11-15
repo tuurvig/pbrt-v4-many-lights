@@ -1745,6 +1745,25 @@ inline bool SameHemisphere(Vector3f w, Normal3f wp) {
     return w.z * wp.z > 0;
 }
 
+enum HemisphereIntersection : uint8_t {
+    SAME = 1,
+    DIFF = 2,
+    BOTH = SAME | DIFF
+};
+
+PBRT_CPU_GPU inline HemisphereIntersection WhichHemisphere(Vector3f w, Vector3f wp, Float cosTheta) {
+    bool isUpper = w.z > 0;
+
+    Float sinTheta = std::sqrt(1 - cosTheta * cosTheta);
+    if (std::abs(wp.z) <= sinTheta) {
+        return BOTH;
+    } else if (wp.z > sinTheta) {
+        return isUpper ? SAME : DIFF;
+    }
+
+    return isUpper ? DIFF : SAME;
+}
+
 // OctahedralVector Definition
 class OctahedralVector {
   public:

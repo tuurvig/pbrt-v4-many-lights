@@ -208,6 +208,11 @@ PBRT_CPU_GPU SampledSpectrum DielectricBxDF::f(Vector3f wo, Vector3f wi, Transpo
     }
 }
 
+PBRT_CPU_GPU SampledSpectrum DielectricBxDF::Max_f(Vector3f wo, DirectionCone wiCone,
+             TransportMode mode, BxDFReflTransFlags flags) const {
+    return {};
+}
+
 PBRT_CPU_GPU Float DielectricBxDF::PDF(Vector3f wo, Vector3f wi, TransportMode mode,
                           BxDFReflTransFlags sampleFlags) const {
     if (eta == 1 || mfDistrib.EffectivelySmooth())
@@ -487,6 +492,11 @@ PBRT_CPU_GPU pstd::optional<BSDFSample> HairBxDF::Sample_f(Vector3f wo, Float uc
            (1 / (2 * Pi));
 
     return BSDFSample(f(wo, wi, mode), wi, pdf, Flags());
+}
+
+PBRT_CPU_GPU SampledSpectrum HairBxDF::Max_f(Vector3f wo, DirectionCone wiCone,
+             TransportMode mode, BxDFReflTransFlags flags) const {
+    return {};
 }
 
 PBRT_CPU_GPU Float HairBxDF::PDF(Vector3f wo, Vector3f wi, TransportMode mode,
@@ -1031,6 +1041,11 @@ PBRT_CPU_GPU SampledSpectrum MeasuredBxDF::f(Vector3f wo, Vector3f wi,
     // Return measured BRDF value
     return fr * brdf->ndf.Evaluate(u_wm) /
            (4 * brdf->sigma.Evaluate(u_wo) * CosTheta(wi));
+}
+
+PBRT_CPU_GPU SampledSpectrum MeasuredBxDF::Max_f(Vector3f wo, DirectionCone wiCone,
+             TransportMode mode, BxDFReflTransFlags flags) const {
+    return {};
 }
 
 PBRT_CPU_GPU pstd::optional<BSDFSample> MeasuredBxDF::Sample_f(Vector3f wo, Float uc, Point2f u,
