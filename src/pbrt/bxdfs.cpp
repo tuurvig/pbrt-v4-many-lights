@@ -241,11 +241,12 @@ PBRT_CPU_GPU SampledSpectrum DielectricBxDF::Max_f(Vector3f wo, DirectionCone wi
         return SampledSpectrum(std::max(fr, ft));
     }
 
-    SampledSpectrum fr(0), ft(0);
+    SampledSpectrum fMax(0);
     if ((flags & BxDFReflTransFlags::Reflection) && (h & HemisphereIntersection::SAME)) {
         Vector3f wi(-wo.x, -wo.y, wo.z);
         wi = wiCone.ClosestVectorInCone(wi);
-        fr = f(wo, wi, mode);
+        DCHECK(InsideNormalized(wiCone, wi));
+        fMax = f(wo, wi, mode);
     }
 
     if ((flags & BxDFReflTransFlags::Transmission) && (h & HemisphereIntersection::DIFF)) {
@@ -255,10 +256,11 @@ PBRT_CPU_GPU SampledSpectrum DielectricBxDF::Max_f(Vector3f wo, DirectionCone wi
         CHECK_RARE(1e-5f, !valid);
 
         wi = wiCone.ClosestVectorInCone(wi);
-        ft = f(wo, wi, mode);
+        DCHECK(InsideNormalized(wiCone, wi));
+        fMax.MixMax(f(wo, wi, mode));
     }
 
-    return fr.MixMax(ft);
+    return fMax;
 }
 
 PBRT_CPU_GPU Float DielectricBxDF::PDF(Vector3f wo, Vector3f wi, TransportMode mode,

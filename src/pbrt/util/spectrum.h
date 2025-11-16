@@ -244,12 +244,14 @@ class SampledSpectrum {
     }
 
     PBRT_CPU_GPU
-    SampledSpectrum MixMax(const SampledSpectrum &s) const {
-        SampledSpectrum ret = *this;
+    SampledSpectrum& MixMax(const SampledSpectrum &s) {
         for (int i = 0; i < NSpectrumSamples; ++i) {
-            ret.values[i] = std::max(values[i], s.values[i]);
+            Float otherVal = s.values[i];
+            if (otherVal < values[i]) {
+                values[i] = otherVal;
+            }
         }
-        return ret;
+        return *this;
     }
 
     PBRT_CPU_GPU
