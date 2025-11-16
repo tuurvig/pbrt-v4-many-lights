@@ -210,7 +210,55 @@ PBRT_CPU_GPU SampledSpectrum DielectricBxDF::f(Vector3f wo, Vector3f wi, Transpo
 
 PBRT_CPU_GPU SampledSpectrum DielectricBxDF::Max_f(Vector3f wo, DirectionCone wiCone,
              TransportMode mode, BxDFReflTransFlags flags) const {
-    return {};
+    HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
+    if (eta == 1 || mfDistrib.EffectivelySmooth()) {
+        // Perfect specular dielectric BSDF
+        Float R = FrDielectric(CosTheta(wo), eta);
+        Float T = 1 - R;
+        Float fr = 0, ft = 0;
+        if ((flags & BxDFReflTransFlags::Reflection) && (h & HemisphereIntersection::SAME)) {
+            // perfect specular reflection for dielectric BRDF
+            Vector3f wi(-wo.x, -wo.y, wo.z);
+            if (InsideNormalized(wiCone, wi)) {
+                fr = R / AbsCosTheta(wi);
+            }
+        }
+        if ((flags & BxDFReflTransFlags::Transmission) && (h & HemisphereIntersection::DIFF)) {
+            // Perfect specular transmission for dielectric BTDF
+            // Compute ray direction for specular transmission
+            Vector3f wi;
+            Float etap;
+            bool valid = Refract(wo, Normal3f(0, 0, 1), eta, &etap, &wi);
+            CHECK_RARE(1e-5f, !valid);
+            if (valid && InsideNormalized(wiCone, wi)) {
+                ft = T / AbsCosTheta(wi);
+                // Account for non-symmetry with transmission to different medium
+                if (mode == TransportMode::Radiance) {
+                    ft /= Sqr(etap);
+                }
+            }
+        }
+        return SampledSpectrum(std::max(fr, ft));
+    }
+
+    SampledSpectrum fr(0), ft(0);
+    if ((flags & BxDFReflTransFlags::Reflection) && (h & HemisphereIntersection::SAME)) {
+        Vector3f wi(-wo.x, -wo.y, wo.z);
+        wi = wiCone.ClosestVectorInCone(wi);
+        fr = f(wo, wi, mode);
+    }
+
+    if ((flags & BxDFReflTransFlags::Transmission) && (h & HemisphereIntersection::DIFF)) {
+        Vector3f wi;
+        Float etap;
+        bool valid = Refract(wo, Normal3f(0, 0, 1), eta, &etap, &wi);
+        CHECK_RARE(1e-5f, !valid);
+
+        wi = wiCone.ClosestVectorInCone(wi);
+        ft = f(wo, wi, mode);
+    }
+
+    return fr.MixMax(ft);
 }
 
 PBRT_CPU_GPU Float DielectricBxDF::PDF(Vector3f wo, Vector3f wi, TransportMode mode,
