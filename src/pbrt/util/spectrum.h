@@ -206,6 +206,11 @@ class SampledSpectrum {
     PBRT_CPU_GPU
     explicit SampledSpectrum(Float c) { values.fill(c); }
     PBRT_CPU_GPU
+    SampledSpectrum& operator=(Float c) {
+        values.fill(c);
+        return *this;
+    }
+    PBRT_CPU_GPU
     SampledSpectrum(pstd::span<const Float> v) {
         DCHECK_EQ(NSpectrumSamples, v.size());
         for (int i = 0; i < NSpectrumSamples; ++i)
@@ -239,6 +244,15 @@ class SampledSpectrum {
     }
 
     PBRT_CPU_GPU
+    SampledSpectrum MixMax(const SampledSpectrum &s) const {
+        SampledSpectrum ret = *this;
+        for (int i = 0; i < NSpectrumSamples; ++i) {
+            ret.values[i] = std::max(values[i], s.values[i]);
+        }
+        return ret;
+    }
+
+    PBRT_CPU_GPU
     Float MinComponentValue() const {
         Float m = values[0];
         for (int i = 1; i < NSpectrumSamples; ++i)
@@ -259,7 +273,6 @@ class SampledSpectrum {
             sum += values[i];
         return sum / NSpectrumSamples;
     }
-
   private:
     friend struct SOA<SampledSpectrum>;
     pstd::array<Float, NSpectrumSamples> values;

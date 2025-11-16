@@ -1754,7 +1754,7 @@ enum HemisphereIntersection : uint8_t {
 PBRT_CPU_GPU inline HemisphereIntersection WhichHemisphere(Vector3f w, Vector3f wp, Float cosTheta) {
     bool isUpper = w.z > 0;
 
-    Float sinTheta = std::sqrt(1 - cosTheta * cosTheta);
+    Float sinTheta = SafeSqrt(1 - cosTheta * cosTheta);
     if (std::abs(wp.z) <= sinTheta) {
         return BOTH;
     } else if (wp.z > sinTheta) {
@@ -1845,6 +1845,10 @@ class DirectionCone {
 // DirectionCone Inline Functions
 PBRT_CPU_GPU inline bool Inside(const DirectionCone &d, Vector3f w) {
     return !d.IsEmpty() && Dot(d.w, Normalize(w)) >= d.cosTheta;
+}
+
+PBRT_CPU_GPU inline bool InsideNormalized(const DirectionCone &d, Vector3f w) {
+    return !d.IsEmpty() && Dot(d.w, w) >= d.cosTheta;
 }
 
 PBRT_CPU_GPU inline DirectionCone BoundSubtendedDirections(const Bounds3f &b, Point3f p) {
