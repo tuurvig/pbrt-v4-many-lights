@@ -612,6 +612,12 @@ PBRT_CPU_GPU SampledSpectrum HairBxDF::Max_f(Vector3f wo, DirectionCone wiCone,
     return SampledSpectrum(1.f);
 }
 
+PBRT_CPU_GPU SampledSpectrum HairBxDF::Max_f(Vector3f woGlobal, Bounds3f wiBoundsGlobal, Point3f p,
+                          const Frame& localFrame, TransportMode mode, BxDFReflTransFlags flags) const {
+    return SampledSpectrum(1.f);
+
+}
+
 PBRT_CPU_GPU Float HairBxDF::PDF(Vector3f wo, Vector3f wi, TransportMode mode,
                     BxDFReflTransFlags sampleFlags) const {
     // TODO? flags...
@@ -1174,7 +1180,7 @@ PBRT_CPU_GPU SampledSpectrum MeasuredBxDF::Max_f(Vector3f wo, DirectionCone wiCo
 
     Float theta_o = SphericalTheta(woEval), phi_o = std::atan2(woEval.y, woEval.x);
 
-    Point2f u_wm = brdf->vndf.ArgMax(phi_o, theta_o);
+    Point2f u_wm = brdf->vndf.ArgMax(true, phi_o, theta_o);
     Float theta_m = u2theta(u_wm.x);
     Float phi_m = u2phi(u_wm.y);
     if (brdf->isotropic)
@@ -1215,7 +1221,7 @@ PBRT_CPU_GPU SampledSpectrum MeasuredBxDF::Max_f(Vector3f woGlobal, Bounds3f wiB
 
     Float theta_o = SphericalTheta(woEval), phi_o = std::atan2(woEval.y, woEval.x);
 
-    Point2f u_wm = brdf->vndf.ArgMax(phi_o, theta_o);
+    Point2f u_wm = brdf->vndf.ArgMax(true, phi_o, theta_o);
     Float theta_m = u2theta(u_wm.x);
     Float phi_m = u2phi(u_wm.y);
     if (brdf->isotropic)
@@ -1237,7 +1243,7 @@ PBRT_CPU_GPU SampledSpectrum MeasuredBxDF::Max_f(Vector3f woGlobal, Bounds3f wiB
 
     Vector3f wiAdjusted = localFrame.ToLocal(wiGlobal);
 
-    return f(wo, wi, mode);
+    return f(wo, wiAdjusted, mode);
 }
 
 PBRT_CPU_GPU pstd::optional<BSDFSample> MeasuredBxDF::Sample_f(Vector3f wo, Float uc, Point2f u,

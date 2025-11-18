@@ -1719,7 +1719,7 @@ class PiecewiseLinear2D {
     }
 
     template <typename... Ts>
-    PBRT_CPU_GPU Point2f ArgMax(Ts... params) const {
+    PBRT_CPU_GPU Point2f ArgMax(bool interpolate, Ts... params) const {
         static_assert((std::is_arithmetic_v<Ts> && ...),
                       "Additional parameters must be numeric values");
         static_assert(sizeof...(Ts) == Dimension,
@@ -1727,6 +1727,35 @@ class PiecewiseLinear2D {
         pstd::array<Float, Dimension> param = {params...};
 
         DCHECK(!m_max_samples.empty());
+
+        /* In ArgMax, the size is 2, because we store only u and v per slice */
+        const uint32_t stride = 2;
+
+        /* There needs to be a case to handle Valley of Death, between two interpolated value */
+        /* Let user decide, which distribution can be interpolated and which not */
+        if (!interpolate) {
+            uint32_t slice_offset = 0;
+
+            for (size_t dim = 0; dim < Dimension; ++dim) {
+                if (m_param_size[dim] <= 1) continue;
+
+                uint32_t param_index = FindInterval(m_param_size[dim], [&](uint32_t idx) {
+                    return m_param_values[dim].data()[idx] <= param[dim];
+                });
+
+                Float p0 = m_param_values[dim][param_index];
+                Float p1 = m_param_values[dim][param_index + 1];
+
+                if ((param[dim] - p0) > (p1 - p0) * 0.5f) {
+                    param_index = std::min(param_index + 1, m_param_size[dim] - 1);
+                }
+
+                slice_offset += m_param_strides[dim] * param_index;
+            }
+
+            uint32_t offset = slice_offset * stride;
+            return Point2f(m_max_samples[offset], m_max_samples[offset + 1]);
+        }
 
         /* Look up parameter-related indices and weights (if Dimension != 0) */
         float param_weight[2 * ArraySize];
@@ -1751,12 +1780,13 @@ class PiecewiseLinear2D {
         }
 
         /* Sample the row first */
-        uint32_t offset = 0;
+        uint32_t base_index = 0;
         if (Dimension != 0)
-            offset = slice_offset * 2;
+            base_index = slice_offset * stride;
 
-        Float u = m_max_samples[offset];
-        Float v = m_max_samples[offset + 1];
+        Float u = lookup<Dimension>(m_max_samples.data(), base_index, stride, param_weight);
+        Float v = lookup<Dimension>(m_max_samples.data(), base_index + 1, stride, param_weight);
+
         return Point2f(u, v);
     }
 
