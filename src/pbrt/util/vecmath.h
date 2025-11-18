@@ -1560,6 +1560,27 @@ PBRT_CPU_GPU inline Bounds3<T> Expand(const Bounds3<T> &b, U delta) {
 }
 
 template <typename T>
+PBRT_CPU_GPU inline Vector3f IntersectOrAdjust(const Bounds3<T>& bounds, Point3f origin, Vector3f direction) {
+    if (bounds.IntersectP(origin, direction)) {
+        return direction;
+    }
+
+    float bestDot = -Infinity;
+    Vector3f bestDir;
+    for (int i = 0; i < 8; ++i) {
+        const Vector3f toCorner = Normalize(bounds.Corner(i) - origin);
+        float d = Dot(toCorner, direction);
+
+        if (d > bestDot) {
+            bestDot = d;
+            bestDir = toCorner;
+        }
+    }
+
+    return bestDir;
+}
+
+template <typename T>
 PBRT_CPU_GPU inline bool Bounds3<T>::IntersectP(Point3f o, Vector3f d, Float tMax,
                                                 Float *hitt0, Float *hitt1) const {
     Float t0 = 0, t1 = tMax;

@@ -134,6 +134,28 @@ class BSDF {
         return bxdf.Max_f(wo, wiCone, mode, flags);
     }
 
+    template <typename BxDF>
+    PBRT_CPU_GPU SampledSpectrum Max_f(Vector3f woRender, Bounds3f wiBoundsRender,
+        Point3f p, TransportMode mode = TransportMode::Radiance, 
+        BxDFReflTransFlags flags = BxDFReflTransFlags::All) {
+        if (Dot(woRender, shadingFrame.z) == 0) {
+            return {};
+        }
+
+        const BxDF *specificBxDF = bxdf.Cast<BxDF>();
+        return specificBxDF->Max_f(woRender, wiBoundsRender, p, shadingFrame, mode, flags);
+    }
+
+    PBRT_CPU_GPU SampledSpectrum Max_f(Vector3f woRender, Bounds3f wiBoundsRender,
+        Point3f p, TransportMode mode = TransportMode::Radiance, 
+        BxDFReflTransFlags flags = BxDFReflTransFlags::All) {
+        if (Dot(woRender, shadingFrame.z) == 0) {
+            return {};
+        }
+
+        return bxdf.Max_f(woRender, wiBoundsRender, p, shadingFrame, mode, flags);
+    }
+
     PBRT_CPU_GPU
     Float PDF(Vector3f woRender, Vector3f wiRender,
               TransportMode mode = TransportMode::Radiance,
