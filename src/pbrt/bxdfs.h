@@ -1334,22 +1334,35 @@ class NormalizedFresnelBxDF {
     PBRT_CPU_GPU
     SampledSpectrum Max_f(Vector3f wo, DirectionCone wiCone,
         TransportMode mode, BxDFReflTransFlags flags = BxDFReflTransFlags::All) const {
-        return SampledSpectrum(1.f);
-        //HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
-        //
-        //if (!(flags & BxDFReflTransFlags::Reflection) || !(h & HemisphereIntersection::SAME)) {
-        //    return SampledSpectrum(0.f);
-        //}
-        //
-        //
-        //return f(wo, wi, mode);
+        HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
+        if (!(flags & BxDFReflTransFlags::Reflection) || !(h & HemisphereIntersection::SAME)) {
+            return SampledSpectrum(0.f);
+        }
+
+        // Maximalizing CosTheta(wi) by using the local normal
+        Vector3f wi(0.f, 0.f, 1.f);
+        wi = wiCone.ClosestVectorInCone(wi);
+        return f(wo, wi, mode);
     }
 
     PBRT_CPU_GPU
     SampledSpectrum Max_f(Vector3f woGlobal, Bounds3f wiBoundsGlobal, Point3f p,
                           const Frame& localFrame, TransportMode mode,
                           BxDFReflTransFlags flags) const {
-        return SampledSpectrum(1.f);
+        DirectionCone wiConeGlobal = BoundSubtendedDirections(wiBoundsGlobal, p);
+        DirectionCone wiCone = wiConeGlobal;
+        wiCone.w = localFrame.ToLocal(wiCone.w);
+        Vector3f wo = localFrame.ToLocal(woGlobal);
+        HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
+        if (!(flags & BxDFReflTransFlags::Reflection) || !(h & HemisphereIntersection::SAME)) {
+            return SampledSpectrum(0.f);
+        }
+
+        Vector3f wiGlobal = localFrame.z;
+        wiGlobal = IntersectOrAdjust(wiBoundsGlobal, p, wiGlobal);
+        Vector3f wi = localFrame.ToLocal(wiGlobal);
+
+        return f(wo, wi, mode);
     }
 
     PBRT_CPU_GPU
