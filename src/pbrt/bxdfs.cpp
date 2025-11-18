@@ -546,7 +546,7 @@ PBRT_CPU_GPU pstd::optional<BSDFSample> HairBxDF::Sample_f(Vector3f wo, Float uc
 
 PBRT_CPU_GPU SampledSpectrum HairBxDF::Max_f(Vector3f wo, DirectionCone wiCone,
              TransportMode mode, BxDFReflTransFlags flags) const {
-    return {};
+    return SampledSpectrum(1.f);
 }
 
 PBRT_CPU_GPU Float HairBxDF::PDF(Vector3f wo, Vector3f wi, TransportMode mode,
@@ -1017,7 +1017,8 @@ MeasuredBxDFData *MeasuredBxDFData::Create(const std::string &filename, Allocato
     brdf->vndf = PiecewiseLinear2D<2>(
         alloc, (float *)vndf.data.get(), vndf.shape[3], vndf.shape[2],
         {{(int)phi_i.shape[0], (int)theta_i.shape[0]}},
-        {{(const float *)phi_i.data.get(), (const float *)theta_i.data.get()}});
+        {{(const float *)phi_i.data.get(), (const float *)theta_i.data.get()}},
+        true, true, true);
 
     /* Construct Luminance warp data structure */
     brdf->luminance = PiecewiseLinear2D<2>(
@@ -1095,7 +1096,42 @@ PBRT_CPU_GPU SampledSpectrum MeasuredBxDF::f(Vector3f wo, Vector3f wi,
 
 PBRT_CPU_GPU SampledSpectrum MeasuredBxDF::Max_f(Vector3f wo, DirectionCone wiCone,
              TransportMode mode, BxDFReflTransFlags flags) const {
-    return {};
+    if (!(flags & BxDFReflTransFlags::Reflection) || wiCone.IsEmpty())
+        return SampledSpectrum(0.f);
+
+    bool flipWi = false;
+    Vector3f woEval = wo;
+    if (wo.z <= 0) {
+        woEval = -woEval;
+        wiCone.w = -wiCone.w;
+        flipWi = true;
+    }
+
+    HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
+    if (!(h & HemisphereIntersection::SAME))
+        return SampledSpectrum(0.f);
+
+    Float theta_o = SphericalTheta(woEval), phi_o = std::atan2(woEval.y, woEval.x);
+
+    Point2f u_wm = brdf->vndf.ArgMax(phi_o, theta_o);
+    Float theta_m = u2theta(u_wm.x);
+    Float phi_m = u2phi(u_wm.y);
+    if (brdf->isotropic)
+        phi_m += phi_o;
+
+    Float sinTheta_m = std::sin(theta_m), cosTheta_m = std::cos(theta_m);
+    Vector3f wm = SphericalDirection(sinTheta_m, cosTheta_m, phi_m);
+    Vector3f wi = Reflect(woEval, wm);
+    if (wi.z <= 0)
+        return SampledSpectrum(0.f);
+
+    wi = wiCone.ClosestVectorInCone(wi);
+
+    if (flipWi) {
+        wi = -wi;
+    }
+        
+    return f(wo, wi, mode);
 }
 
 PBRT_CPU_GPU pstd::optional<BSDFSample> MeasuredBxDF::Sample_f(Vector3f wo, Float uc, Point2f u,
