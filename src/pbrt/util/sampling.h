@@ -1308,7 +1308,8 @@ class PiecewiseLinear2D {
         : m_param_values(alloc),
           m_data(alloc),
           m_marginal_cdf(alloc),
-          m_conditional_cdf(alloc) {
+          m_conditional_cdf(alloc),
+          m_max_samples(alloc) {
         for (int i = 0; i < ArraySize; ++i)
             m_param_values.emplace_back(alloc);
     }
@@ -1333,14 +1334,15 @@ class PiecewiseLinear2D {
     PiecewiseLinear2D(Allocator alloc, const float *data, int xSize, int ySize,
                       pstd::array<int, Dimension> param_res = {},
                       pstd::array<const float *, Dimension> param_values = {},
-                      bool normalize = true, bool build_cdf = true)
+                      bool normalize = true, bool build_cdf = true, bool compute_max = false)
         : m_size(xSize, ySize),
           m_patch_size(1.f / (xSize - 1), 1.f / (ySize - 1)),
           m_inv_patch_size(m_size - Vector2i(1, 1)),
           m_param_values(alloc),
           m_data(alloc),
           m_marginal_cdf(alloc),
-          m_conditional_cdf(alloc) {
+          m_conditional_cdf(alloc),
+          m_max_samples(alloc) {
         if (build_cdf && !normalize)
             LOG_FATAL("PiecewiseLinear2D: build_cdf implies normalize=true");
 
@@ -1368,18 +1370,32 @@ class PiecewiseLinear2D {
             m_marginal_cdf = FloatStorage(slices * m_size.y);
             m_conditional_cdf = FloatStorage(slices * n_values);
 
+            if (compute_max) {
+                m_max_samples = FloatStorage(slices * 2);
+            }
+
             float *marginal_cdf = m_marginal_cdf.data(),
                   *conditional_cdf = m_conditional_cdf.data(), *data_out = m_data.data();
 
+            float *max_sample = m_max_samples.data();
+
             for (uint32_t slice = 0; slice < slices; ++slice) {
                 /* Construct conditional CDF */
+                int max_x = 0, max_y = 0;
+                float max_value = 0.f;
                 for (int y = 0; y < m_size.y; ++y) {
                     double sum = 0.0;
                     size_t i = y * xSize;
                     conditional_cdf[i] = 0.f;
                     for (int x = 0; x < m_size.x - 1; ++x, ++i) {
-                        sum += .5 * ((double)data[i] + (double)data[i + 1]);
+                        float value = data[i];
+                        sum += .5 * ((double)value + (double)data[i + 1]);
                         conditional_cdf[i + 1] = (float)sum;
+                        if (compute_max && value > max_value) {
+                            max_value = value;
+                            max_x = x;
+                            max_y = y;
+                        }
                     }
                 }
 
@@ -1401,6 +1417,14 @@ class PiecewiseLinear2D {
                 for (size_t i = 0; i < n_values; ++i)
                     data_out[i] = data[i] * normalization;
 
+                if (compute_max) {
+                    const float max_u = static_cast<float>(max_x) / static_cast<float>(m_size.x - 1);
+                    const float max_v = static_cast<float>(max_y) / static_cast<float>(m_size.y - 1);
+                    max_sample[0] = Clamp(max_u, 1 - OneMinusEpsilon, OneMinusEpsilon);
+                    max_sample[1] = Clamp(max_v, 1 - OneMinusEpsilon, OneMinusEpsilon);
+                    max_sample += 2;
+                }
+                
                 marginal_cdf += m_size.y;
                 conditional_cdf += n_values;
                 data_out += n_values;
@@ -1694,6 +1718,48 @@ class PiecewiseLinear2D {
                HProd(m_inv_patch_size);
     }
 
+    template <typename... Ts>
+    PBRT_CPU_GPU Point2f ArgMax(Ts... params) const {
+        static_assert((std::is_arithmetic_v<Ts> && ...),
+                      "Additional parameters must be numeric values");
+        static_assert(sizeof...(Ts) == Dimension,
+                      "Incorrect number of additional parameters passed");
+        pstd::array<Float, Dimension> param = {params...};
+
+        DCHECK(!m_max_samples.empty());
+
+        /* Look up parameter-related indices and weights (if Dimension != 0) */
+        float param_weight[2 * ArraySize];
+        uint32_t slice_offset = 0u;
+        for (size_t dim = 0; dim < Dimension; ++dim) {
+            if (m_param_size[dim] == 1) {
+                param_weight[2 * dim] = 1.f;
+                param_weight[2 * dim + 1] = 0.f;
+                continue;
+            }
+
+            uint32_t param_index = FindInterval(m_param_size[dim], [&](uint32_t idx) {
+                return m_param_values[dim].data()[idx] <= param[dim];
+            });
+
+            Float p0 = m_param_values[dim][param_index],
+                  p1 = m_param_values[dim][param_index + 1];
+
+            param_weight[2 * dim + 1] = Clamp((param[dim] - p0) / (p1 - p0), 0, 1);
+            param_weight[2 * dim] = 1.f - param_weight[2 * dim + 1];
+            slice_offset += m_param_strides[dim] * param_index;
+        }
+
+        /* Sample the row first */
+        uint32_t offset = 0;
+        if (Dimension != 0)
+            offset = slice_offset * 2;
+
+        Float u = m_max_samples[offset];
+        Float v = m_max_samples[offset + 1];
+        return Point2f(u, v);
+    }
+
     PBRT_CPU_GPU
     size_t BytesUsed() const {
         size_t sum = 4 * (m_data.capacity() + m_marginal_cdf.capacity() +
@@ -1743,6 +1809,7 @@ class PiecewiseLinear2D {
     /// Marginal and conditional PDFs
     FloatStorage m_marginal_cdf;
     FloatStorage m_conditional_cdf;
+    FloatStorage m_max_samples;
 };
 
 }  // namespace pbrt
