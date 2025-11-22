@@ -724,7 +724,6 @@ if (PBRT_CUDA_ENABLED)
     src/pbrt/gpu/optix/denoiser.cpp
     src/pbrt/gpu/memory.cpp
     src/pbrt/gpu/util.cpp
-    src/pbrt/gpu/lightsamplers/bvhlight_hploc.cu
   )
   set (PBRT_GPU_SOURCE_HEADERS
     src/pbrt/gpu/optix/aggregate.h
@@ -733,6 +732,7 @@ if (PBRT_CUDA_ENABLED)
     src/pbrt/gpu/memory.h
     src/pbrt/gpu/optix/optix.h
     src/pbrt/gpu/util.h
+    src/pbrt/gpu/lighttreebuilder.h
   )
 
   set_source_files_properties (
