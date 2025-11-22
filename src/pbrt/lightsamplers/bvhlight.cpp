@@ -3,7 +3,114 @@
 #include <pbrt/util/stats.h>
 #include <pbrt/util/vecmath.h>
 
+#ifdef PBRT_BUILD_GPU_RENDERER
+#include <pbrt/gpu/lighttreebuilder.h>
+#include <pbrt/util/math.h>
+#include <pbrt/util/pstd.h>
+
+#include <algorithm>
+#include <array>
+
+#include <cub/device/device_radix_sort.cuh>
+#endif
+
 namespace pbrt{
+
+#ifdef PBRT_BUILD_GPU_RENDERER
+
+struct LightBVHCostEvaluator {
+    PBRT_GPU Float operator()(const LightBounds &bounds) const {
+        return BVHLightSampler::EvaluateCost(bounds);
+    }
+};
+
+class BVHLightTreeBuilder final : public LightTreeBuilderGPU<LightBVHCostEvaluator> {
+  public:
+    explicit BVHLightTreeBuilder(const Bounds3f &bounds) : allLightBounds(bounds) {}
+
+    bool Build(std::vector<LightBVHBuildContainer> &lights) {
+        if (lights.empty())
+            return false;
+
+        Allocate(static_cast<uint32_t>(lights.size()), allLightBounds);
+        UploadSortedLeaves(State(), lights);
+        BuildNodes();
+        Release();
+        return true;
+    }
+
+    static void UploadSortedLeaves(LightTreeBuildState& buildState, const std::vector<LightBVHBuildContainer> &lights) {
+        LightTreeBuildState localState = buildState;
+        std::array<uint8_t, 3> ax = DetermineAxisOrder(localState.allLightBounds);
+
+        LightBVHBuildContainer* dLightsContainer = GPUAllocAsync<LightBVHBuildContainer>(buildState.nLights);
+        GPUCopyToDevice(dLightsContainer, lights.data(), lights.size());
+
+        GPUParallelFor("Assign Morton Codes", ProfilerKernelGroup::HPLOC, localState.nLights, [=] PBRT_GPU(int idx) {
+            LightBVHBuildContainer cont = dLightsContainer[idx];
+            LightTreeConstructionNode leaf{cont.bounds, kInvalidIndex, cont.index};
+            Point3f centroid = cont.bounds.Centroid();
+            Vector3f offset = buildState.allLightBounds.Offset(centroid);
+
+            Point3f position = {offset[ax[0]], offset[ax[1]], offset[ax[2]]};
+            Vector3f direction = Normalize(cont.bounds.w);
+
+            localState.dClusterIndices[idx] = idx;
+            localState.dMortonCodes[idx] = EncodeExtendedMorton5(position, direction);
+            localState.dNodes[idx] = leaf;
+        });
+
+        GPUFreeAsync(dLightsContainer);
+        dLightsContainer = nullptr;
+
+        uint64_t *dMortonCodesSorted = GPUAllocAsync<uint64_t>(localState.nLights);
+        uint32_t *dClusterIndicesSorted = GPUAllocAsync<uint32_t>(localState.nLights);
+
+        void *dTempStorage = nullptr;
+        size_t tempStorageBytes = 0;
+        uint32_t beginBit = 1, endBit = 64;
+
+        const char *description = "Radix Sort Morton keys";
+        {
+            KernelTimerWrapper timer(GetProfilerEvents(description, ProfilerKernelGroup::HPLOC));
+            cub::DeviceRadixSort::SortPairs(dTempStorage, tempStorageBytes, localState.dMortonCodes,
+                dMortonCodesSorted, localState.dClusterIndices, dClusterIndicesSorted,
+                localState.nLights, beginBit, endBit);
+
+            dTempStorage = GPUAllocAsync<uint8_t>(tempStorageBytes);
+
+            cub::DeviceRadixSort::SortPairs(dTempStorage, tempStorageBytes, localState.dMortonCodes,
+                dMortonCodesSorted, localState.dClusterIndices, dClusterIndicesSorted,
+                localState.nLights, beginBit, endBit);
+        }
+
+        GPUFreeAsync(dTempStorage);
+        GPUFreeAsync(buildState.dMortonCodes);
+        GPUFreeAsync(buildState.dClusterIndices);
+
+        buildState.dMortonCodes = dMortonCodesSorted;
+        buildState.dClusterIndices = dClusterIndicesSorted;
+    }
+
+    static std::array<uint8_t, 3> DetermineAxisOrder(const Bounds3f &bounds) {
+        std::array<uint8_t, 3> axis{uint8_t(0), uint8_t(1), uint8_t(2)};
+        Vector3f diagonal = bounds.Diagonal();
+
+        if (diagonal[axis[0]] < diagonal[axis[1]])
+            std::swap(axis[0], axis[1]);
+        if (diagonal[axis[1]] < diagonal[axis[2]])
+            std::swap(axis[1], axis[2]);
+        if (diagonal[axis[0]] < diagonal[axis[1]])
+            std::swap(axis[0], axis[1]);
+
+        return axis;
+    }
+
+    Bounds3f allLightBounds;
+};
+
+#endif  // PBRT_BUILD_GPU_RENDERER
+
 ///////////////////////////////////////////////////////////////////////////
 // BVHLightSampler
 
@@ -29,6 +136,7 @@ BVHLightSampler::BVHLightSampler(pstd::span<const Light> lights, Allocator alloc
             m_allLightBounds = Union(m_allLightBounds, lightBounds->bounds);
         }
     }
+
     if (!bvhLights.empty()) {
 #ifdef PBRT_BUILD_GPU_RENDERER
         bool buildOnGPU = buildBVHGPU(bvhLights);
@@ -147,6 +255,21 @@ LightBVHBuildContainer BVHLightSampler::buildBVH(
     m_nodes[nodeIndex] = LightBVHNode::MakeInterior(child1.index, cb);
     return {lb, nodeIndex};
 }
+
+#ifdef PBRT_BUILD_GPU_RENDERER
+bool BVHLightSampler::buildBVHGPU(
+    std::vector<LightBVHBuildContainer> &bvhLights) {
+    if (bvhLights.size() < 100)
+        return false;
+
+    BVHLightTreeBuilder builder(m_allLightBounds);
+    if (!builder.Build(bvhLights))
+        return false;
+
+    ReportKernelStats(ProfilerKernelGroup::HPLOC);
+    return false;
+}
+#endif
 
 std::string BVHLightSampler::ToString() const {
     return StringPrintf("[ BVHLightSampler nodes: %s ]", m_nodes);
