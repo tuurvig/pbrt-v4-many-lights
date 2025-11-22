@@ -87,6 +87,7 @@ PBRT_GPU uint32_t FindNearestNeighbor(uint32_t nLights, uint32_t clusterIdx,
         clusterBounds = buildState.dNodes[clusterIdx].bounds;
     }
 
+    DCHECK_EQ(laneWarpIdx < nLights, clusterIdx != kInvalidIndex);
     const bool active = laneWarpIdx < nLights && clusterIdx != kInvalidIndex; 
 
     uint32_t minCostIdx = kInvalidIndex;
@@ -97,7 +98,7 @@ PBRT_GPU uint32_t FindNearestNeighbor(uint32_t nLights, uint32_t clusterIdx,
         uint32_t newCostIdx0 = kInvalidIndex;
         uint32_t newCostIdx1 = kInvalidIndex;
         if (neighborIdx < nLights) {
-            LightBounds neighborBounds = buildState.dNodes[clusterIdx].bounds;
+            LightBounds neighborBounds = buildState.dNodes[neighborClusterIdx].bounds;
             neighborBounds = Union(neighborBounds, clusterBounds);
 
             const float newCost = BVHLightSampler::EvaluateCost(neighborBounds);
