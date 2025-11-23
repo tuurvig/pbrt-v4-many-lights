@@ -2,6 +2,7 @@
 
 #include <pbrt/util/stats.h>
 #include <pbrt/util/vecmath.h>
+#include <vector>
 
 #ifdef PBRT_BUILD_GPU_RENDERER
 #include <pbrt/gpu/lighttreebuilder.h>
@@ -26,17 +27,47 @@ struct LightBVHCostEvaluator {
 
 class BVHLightTreeBuilder final : public LightTreeBuilderGPU<LightBVHCostEvaluator> {
   public:
-    explicit BVHLightTreeBuilder(const Bounds3f &bounds) : allLightBounds(bounds) {}
+    explicit BVHLightTreeBuilder(const Bounds3f &bounds) : m_allLightBounds(bounds) {}
 
     bool Build(std::vector<LightBVHBuildContainer> &lights) {
         if (lights.empty())
             return false;
 
-        Allocate(static_cast<uint32_t>(lights.size()), allLightBounds);
+        Allocate(static_cast<uint32_t>(lights.size()), m_allLightBounds);
         UploadSortedLeaves(State(), lights);
         BuildNodes();
-        Release();
         return true;
+    }
+
+    void FlattenTree(const pstd::vector<Light>& lights, pstd::vector<LightBVHNode>& nodes, HashMap<Light, uint32_t>& bitTrailContainer) {
+        const LightTreeBuildState &state(State());
+        if (state.nLights == 0)
+            return;
+
+        uint32_t nNodes = 0;
+        uint32_t rootIndex = 0;
+        GPUCopyToHost(&nNodes, state.nMergedClusters, 1);
+        GPUCopyToHost(&rootIndex, state.dClusterIndices, 1);
+        std::vector<LightTreeConstructionNode> hostNodes(nNodes);
+        GPUCopyToHost(hostNodes.data(), state.dNodes, nNodes);
+
+        nodes.reserve(nNodes);
+
+        FlattenNode(lights, hostNodes, rootIndex, 0, 0, nodes, bitTrailContainer);
+    }
+
+    static std::array<uint8_t, 3> DetermineAxisOrder(const Bounds3f &bounds) {
+        std::array<uint8_t, 3> axis{uint8_t(0), uint8_t(1), uint8_t(2)};
+        Vector3f diagonal = bounds.Diagonal();
+
+        if (diagonal[axis[0]] < diagonal[axis[1]])
+            std::swap(axis[0], axis[1]);
+        if (diagonal[axis[1]] < diagonal[axis[2]])
+            std::swap(axis[1], axis[2]);
+        if (diagonal[axis[0]] < diagonal[axis[1]])
+            std::swap(axis[0], axis[1]);
+
+        return axis;
     }
 
     static void UploadSortedLeaves(LightTreeBuildState& buildState, const std::vector<LightBVHBuildContainer> &lights) {
@@ -92,21 +123,35 @@ class BVHLightTreeBuilder final : public LightTreeBuilderGPU<LightBVHCostEvaluat
         buildState.dClusterIndices = dClusterIndicesSorted;
     }
 
-    static std::array<uint8_t, 3> DetermineAxisOrder(const Bounds3f &bounds) {
-        std::array<uint8_t, 3> axis{uint8_t(0), uint8_t(1), uint8_t(2)};
-        Vector3f diagonal = bounds.Diagonal();
 
-        if (diagonal[axis[0]] < diagonal[axis[1]])
-            std::swap(axis[0], axis[1]);
-        if (diagonal[axis[1]] < diagonal[axis[2]])
-            std::swap(axis[1], axis[2]);
-        if (diagonal[axis[0]] < diagonal[axis[1]])
-            std::swap(axis[0], axis[1]);
+  private:
+    uint32_t FlattenNode(const pstd::vector<Light>& lights, const std::vector<LightTreeConstructionNode>& gpuNodes, uint32_t nodeIdx,
+        uint32_t bitTrail, uint32_t depth, pstd::vector<LightBVHNode>& nodes, HashMap<Light, uint32_t>& bitTrailContainer) const {
+         const LightTreeConstructionNode &gpuNode = gpuNodes[nodeIdx];
+         CompactLightBounds cb(gpuNode.bounds, m_allLightBounds);
 
-        return axis;
+         const bool isLeaf = gpuNode.left == kInvalidIndex;
+         if (isLeaf) {
+             int flatLeafIndex = nodes.size();
+             int lightIndex = gpuNode.right;
+             nodes.push_back(LightBVHNode::MakeLeaf(lightIndex, cb));
+             bitTrailContainer.Insert(lights[lightIndex], bitTrail);
+             return flatLeafIndex;
+         }
+
+         // Allocate interior _LightBVHNode_ and recursively initialize children
+         int flatNodeIndex = nodes.size();
+         nodes.push_back(LightBVHNode());
+         CHECK_LT(depth, 32);
+         uint32_t child0 = FlattenNode(lights, gpuNodes, gpuNode.left, bitTrail, depth + 1, nodes, bitTrailContainer);
+         DCHECK_EQ(flatNodeIndex + 1, child0);
+         uint32_t child1 = FlattenNode(lights, gpuNodes, gpuNode.right, bitTrail | (1u << depth), depth + 1, nodes, bitTrailContainer);
+         
+         nodes[flatNodeIndex] = LightBVHNode::MakeInterior(child1, cb);
+         return flatNodeIndex;
     }
 
-    Bounds3f allLightBounds;
+    Bounds3f m_allLightBounds;
 };
 
 #endif  // PBRT_BUILD_GPU_RENDERER
@@ -266,8 +311,8 @@ bool BVHLightSampler::buildBVHGPU(
     if (!builder.Build(bvhLights))
         return false;
 
-    ReportKernelStats(ProfilerKernelGroup::HPLOC);
-    return false;
+    builder.FlattenTree(m_lights, m_nodes, m_lightToBitTrail);
+    return true;
 }
 #endif
 
