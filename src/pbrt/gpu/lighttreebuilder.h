@@ -34,7 +34,7 @@ constexpr PBRT_GPU uint32_t kInvalidIndex = std::numeric_limits<uint32_t>::max()
 // Intermediate BVH node that stores spatial bounds and child references.
 // Leaves store the light index in both child slots and use kInvalidIndex to
 // signal that no further subdivision is needed.
-struct LightTreeConstructionNode {
+struct LightTreeConstructionNodeGPU {
     LightBounds bounds;
     uint32_t left; // invalidIdx == leaf
     uint32_t right; // leaf => lightIdx
@@ -45,19 +45,18 @@ struct LightTreeBuildState {
     Bounds3f allLightBounds;
     uint32_t nLights = 0;
 
-    LightTreeConstructionNode *dNodes = nullptr;
-    uint64_t *dMortonCodes = nullptr;
+    LightTreeConstructionNodeGPU *dNodes = nullptr;
     uint32_t *dClusterIndices = nullptr;
     uint32_t *dParentIndices = nullptr;
     uint32_t *nMergedClusters = nullptr;
 };
 
-template <typename CostEvaluator>
-__global__ void LightTreeBuilderGPUHplocOuterLoop(LightTreeBuildState state);
+template <typename MortonInt, typename CostEvaluator>
+__global__ void LightTreeBuilderGPUHplocOuterLoop(LightTreeBuildState state, MortonInt* mortonCodes, CostEvaluator evaluator);
 
 // Thin RAII wrapper that owns the device buffers required to build the light
 // tree and provides a convenience entry point to launch the kernel.
-template <typename CostEvaluator>
+template <typename MortonInt, typename CostEvaluator>
 class LightTreeBuilderGPU {
   public:
     LightTreeBuilderGPU() = default;
@@ -68,22 +67,43 @@ class LightTreeBuilderGPU {
     void Allocate(uint32_t nLights, const Bounds3f &bounds);
     void Release();
 
-    void BuildNodes(const char *description = "Build Nodes");
+    void BuildNodes(CostEvaluator evaluator, const char *description = "Build Nodes");
 
     LightTreeBuildState &State() { return m_state; }
     const LightTreeBuildState &State() const { return m_state; }
 
+    MortonInt*& MortonCodes() { return m_mortonCodes; }
+    const MortonInt* MortonCodes() const { return m_mortonCodes; }
+
+    static std::array<uint8_t, 3> DetermineAxisOrder(const Bounds3f &bounds);
   private:
     LightTreeBuildState m_state;
+    MortonInt* m_mortonCodes;
     bool m_allocated = false;
 };
-template <typename CostEvaluator>
-LightTreeBuilderGPU<CostEvaluator>::~LightTreeBuilderGPU() {
+
+template <typename MortonInt, typename CostEvaluator>
+LightTreeBuilderGPU<MortonInt, CostEvaluator>::~LightTreeBuilderGPU() {
     Release();
 }
 
-template <typename CostEvaluator>
-void LightTreeBuilderGPU<CostEvaluator>::Allocate(uint32_t nLights, const Bounds3f &bounds) {
+template <typename MortonInt, typename CostEvaluator>
+static std::array<uint8_t, 3> LightTreeBuilderGPU<MortonInt, CostEvaluator>::DetermineAxisOrder(const Bounds3f &bounds) {
+    std::array<uint8_t, 3> axis{uint8_t(0), uint8_t(1), uint8_t(2)};
+    Vector3f diagonal = bounds.Diagonal();
+
+    if (diagonal[axis[0]] < diagonal[axis[1]])
+        std::swap(axis[0], axis[1]);
+    if (diagonal[axis[1]] < diagonal[axis[2]])
+        std::swap(axis[1], axis[2]);
+    if (diagonal[axis[0]] < diagonal[axis[1]])
+        std::swap(axis[0], axis[1]);
+
+    return axis;
+}
+
+template <typename MortonInt, typename CostEvaluator>
+void LightTreeBuilderGPU<MortonInt, CostEvaluator>::Allocate(uint32_t nLights, const Bounds3f &bounds) {
     if (m_allocated)
         Release();
 
@@ -94,10 +114,11 @@ void LightTreeBuilderGPU<CostEvaluator>::Allocate(uint32_t nLights, const Bounds
     if (nNodes == 0)
         return;
 
-    m_state.dNodes = GPUAllocAsync<LightTreeConstructionNode>(nNodes);
+    m_mortonCodes = GPUAllocAsync<MortonInt>(nLights);
+
+    m_state.dNodes = GPUAllocAsync<LightTreeConstructionNodeGPU>(nNodes);
     m_state.dClusterIndices = GPUAllocAsync<uint32_t>(nLights);
     m_state.dParentIndices = GPUAllocAsync<uint32_t>(nLights);
-    m_state.dMortonCodes = GPUAllocAsync<uint64_t>(nLights);
     m_state.nMergedClusters = GPUAllocAsync<uint32_t>(1);
 
     uint32_t initialClusters = nLights;
@@ -107,10 +128,13 @@ void LightTreeBuilderGPU<CostEvaluator>::Allocate(uint32_t nLights, const Bounds
     m_allocated = true;
 }
 
-template <typename CostEvaluator>
-void LightTreeBuilderGPU<CostEvaluator>::Release() {
+template <typename MortonInt, typename CostEvaluator>
+void LightTreeBuilderGPU<MortonInt, CostEvaluator>::Release() {
     if (!m_allocated)
         return;
+
+    if (m_mortonCodes)
+        GPUFreeAsync(m_mortonCodes);
 
     if (m_state.dNodes)
         GPUFreeAsync(m_state.dNodes);
@@ -118,8 +142,6 @@ void LightTreeBuilderGPU<CostEvaluator>::Release() {
         GPUFreeAsync(m_state.dClusterIndices);
     if (m_state.dParentIndices)
         GPUFreeAsync(m_state.dParentIndices);
-    if (m_state.dMortonCodes)
-        GPUFreeAsync(m_state.dMortonCodes);
     if (m_state.nMergedClusters)
         GPUFreeAsync(m_state.nMergedClusters);
 
@@ -129,12 +151,13 @@ void LightTreeBuilderGPU<CostEvaluator>::Release() {
 
 // Compares two Morton codes and returns the bit position of their highest
 // differing bit (spatial split level).
-static PBRT_GPU_INLINE uint64_t MortonCodeDelta(int32_t L, int32_t R, const uint64_t *mortonCodes) {
-    uint64_t splitLevel = mortonCodes[L] ^ mortonCodes[R];
+template <typename MortonInt>
+static PBRT_GPU_INLINE MortonInt MortonCodeDelta(int32_t L, int32_t R, const MortonInt* mortonCodes) {
+    MortonInt splitLevel = mortonCodes[L] ^ mortonCodes[R];
     if (splitLevel == 0) {
         // Fake split is used for duplicate Morton codes so the
         // hierarchy continues to grow.
-        return L ^ (L + 1ull);
+        return L ^ (L + static_cast<MortonInt>(1ull));
     }
         
     return splitLevel;
@@ -142,11 +165,11 @@ static PBRT_GPU_INLINE uint64_t MortonCodeDelta(int32_t L, int32_t R, const uint
 
 // Walks through the Morton ordering to find the neighbor range that should be
 // merged next (i.e. which side becomes the parent).
-static PBRT_GPU_INLINE uint32_t FindParentIdx(int32_t L, int32_t R, int32_t N,
-                                              const uint64_t *mortonCodes) {
+template <typename MortonInt>
+static PBRT_GPU_INLINE uint32_t FindParentIdx(int32_t L, int32_t R, int32_t N, const MortonInt* mortonCodes) {
     if (L == 0 ||
-       (R != N && MortonCodeDelta(L - 1, L, mortonCodes) >
-                  MortonCodeDelta(R, R + 1, mortonCodes))) {
+       (R != N && MortonCodeDelta<MortonInt>(L - 1, L, mortonCodes) >
+                  MortonCodeDelta<MortonInt>(R, R + 1, mortonCodes))) {
         return R;
     }
 
@@ -168,11 +191,8 @@ static PBRT_GPU_INLINE uint32_t DecodeRelativeOffset(uint32_t idx, uint32_t offs
 
 template <typename CostEvaluator>
 PBRT_GPU uint32_t FindNearestNeighbor(uint32_t nLights, uint32_t clusterIdx,
-    uint8_t laneWarpIdx, LightTreeConstructionNode* dNodes) {
+    uint8_t laneWarpIdx, LightTreeConstructionNodeGPU* dNodes, const CostEvaluator& evaluator) {
 
-    // Templated functor to evaluate cost
-    CostEvaluator costEvaluator;
-    
     // Each lane keeps track of the bounds of its current cluster and scans
     // progressively wider radii to find the cheapest merge partner.
     LightBounds clusterBounds;
@@ -196,7 +216,7 @@ PBRT_GPU uint32_t FindNearestNeighbor(uint32_t nLights, uint32_t clusterIdx,
             LightBounds neighborBounds = dNodes[neighborClusterIdx].bounds;
             neighborBounds = Union(neighborBounds, clusterBounds);
 
-            float newCost = costEvaluator(neighborBounds);
+            float newCost = evaluator(neighborBounds);
             uint32_t newCostInt = __float_as_uint(newCost);
 
             uint32_t encode0 = EncodeRelativeOffset(laneWarpIdx, neighborIdx);
@@ -229,11 +249,8 @@ PBRT_GPU uint32_t FindNearestNeighbor(uint32_t nLights, uint32_t clusterIdx,
 
 // Performs the actual merge between mutually nearest neighbors and compacts
 // the active cluster list for the next PlocMerge round.
-template <typename CostEvaluator>
-PBRT_GPU uint32_t MergeClusters(uint32_t nLights, uint32_t &clusterIdx, uint8_t laneWarpIdx,
-    uint32_t* nMergedClustersPtr, LightTreeConstructionNode* dNodes) {
-
-    uint32_t nearestNeighborIdx = FindNearestNeighbor<CostEvaluator>(nLights, clusterIdx, laneWarpIdx, dNodes);
+PBRT_GPU_INLINE uint32_t MergeClusters(uint32_t nLights, uint32_t &clusterIdx, uint32_t nearestNeighborIdx, uint8_t laneWarpIdx,
+    uint32_t* nMergedClustersPtr, LightTreeConstructionNodeGPU* dNodes) {
 
     uint32_t neighborNNIdx = __shfl_sync(kFullMask, nearestNeighborIdx, nearestNeighborIdx);
     uint32_t neighborClusterIdx = __shfl_sync(kFullMask, clusterIdx, nearestNeighborIdx);
@@ -259,7 +276,7 @@ PBRT_GPU uint32_t MergeClusters(uint32_t nLights, uint32_t &clusterIdx, uint8_t 
         LightBounds neighborBounds = dNodes[neighborClusterIdx].bounds;
         clusterBounds = Union(clusterBounds, neighborBounds);
 
-        LightTreeConstructionNode node;
+        LightTreeConstructionNodeGPU node;
         node.bounds = clusterBounds;
         node.left = clusterIdx;
         node.right = neighborClusterIdx;
@@ -281,12 +298,13 @@ PBRT_GPU uint32_t MergeClusters(uint32_t nLights, uint32_t &clusterIdx, uint8_t 
 // the segment reaches the requested threshold (usually kHalfWarp).
 template <typename CostEvaluator>
 PBRT_GPU void PlocMerge(uint32_t start, uint32_t nLeft, uint32_t nRight, uint32_t threshold,
-    uint32_t clusterIdx, uint8_t laneWarpIdx, const LightTreeBuildState &state) {
+    uint32_t clusterIdx, uint8_t laneWarpIdx, const LightTreeBuildState &state, const CostEvaluator& evaluator) {
     uint32_t nLightsInCurrentStep = nLeft + nRight;
     uint32_t nLightsToProcess = nLightsInCurrentStep;
 
     while (nLightsToProcess > threshold) {
-        nLightsToProcess = MergeClusters<CostEvaluator>(nLightsToProcess, clusterIdx, laneWarpIdx,
+        uint32_t nearestNeighborIdx = FindNearestNeighbor<CostEvaluator>(nLightsToProcess, clusterIdx, laneWarpIdx, state.dNodes, evaluator);
+        nLightsToProcess = MergeClusters(nLightsToProcess, clusterIdx, laneWarpIdx, nearestNeighborIdx,
                            state.nMergedClusters, state.dNodes);
     }
 
@@ -310,8 +328,8 @@ PBRT_GPU_INLINE bool LoadIndex(uint32_t &clusterIdx, uint32_t start, uint32_t en
     return validLaneIdx;
 }
 
-template <typename CostEvaluator>
-__global__ void LightTreeBuilderGPUHplocOuterLoop(LightTreeBuildState state) {
+template <typename MortonInt, typename CostEvaluator>
+__global__ void LightTreeBuilderGPUHplocOuterLoop(LightTreeBuildState state, MortonInt* dMortonCodes, CostEvaluator evaluator) {
     uint32_t memStart = blockIdx.x * blockDim.x;
     uint32_t tid = memStart + threadIdx.x;
 
@@ -326,7 +344,7 @@ __global__ void LightTreeBuilderGPUHplocOuterLoop(LightTreeBuildState state) {
         if (laneActive) {
             uint32_t prevIdx = 0;
             uint32_t sibling =
-                FindParentIdx(leftIdx, rightIdx, state.nLights - 1, state.dMortonCodes);
+                FindParentIdx<MortonInt>(leftIdx, rightIdx, state.nLights - 1, dMortonCodes);
             if (sibling == rightIdx) {
                 prevIdx = atomicExch(&state.dParentIndices[rightIdx], leftIdx);
                 if (prevIdx != kInvalidIndex) {
@@ -369,15 +387,15 @@ __global__ void LightTreeBuilderGPUHplocOuterLoop(LightTreeBuildState state) {
             bool isRightValidIndex = LoadIndex(idx, startR, endR, nLeftClusters, state.dClusterIndices, laneWarpId);
             uint32_t nRightClusters = __popc(__ballot_sync(kFullMask, isRightValidIndex && idx != kInvalidIndex));
 
-            PlocMerge<CostEvaluator>(startL, nLeftClusters, nRightClusters, threshold, idx, laneWarpId, state);
+            PlocMerge<CostEvaluator>(startL, nLeftClusters, nRightClusters, threshold, idx, laneWarpId, state, evaluator);
 
-            warpMask = warpMask & (warpMask - 1);
+            warpMask &= (warpMask - 1);
         }
     }
 }
 
-template <typename CostEvaluator>
-void LightTreeBuilderGPU<CostEvaluator>::BuildNodes(const char *description) {
+template <typename MortonInt, typename CostEvaluator>
+void LightTreeBuilderGPU<MortonInt, CostEvaluator>::BuildNodes(CostEvaluator evaluator, const char *description) {
     if (m_state.nLights == 0)
         return;
 
@@ -389,12 +407,12 @@ void LightTreeBuilderGPU<CostEvaluator>::BuildNodes(const char *description) {
     LOG_VERBOSE("Launching %s", description);
 #endif
 
-    auto kernel = &LightTreeBuilderGPUHplocOuterLoop<CostEvaluator>;
+    auto kernel = &LightTreeBuilderGPUHplocOuterLoop<MortonInt, CostEvaluator>;
     int blockSize = GetBlockSize(description, kernel);
     {
         KernelTimerWrapper timer(GetProfilerEvents(description, ProfilerKernelGroup::HPLOC));
         int gridSize = (m_state.nLights + blockSize - 1) / blockSize;
-        kernel<<<gridSize, blockSize>>>(m_state);
+        kernel<<<gridSize, blockSize>>>(m_state, m_mortonCodes, evaluator);
     }
 
 #ifdef PBRT_DEBUG_BUILD

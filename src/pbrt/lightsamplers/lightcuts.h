@@ -54,6 +54,20 @@ struct LightcutsTree {
     bool isPoint;
 };
 
+struct LightBuildContainer{
+    LightBuildContainer(const LightBounds& bounds, const Light& light) 
+        : bounds(bounds), light(light) {}
+    LightBounds bounds;
+    Light light;
+    uint32_t index;
+};
+
+struct TreeNodeBuildSuccess {
+    LightBounds bounds;
+    int representantIdx;
+    int nodeIdx;
+};
+
 // LightcutsLightSampler Definition
 class LightcutsLightSampler {
     
@@ -198,34 +212,13 @@ public:
 
         const LightcutsTree& t(loc.treeIdx == 1 ? m_pointTree : m_spotTree);
         pmf *= weights[loc.treeIdx] / sumWeights;
-        return pmf / t.lights.size(); 
+        return pmf / t.lights.size();
     }
 
     std::string ToString() const;
 
-private:
-    struct LightBuildContainer{
-        LightBuildContainer(const LightBounds& bounds, const Light& light) 
-            : bounds(bounds), light(light) {}
-        LightBounds bounds;
-        Light light;
-    };
-
-    struct TreeNodeBuildSuccess {
-        LightBounds bounds;
-        int representantIdx;
-        int nodeIdx;
-    };
-    
-    // LightcutsLightSampler Private Methods
-    TreeNodeBuildSuccess buildLightTree(std::vector<LightBuildContainer>& lightcutsLights, LightcutsTree& tree, int start, int end, uint32_t bitTrail, int depth, float& u);
-
-    pstd::optional<SampledLight> SampleLightTree(const LightSampleContext& ctx, const LightcutsTree& tree, Float pmf, Float u) const;
-
-    pstd::optional<SampledLight> SampleInfiniteLight(size_t nLights, Float &pmf, Float &u) const;
-
     // Similarity Metric
-    static Float EvaluateCost(const LightBounds& bounds, Float sceneDiagonalSqr, bool isPointLight) {
+    static PBRT_CPU_GPU Float EvaluateCost(const LightBounds& bounds, Float sceneDiagonalSqr, bool isPointLight) {
         const Float diagonalLengthSqr = LengthSquared(bounds.bounds.Diagonal());
 
         Float similarity = diagonalLengthSqr;
@@ -238,6 +231,19 @@ private:
 
         return bounds.phi * similarity;
     }
+
+private:
+    
+    // LightcutsLightSampler Private Methods
+    TreeNodeBuildSuccess buildLightTree(std::vector<LightBuildContainer>& lightcutsLights, LightcutsTree& tree, int start, int end, uint32_t bitTrail, int depth, float& u);
+
+#ifdef PBRT_BUILD_GPU_RENDERER
+    bool buildLightTreeGPU(std::vector<LightBuildContainer> &lights, LightcutsTree& tree, HashMap<Light, LightLocation>& lightToLocation, float& u);
+#endif
+
+    pstd::optional<SampledLight> SampleLightTree(const LightSampleContext& ctx, const LightcutsTree& tree, Float pmf, Float u) const;
+
+    pstd::optional<SampledLight> SampleInfiniteLight(size_t nLights, Float &pmf, Float &u) const;
 
     static Float ComputeErrorBounds(const LightcutsTreeNode* node, const Bounds3f& sceneBounds, Point3f point) {
         Bounds3f bounds = node->compactLightBounds.Bounds(sceneBounds);

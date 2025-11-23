@@ -13,7 +13,7 @@
 #include <array>
 
 #include <cub/device/device_radix_sort.cuh>
-#endif
+#endif //PBRT_BUILD_GPU_RENDERER
 
 namespace pbrt{
 
@@ -25,7 +25,7 @@ struct LightBVHCostEvaluator {
     }
 };
 
-class BVHLightTreeBuilder final : public LightTreeBuilderGPU<LightBVHCostEvaluator> {
+class BVHLightTreeBuilder final : public LightTreeBuilderGPU<uint64_t, LightBVHCostEvaluator> {
   public:
     explicit BVHLightTreeBuilder(const Bounds3f &bounds) : m_allLightBounds(bounds) {}
 
@@ -34,8 +34,8 @@ class BVHLightTreeBuilder final : public LightTreeBuilderGPU<LightBVHCostEvaluat
             return false;
 
         Allocate(static_cast<uint32_t>(lights.size()), m_allLightBounds);
-        UploadSortedLeaves(State(), lights);
-        BuildNodes();
+        MortonCodes() = GetSortedMortonCodes(State(), MortonCodes(), lights);
+        BuildNodes(LightBVHCostEvaluator());
         return true;
     }
 
@@ -48,7 +48,7 @@ class BVHLightTreeBuilder final : public LightTreeBuilderGPU<LightBVHCostEvaluat
         uint32_t rootIndex = 0;
         GPUCopyToHost(&nNodes, state.nMergedClusters, 1);
         GPUCopyToHost(&rootIndex, state.dClusterIndices, 1);
-        std::vector<LightTreeConstructionNode> hostNodes(nNodes);
+        std::vector<LightTreeConstructionNodeGPU> hostNodes(nNodes);
         GPUCopyToHost(hostNodes.data(), state.dNodes, nNodes);
 
         nodes.reserve(nNodes);
@@ -56,21 +56,7 @@ class BVHLightTreeBuilder final : public LightTreeBuilderGPU<LightBVHCostEvaluat
         FlattenNode(lights, hostNodes, rootIndex, 0, 0, nodes, bitTrailContainer);
     }
 
-    static std::array<uint8_t, 3> DetermineAxisOrder(const Bounds3f &bounds) {
-        std::array<uint8_t, 3> axis{uint8_t(0), uint8_t(1), uint8_t(2)};
-        Vector3f diagonal = bounds.Diagonal();
-
-        if (diagonal[axis[0]] < diagonal[axis[1]])
-            std::swap(axis[0], axis[1]);
-        if (diagonal[axis[1]] < diagonal[axis[2]])
-            std::swap(axis[1], axis[2]);
-        if (diagonal[axis[0]] < diagonal[axis[1]])
-            std::swap(axis[0], axis[1]);
-
-        return axis;
-    }
-
-    static void UploadSortedLeaves(LightTreeBuildState& buildState, const std::vector<LightBVHBuildContainer> &lights) {
+    static uint64_t* GetSortedMortonCodes(LightTreeBuildState& buildState, uint64_t* dMortonCodes, const std::vector<LightBVHBuildContainer> &lights) {
         LightTreeBuildState localState = buildState;
         std::array<uint8_t, 3> ax = DetermineAxisOrder(localState.allLightBounds);
 
@@ -79,15 +65,16 @@ class BVHLightTreeBuilder final : public LightTreeBuilderGPU<LightBVHCostEvaluat
 
         GPUParallelFor("Assign Morton Codes", ProfilerKernelGroup::HPLOC, localState.nLights, [=] PBRT_GPU(int idx) {
             LightBVHBuildContainer cont = dLightsContainer[idx];
-            LightTreeConstructionNode leaf{cont.bounds, kInvalidIndex, cont.index};
+            LightTreeConstructionNodeGPU leaf{cont.bounds, kInvalidIndex, cont.index};
             Point3f centroid = cont.bounds.Centroid();
             Vector3f offset = buildState.allLightBounds.Offset(centroid);
 
             Point3f position = {offset[ax[0]], offset[ax[1]], offset[ax[2]]};
             Vector3f direction = Normalize(cont.bounds.w);
 
+            dMortonCodes[idx] = EncodeExtendedMorton5(position, direction);
+
             localState.dClusterIndices[idx] = idx;
-            localState.dMortonCodes[idx] = EncodeExtendedMorton5(position, direction);
             localState.dNodes[idx] = leaf;
         });
 
@@ -104,30 +91,31 @@ class BVHLightTreeBuilder final : public LightTreeBuilderGPU<LightBVHCostEvaluat
         const char *description = "Radix Sort Morton keys";
         {
             KernelTimerWrapper timer(GetProfilerEvents(description, ProfilerKernelGroup::HPLOC));
-            cub::DeviceRadixSort::SortPairs(dTempStorage, tempStorageBytes, localState.dMortonCodes,
+            cub::DeviceRadixSort::SortPairs(dTempStorage, tempStorageBytes, dMortonCodes,
                 dMortonCodesSorted, localState.dClusterIndices, dClusterIndicesSorted,
                 localState.nLights, beginBit, endBit);
 
             dTempStorage = GPUAllocAsync<uint8_t>(tempStorageBytes);
 
-            cub::DeviceRadixSort::SortPairs(dTempStorage, tempStorageBytes, localState.dMortonCodes,
+            cub::DeviceRadixSort::SortPairs(dTempStorage, tempStorageBytes, dMortonCodes,
                 dMortonCodesSorted, localState.dClusterIndices, dClusterIndicesSorted,
                 localState.nLights, beginBit, endBit);
         }
 
         GPUFreeAsync(dTempStorage);
-        GPUFreeAsync(buildState.dMortonCodes);
+        GPUFreeAsync(dMortonCodes);
         GPUFreeAsync(buildState.dClusterIndices);
 
-        buildState.dMortonCodes = dMortonCodesSorted;
         buildState.dClusterIndices = dClusterIndicesSorted;
+
+        return dMortonCodesSorted;
     }
 
 
   private:
-    uint32_t FlattenNode(const pstd::vector<Light>& lights, const std::vector<LightTreeConstructionNode>& gpuNodes, uint32_t nodeIdx,
+    uint32_t FlattenNode(const pstd::vector<Light>& lights, const std::vector<LightTreeConstructionNodeGPU>& gpuNodes, uint32_t nodeIdx,
         uint32_t bitTrail, uint32_t depth, pstd::vector<LightBVHNode>& nodes, HashMap<Light, uint32_t>& bitTrailContainer) const {
-         const LightTreeConstructionNode &gpuNode = gpuNodes[nodeIdx];
+         const LightTreeConstructionNodeGPU &gpuNode = gpuNodes[nodeIdx];
          CompactLightBounds cb(gpuNode.bounds, m_allLightBounds);
 
          const bool isLeaf = gpuNode.left == kInvalidIndex;
