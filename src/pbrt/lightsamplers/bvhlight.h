@@ -60,6 +60,11 @@ class BVHLightSampler {
     BVHLightSampler(pstd::span<const Light> lights, Allocator alloc);
 
     PBRT_CPU_GPU
+    pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* /*bsdf*/, Float u) const {
+        return Sample(ctx, u);
+    }
+
+    PBRT_CPU_GPU
     pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, Float u) const {
         // Compute infinite light sampling probability _pInfinite_
         Float pInfinite = Float(m_infiniteLights.size()) /
@@ -114,6 +119,11 @@ class BVHLightSampler {
                 }
             }
         }
+    }
+
+    PBRT_CPU_GPU
+    Float PMF(const LightSampleContext &ctx, const BSDF* /*bsdf*/, Light light) const {
+        return PMF(ctx, light);
     }
 
     PBRT_CPU_GPU
