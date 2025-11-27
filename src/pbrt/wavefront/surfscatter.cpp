@@ -241,7 +241,7 @@ void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQue
                         // NOTE: slightly different than context below. Problem?
                         LightSampleContext ctx(w.pi, w.n, ns);
                         nextRayQueue->PushIndirectRay(
-                            ray, w.depth + 1, ctx, beta, r_u, r_l, lambda,
+                            ray, w.depth + 1, ctx, bsdf, beta, r_u, r_l, lambda,
                             etaScale, bsdfSample->IsSpecular(), anyNonSpecularBounces,
                             w.pixelIndex);
 

@@ -8,6 +8,7 @@
 #include <pbrt/pbrt.h>
 
 #include <pbrt/base/sampler.h>
+#include <pbrt/bsdf.h>
 #include <pbrt/film.h>
 #include <pbrt/lightsamplers.h>
 #include <pbrt/materials.h>
@@ -124,6 +125,7 @@ struct RayWorkItem {
     int pixelIndex;
     SampledSpectrum beta, r_u, r_l;
     LightSampleContext prevIntrCtx;
+    BSDF prevBsdf;
     Float etaScale;
     int specularBounce;
     int anyNonSpecularBounces;
@@ -155,6 +157,7 @@ struct HitAreaLightWorkItem {
     int depth;
     SampledSpectrum beta, r_u, r_l;
     LightSampleContext prevIntrCtx;
+    BSDF prevBsdf;
     int specularBounce;
     int pixelIndex;
 };
@@ -335,7 +338,7 @@ class RayQueue : public WorkQueue<RayWorkItem> {
     int PushCameraRay(const Ray &ray, const SampledWavelengths &lambda, int pixelIndex);
 
     PBRT_CPU_GPU
-    int PushIndirectRay(const Ray &ray, int depth, const LightSampleContext &prevIntrCtx,
+    int PushIndirectRay(const Ray &ray, int depth, const LightSampleContext &prevIntrCtx, const BSDF& prevBsdf,
                         const SampledSpectrum &beta, const SampledSpectrum &r_u,
                         const SampledSpectrum &r_l, const SampledWavelengths &lambda,
                         Float etaScale, bool specularBounce, bool anyNonSpecularBounces,
@@ -350,6 +353,7 @@ PBRT_CPU_GPU inline int RayQueue::PushCameraRay(const Ray &ray, const SampledWav
     this->ray[index] = ray;
     this->depth[index] = 0;
     this->pixelIndex[index] = pixelIndex;
+    this->prevBsdf[index] = BSDF();
     this->lambda[index] = lambda;
     this->beta[index] = SampledSpectrum(1.f);
     this->etaScale[index] = 1.f;
@@ -362,7 +366,7 @@ PBRT_CPU_GPU inline int RayQueue::PushCameraRay(const Ray &ray, const SampledWav
 
 PBRT_CPU_GPU
 inline int RayQueue::PushIndirectRay(
-    const Ray &ray, int depth, const LightSampleContext &prevIntrCtx,
+    const Ray &ray, int depth, const LightSampleContext &prevIntrCtx, const BSDF& prevBsdf,
     const SampledSpectrum &beta, const SampledSpectrum &r_u,
     const SampledSpectrum &r_l, const SampledWavelengths &lambda, Float etaScale,
     bool specularBounce, bool anyNonSpecularBounces, int pixelIndex) {
@@ -372,6 +376,7 @@ inline int RayQueue::PushIndirectRay(
     this->depth[index] = depth;
     this->pixelIndex[index] = pixelIndex;
     this->prevIntrCtx[index] = prevIntrCtx;
+    this->prevBsdf[index] = prevBsdf;
     this->beta[index] = beta;
     this->r_u[index] = r_u;
     this->r_l[index] = r_l;
