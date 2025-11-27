@@ -40,6 +40,17 @@ PBRT_CPU_GPU inline Float LightSampler::PMF(const LightSampleContext &ctx, Light
     return Dispatch(pdf);
 }
 
+PBRT_CPU_GPU inline pstd::optional<SampledLight> LightSampler::Sample(const LightSampleContext &ctx,
+                                                         const BSDF* bsdf, Float u) const {
+    auto s = [&](auto ptr) { return ptr->Sample(ctx, bsdf, u); };
+    return Dispatch(s);
+}
+
+PBRT_CPU_GPU inline Float LightSampler::PMF(const LightSampleContext &ctx, const BSDF* bsdf, Light light) const {
+    auto pdf = [&](auto ptr) { return ptr->PMF(ctx, bsdf, light); };
+    return Dispatch(pdf);
+}
+
 PBRT_CPU_GPU inline pstd::optional<SampledLight> LightSampler::Sample(Float u) const {
     auto sample = [&](auto ptr) { return ptr->Sample(u); };
     return Dispatch(sample);

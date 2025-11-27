@@ -36,7 +36,7 @@ class LightSampler : public TaggedPointer<UniformLightSampler,
     // LightSampler Interface
     using TaggedPointer::TaggedPointer;
 
-    static LightSampler Create(const std::string &name, pstd::span<const Light> lights,
+    static LightSampler Create(const std::string &name, pstd::span<const Light> lights, bool discretizedLights,
                                Allocator alloc);
 
     std::string ToString() const;
@@ -48,6 +48,9 @@ class LightSampler : public TaggedPointer<UniformLightSampler,
 
     PBRT_CPU_GPU inline pstd::optional<SampledLight> Sample(Float u) const;
     PBRT_CPU_GPU inline Float PMF(Light light) const;
+
+    PBRT_CPU_GPU inline pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, Float u) const;
+    PBRT_CPU_GPU inline Float PMF(const LightSampleContext &ctx, const BSDF* bsdf, Light light) const;
 };
 
 }  // namespace pbrt

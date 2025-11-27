@@ -1291,7 +1291,7 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, const BSDF 
 
     // Sample a light source using _lightSampler_
     Float u = sampler.Get1D();
-    pstd::optional<SampledLight> sampledLight = lightSampler.Sample(ctx, u);
+    pstd::optional<SampledLight> sampledLight = lightSampler.Sample(ctx, bsdf, u);
     Point2f uLight = sampler.Get2D();
     if (!sampledLight)
         return SampledSpectrum(0.f);
