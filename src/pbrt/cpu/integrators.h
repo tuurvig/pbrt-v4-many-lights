@@ -267,7 +267,7 @@ class VolPathIntegrator : public RayIntegrator {
                       bool regularize = false)
         : RayIntegrator(camera, sampler, aggregate, lights),
           maxDepth(maxDepth),
-          lightSampler(LightSampler::Create(lightSampleStrategy, lights, Allocator())),
+          lightSampler(LightSampler::Create(lightSampleStrategy, lights, Options->discretizeAreaLights > 0, Allocator())),
           regularize(regularize) {}
 
     SampledSpectrum Li(RayDifferential ray, SampledWavelengths &lambda, Sampler sampler,
