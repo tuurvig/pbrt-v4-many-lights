@@ -635,6 +635,8 @@ SampledSpectrum PathIntegrator::Li(RayDifferential ray, SampledWavelengths &lamb
     Float p_b, etaScale = 1;
     bool specularBounce = false, anyNonSpecularBounces = false;
     LightSampleContext prevIntrCtx;
+    BSDF bsdf;
+    BSDF* bsdfPrev = nullptr;
 
     // Sample path from camera and accumulate radiance estimate
     while (true) {
@@ -667,7 +669,7 @@ SampledSpectrum PathIntegrator::Li(RayDifferential ray, SampledWavelengths &lamb
             else {
                 // Compute MIS weight for area light
                 Light areaLight(si->intr.areaLight);
-                Float p_l = lightSampler.PMF(prevIntrCtx, areaLight) *
+                Float p_l = lightSampler.PMF(prevIntrCtx, bsdfPrev, areaLight) *
                             areaLight.PDF_Li(prevIntrCtx, ray.d, true);
                 Float w_l = PowerHeuristic(1, p_b, 1, p_l);
 
@@ -677,8 +679,9 @@ SampledSpectrum PathIntegrator::Li(RayDifferential ray, SampledWavelengths &lamb
 
         SurfaceInteraction &isect = si->intr;
         // Get BSDF and skip over medium boundaries
-        BSDF bsdf = isect.GetBSDF(ray, lambda, camera, scratchBuffer, sampler);
+        bsdf = isect.GetBSDF(ray, lambda, camera, scratchBuffer, sampler);
         if (!bsdf) {
+            bsdfPrev = nullptr;
             specularBounce = true;  // disable MIS if the indirect ray hits a light
             isect.SkipIntersection(&ray, si->tHit);
             continue;
@@ -744,6 +747,7 @@ SampledSpectrum PathIntegrator::Li(RayDifferential ray, SampledWavelengths &lamb
         if (bs->IsTransmission())
             etaScale *= Sqr(bs->eta);
         prevIntrCtx = si->intr;
+        bsdfPrev = &bsdf;
 
         ray = isect.SpawnRay(ray, bsdf, bs->wi, bs->flags, bs->eta);
 
@@ -775,7 +779,7 @@ SampledSpectrum PathIntegrator::SampleLd(const SurfaceInteraction &intr, const B
 
     // Choose a light source for the direct lighting calculation
     Float u = sampler.Get1D();
-    pstd::optional<SampledLight> sampledLight = lightSampler.Sample(ctx, u);
+    pstd::optional<SampledLight> sampledLight = lightSampler.Sample(ctx, bsdf, u);
     Point2f uLight = sampler.Get2D();
     if (!sampledLight)
         return {};
@@ -960,6 +964,8 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, SampledWavelengths &l
     Float etaScale = 1;
 
     LightSampleContext prevIntrContext;
+    BSDF bsdf;
+    BSDF* bsdfPrev = nullptr;
 
     while (true) {
         // Sample segment of volumetric scattering path
@@ -1044,6 +1050,7 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, SampledWavelengths &l
                                 beta *= ps->p / ps->pdf;
                                 r_l = r_u / ps->pdf;
                                 prevIntrContext = LightSampleContext(intr);
+                                bsdfPrev = nullptr;
                                 scattered = true;
                                 ray.o = p;
                                 ray.d = ps->wi;
@@ -1096,7 +1103,9 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, SampledWavelengths &l
 
             break;
         }
+        
         SurfaceInteraction &isect = si->intr;
+
         if (SampledSpectrum Le = isect.Le(-ray.d, lambda); Le) {
             // Add contribution of emission from intersected surface
             if (depth == 0 || specularBounce)
@@ -1104,7 +1113,7 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, SampledWavelengths &l
             else {
                 // Add surface light contribution using both PDFs with MIS
                 Light areaLight(isect.areaLight);
-                Float p_l = lightSampler.PMF(prevIntrContext, areaLight) *
+                Float p_l = lightSampler.PMF(prevIntrContext, bsdfPrev, areaLight) *
                             areaLight.PDF_Li(prevIntrContext, ray.d, true);
                 r_l *= p_l;
                 L += beta * Le / (r_u + r_l).Average();
@@ -1112,8 +1121,9 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, SampledWavelengths &l
         }
 
         // Get BSDF and skip over medium boundaries
-        BSDF bsdf = isect.GetBSDF(ray, lambda, camera, scratchBuffer, sampler);
+        bsdf = isect.GetBSDF(ray, lambda, camera, scratchBuffer, sampler);
         if (!bsdf) {
+            bsdfPrev = nullptr;
             isect.SkipIntersection(&ray, si->tHit);
             continue;
         }
@@ -1159,6 +1169,7 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, SampledWavelengths &l
             DCHECK(IsInf(L.y(lambda)) == false);
         }
         prevIntrContext = LightSampleContext(isect);
+        bsdfPrev = &bsdf;
 
         // Sample BSDF to get new volumetric path direction
         Vector3f wo = isect.wo;
@@ -1236,6 +1247,9 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, SampledWavelengths &l
                 Sw.Regularize();
             } else
                 ++totalBSDFs;
+
+            bsdf = Sw;
+            bsdfPrev = &bsdf;
 
             // Account for attenuated direct illumination subsurface scattering
             L += SampleLd(pi, &Sw, lambda, sampler, beta, r_u);
@@ -2893,6 +2907,9 @@ void SPPMIntegrator::Render() {
                 Float etaScale = 1, p_b;
                 bool specularBounce = true, haveSetVisiblePoint = false;
                 LightSampleContext prevIntrCtx;
+                BSDF bsdfPrev;
+                BSDF* bsdfPrevPtr = nullptr;
+
                 int depth = 0;
                 while (true) {
                     ++totalPhotonSurfaceInteractions;
@@ -2922,9 +2939,9 @@ void SPPMIntegrator::Render() {
                     // Process SPPM camera ray intersection
                     // Compute BSDF at SPPM camera ray intersection
                     SurfaceInteraction &isect = si->intr;
-                    BSDF bsdf =
-                        isect.GetBSDF(ray, lambda, camera, scratchBuffer, sampler);
+                    BSDF bsdf = isect.GetBSDF(ray, lambda, camera, scratchBuffer, sampler);
                     if (!bsdf) {
+                        bsdfPrevPtr = nullptr;
                         isect.SkipIntersection(&ray, si->tHit);
                         continue;
                     }
@@ -2941,7 +2958,7 @@ void SPPMIntegrator::Render() {
                         else {
                             // Compute MIS weight for area light
                             Light areaLight(si->intr.areaLight);
-                            Float p_l = lightSampler.PMF(prevIntrCtx, areaLight) *
+                            Float p_l = lightSampler.PMF(prevIntrCtx, bsdfPrevPtr, areaLight) *
                                         areaLight.PDF_Li(prevIntrCtx, ray.d, true);
                             Float w_l = PowerHeuristic(1, p_b, 1, p_l);
 
@@ -2990,6 +3007,8 @@ void SPPMIntegrator::Render() {
                     }
                     ray = isect.SpawnRay(ray, bsdf, bs->wi, bs->flags, bs->eta);
                     prevIntrCtx = LightSampleContext(isect);
+                    bsdfPrev = bsdf;
+                    bsdfPrevPtr = &bsdfPrev;
                 }
             }
         });
@@ -3291,7 +3310,7 @@ SampledSpectrum SPPMIntegrator::SampleLd(const SurfaceInteraction &intr, const B
 
     // Choose a light source for the direct lighting calculation
     Float u = sampler.Get1D();
-    pstd::optional<SampledLight> sampledLight = lightSampler.Sample(ctx, u);
+    pstd::optional<SampledLight> sampledLight = lightSampler.Sample(ctx, bsdf, u);
     Point2f uLight = sampler.Get2D();
     if (!sampledLight)
         return {};
