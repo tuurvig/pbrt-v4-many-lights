@@ -183,7 +183,7 @@ WavefrontPathIntegrator::WavefrontPathIntegrator(
         scene.integrator.parameters.GetOneString("lightsampler", "bvh");
     if (allLights.size() == 1)
         lightSamplerName = "uniform";
-    lightSampler = LightSampler::Create(lightSamplerName, allLights, alloc);
+    lightSampler = LightSampler::Create(lightSamplerName, allLights, Options->discretizeAreaLights > 0, alloc);
     LOG_VERBOSE("Finished creating light sampler");
 
     if (scene.integrator.name != "path" && scene.integrator.name != "volpath")

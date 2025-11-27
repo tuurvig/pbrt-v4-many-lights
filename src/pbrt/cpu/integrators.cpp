@@ -622,7 +622,7 @@ PathIntegrator::PathIntegrator(int maxDepth, Camera camera, Sampler sampler,
                                const std::string &lightSampleStrategy, bool regularize)
     : RayIntegrator(camera, sampler, aggregate, lights),
       maxDepth(maxDepth),
-      lightSampler(LightSampler::Create(lightSampleStrategy, lights, Allocator())),
+      lightSampler(LightSampler::Create(lightSampleStrategy, lights, Options->discretizeAreaLights > 0, Allocator())),
       regularize(regularize) {}
 
 SampledSpectrum PathIntegrator::Li(RayDifferential ray, SampledWavelengths &lambda,

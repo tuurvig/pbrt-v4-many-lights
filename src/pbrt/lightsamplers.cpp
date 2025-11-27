@@ -15,6 +15,7 @@
 #include <pbrt/util/print.h>
 #include <pbrt/util/sampling.h>
 #include <pbrt/util/spectrum.h>
+#include <pbrt/options.h>
 
 #include <atomic>
 #include <cstdint>
@@ -28,7 +29,7 @@ std::string SampledLight::ToString() const {
                         light ? light.ToString().c_str() : "(nullptr)", p);
 }
 
-LightSampler LightSampler::Create(const std::string &name, pstd::span<const Light> lights,
+LightSampler LightSampler::Create(const std::string &name, pstd::span<const Light> lights, bool discretizedLights,
                                   Allocator alloc) {
     if (name == "uniform")
         return alloc.new_object<UniformLightSampler>(lights, alloc);
@@ -36,15 +37,20 @@ LightSampler LightSampler::Create(const std::string &name, pstd::span<const Ligh
         return alloc.new_object<PowerLightSampler>(lights, alloc);
     else if (name == "bvh")
         return alloc.new_object<BVHLightSampler>(lights, alloc);
-    else if (name == "lightcuts")
-        return alloc.new_object<LightcutsLightSampler>(lights, alloc);
+    else if (name == "lightcuts") {
+        if (discretizedLights) {
+            return alloc.new_object<LightcutsLightSampler>(lights, alloc);
+        }
+        Error(R"(Cannot use lightcuts lightsampler without discretizing area lights. Using "bvh".)");
+    }
     else if (name == "exhaustive")
         return alloc.new_object<ExhaustiveLightSampler>(lights, alloc);
     else {
         Error(R"(Light sample distribution type "%s" unknown. Using "bvh".)",
               name.c_str());
-        return alloc.new_object<BVHLightSampler>(lights, alloc);
     }
+    
+    return alloc.new_object<BVHLightSampler>(lights, alloc);
 }
 
 std::string LightSampler::ToString() const {
