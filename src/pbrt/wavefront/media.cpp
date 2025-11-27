@@ -194,7 +194,7 @@ void WavefrontPathIntegrator::SampleMediumInteraction(int wavefrontDepth) {
                 intr.mediumInterface = &w.mediumInterface;
                 Ray newRay = intr.SpawnRay(ray.d);
                 nextRayQueue->PushIndirectRay(
-                    newRay, w.depth, w.prevIntrCtx, beta, r_u, r_l, lambda,
+                    newRay, w.depth, w.prevIntrCtx, BSDF(), beta, r_u, r_l, lambda,
                     w.etaScale, w.specularBounce, w.anyNonSpecularBounces, w.pixelIndex);
                 return;
             }
@@ -206,7 +206,7 @@ void WavefrontPathIntegrator::SampleMediumInteraction(int wavefrontDepth) {
                     w.pixelIndex, w.depth);
                 hitAreaLightQueue->Push(HitAreaLightWorkItem{
                     w.areaLight, Point3f(w.pi), w.n, w.uv, -ray.d, lambda, w.depth, beta,
-                    r_u, r_l, w.prevIntrCtx, w.specularBounce, w.pixelIndex});
+                    r_u, r_l, w.prevIntrCtx, BSDF(), w.specularBounce, w.pixelIndex});
             }
 
             FloatTexture displacement = material.GetDisplacement();
@@ -343,7 +343,7 @@ void WavefrontPathIntegrator::SampleMediumScattering(int wavefrontDepth) {
             bool anyNonSpecularBounces = true;
 
             // Spawn indirect ray.
-            nextRayQueue->PushIndirectRay(ray, w.depth + 1, ctx, beta, r_u, r_l,
+            nextRayQueue->PushIndirectRay(ray, w.depth + 1, ctx, BSDF(), beta, r_u, r_l,
                                           w.lambda, w.etaScale, specularBounce,
                                           anyNonSpecularBounces, w.pixelIndex);
             PBRT_DBG("Enqueuing indirect medium ray at depth %d pixel index %d\n",

@@ -9,6 +9,7 @@ flat Light;
 flat Material;
 flat Medium;
 flat int;
+flat BxDF;
 
 soa BSDF;
 soa LightSampleContext;
@@ -44,6 +45,7 @@ soa RayWorkItem {
     SampledWavelengths lambda;
     SampledSpectrum beta, r_u, r_l;
     LightSampleContext prevIntrCtx;
+    BSDF prevBsdf;
     Float etaScale;
     int specularBounce;
     int anyNonSpecularBounces;
@@ -70,6 +72,7 @@ soa HitAreaLightWorkItem {
     Vector3f wo;
     int depth;
     LightSampleContext prevIntrCtx;
+    BSDF prevBsdf;
     int specularBounce;
     int pixelIndex;
 };

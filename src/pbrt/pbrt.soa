@@ -70,3 +70,8 @@ soa LightSampleContext {
     Point3fi pi;
     Normal3f n, ns;
 };
+
+soa BSDF {
+    BxDF bxdf;
+    Frame shadingFrame;
+};

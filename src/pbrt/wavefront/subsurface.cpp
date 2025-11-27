@@ -125,7 +125,7 @@ void WavefrontPathIntegrator::SampleSubsurface(int wavefrontDepth) {
 
                         LightSampleContext ctx(intr.pi, intr.n, intr.ns);
                         nextRayQueue->PushIndirectRay(
-                            ray, w.depth + 1, ctx, beta, indir_r_u, r_l, lambda,
+                            ray, w.depth + 1, ctx, bsdf, beta, indir_r_u, r_l, lambda,
                             etaScale, bsdfSample->IsSpecular(), anyNonSpecularBounces,
                             w.pixelIndex);
 

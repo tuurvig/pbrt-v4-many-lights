@@ -195,8 +195,7 @@ class BSDF {
     PBRT_CPU_GPU
     void Regularize() { bxdf.Regularize(); }
 
-  private:
-    // BSDF Private Members
+    // BSDF Members
     BxDF bxdf;
     Frame shadingFrame;
 };
