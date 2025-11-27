@@ -36,7 +36,7 @@ class LightSampler : public TaggedPointer<UniformLightSampler,
     // LightSampler Interface
     using TaggedPointer::TaggedPointer;
 
-    static LightSampler Create(const std::string &name, pstd::span<const Light> lights,
+    static LightSampler Create(const std::string &name, pstd::span<const Light> lights, bool discretizedLights,
                                Allocator alloc);
 
     std::string ToString() const;
