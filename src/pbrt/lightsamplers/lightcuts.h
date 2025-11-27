@@ -75,6 +75,10 @@ public:
     // LightcutsLightSampler Public Methods
     LightcutsLightSampler(pstd::span<const Light> lights, Allocator alloc, Float threshold = 0.02);
 
+    PBRT_CPU_GPU pstd::optional<SampledLight> Sample(const LightSampleContext& ctx, const BSDF* bsdf, Float u) const {
+        return Sample(ctx, u);
+    }
+
     PBRT_CPU_GPU pstd::optional<SampledLight> Sample(const LightSampleContext& ctx, Float u) const {
         const size_t totalSize = m_pointTree.lights.size() + m_spotTree.lights.size() + m_otherLights.size();
         Float pmf = 1;
@@ -100,6 +104,10 @@ public:
         int index = std::min<int>(u * m_otherLights.size(), m_otherLights.size() - 1);
         pmf /= m_otherLights.size();
         return SampledLight{m_otherLights[index], pmf};
+    }
+
+    PBRT_CPU_GPU Float PMF(const LightSampleContext& ctx, const BSDF* bsdf, Light light) const {
+        return PMF(ctx, light);
     }
 
     PBRT_CPU_GPU Float PMF(const LightSampleContext& ctx, Light light) const {
