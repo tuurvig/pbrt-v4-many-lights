@@ -100,7 +100,7 @@ inline PBRT_CPU_GPU void EnqueueWorkAfterIntersection(
         PBRT_DBG("Enqueuing into medium transition queue: pixel index %d \n",
                  r.pixelIndex);
         Ray newRay = intr.SpawnRay(r.ray.d);
-        nextRayQueue->PushIndirectRay(newRay, r.depth, r.prevIntrCtx, r.beta, r.r_u,
+        nextRayQueue->PushIndirectRay(newRay, r.depth, r.prevIntrCtx, BSDF(), r.beta, r.r_u,
                                       r.r_l, r.lambda, r.etaScale, r.specularBounce,
                                       r.anyNonSpecularBounces, r.pixelIndex);
         return;
@@ -112,7 +112,7 @@ inline PBRT_CPU_GPU void EnqueueWorkAfterIntersection(
         // TODO: intr.wo == -ray.d?
         hitAreaLightQueue->Push(HitAreaLightWorkItem{
             intr.areaLight, intr.p(), intr.n, intr.uv, intr.wo, r.lambda, r.depth, r.beta,
-            r.r_u, r.r_l, r.prevIntrCtx, (int)r.specularBounce, r.pixelIndex});
+            r.r_u, r.r_l, r.prevIntrCtx, r.prevBsdf, (int)r.specularBounce, r.pixelIndex});
     }
 
     FloatTexture displacement = material.GetDisplacement();
