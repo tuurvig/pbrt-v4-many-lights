@@ -61,11 +61,6 @@ class BVHLightSampler {
 
     PBRT_CPU_GPU
     pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* /*bsdf*/, Float u) const {
-        return Sample(ctx, u);
-    }
-
-    PBRT_CPU_GPU
-    pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, Float u) const {
         // Compute infinite light sampling probability _pInfinite_
         Float pInfinite = Float(m_infiniteLights.size()) /
                           Float(m_infiniteLights.size() + (m_nodes.empty() ? 0 : 1));
@@ -123,11 +118,6 @@ class BVHLightSampler {
 
     PBRT_CPU_GPU
     Float PMF(const LightSampleContext &ctx, const BSDF* /*bsdf*/, Light light) const {
-        return PMF(ctx, light);
-    }
-
-    PBRT_CPU_GPU
-    Float PMF(const LightSampleContext &ctx, Light light) const {
         // Handle infinite _light_ PMF computation
         if (!m_lightToBitTrail.HasKey(light))
             return 1.f / (m_infiniteLights.size() + (m_nodes.empty() ? 0 : 1));

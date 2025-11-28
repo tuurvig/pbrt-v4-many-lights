@@ -651,7 +651,7 @@ SampledSpectrum PathIntegrator::Li(RayDifferential ray, SampledWavelengths &lamb
                     L += beta * Le;
                 else {
                     // Compute MIS weight for infinite light
-                    Float p_l = lightSampler.PMF(prevIntrCtx, light) *
+                    Float p_l = lightSampler.PMF(prevIntrCtx, nullptr, light) *
                                 light.PDF_Li(prevIntrCtx, ray.d, true);
                     Float w_b = PowerHeuristic(1, p_b, 1, p_l);
 
@@ -1093,7 +1093,7 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, SampledWavelengths &l
                         L += beta * Le / r_u.Average();
                     else {
                         // Add infinite light contribution using both PDFs with MIS
-                        Float p_l = lightSampler.PMF(prevIntrContext, light) *
+                        Float p_l = lightSampler.PMF(prevIntrContext, nullptr, light) *
                                     light.PDF_Li(prevIntrContext, ray.d, true);
                         r_l *= p_l;
                         L += beta * Le / (r_u + r_l).Average();
@@ -2924,7 +2924,7 @@ void SPPMIntegrator::Render() {
                                 L += beta * Le;
                             else {
                                 // Compute MIS weight for infinite light
-                                Float p_l = lightSampler.PMF(prevIntrCtx, light) *
+                                Float p_l = lightSampler.PMF(prevIntrCtx, nullptr, light) *
                                             light.PDF_Li(prevIntrCtx, ray.d, true);
                                 Float w_b = PowerHeuristic(1, p_b, 1, p_l);
 

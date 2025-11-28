@@ -275,7 +275,7 @@ void WavefrontPathIntegrator::SampleMediumScattering(int wavefrontDepth) {
             // choose a light source.
             LightSampleContext ctx(Point3fi(w.p), Normal3f(0, 0, 0), Normal3f(0, 0, 0));
             pstd::optional<SampledLight> sampledLight =
-                lightSampler.Sample(ctx, raySamples.direct.uc);
+                lightSampler.Sample(ctx, nullptr, raySamples.direct.uc);
 
             if (sampledLight) {
                 Light light = sampledLight->light;
