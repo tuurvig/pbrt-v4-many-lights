@@ -29,8 +29,8 @@ std::string SampledLight::ToString() const {
                         light ? light.ToString().c_str() : "(nullptr)", p);
 }
 
-LightSampler LightSampler::Create(const std::string &name, pstd::span<const Light> lights, bool discretizedLights,
-                                  Allocator alloc) {
+LightSampler LightSampler::Create(const std::string &name, pstd::span<const Light> lights, 
+    bool discretizedLights, Allocator alloc) {
     if (name == "uniform")
         return alloc.new_object<UniformLightSampler>(lights, alloc);
     else if (name == "power")

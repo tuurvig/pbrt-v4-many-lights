@@ -349,7 +349,7 @@ TreeNodeBuildSuccess LightcutsLightSampler::buildLightTree(std::vector<LightBuil
     return {lb, successorIdx, static_cast<int>(nodeIndex)};
 }
 
-pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightSampleContext& ctx, const LightcutsTree& tree, Float pmf, Float u) const {
+pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightSampleContext& ctx, const LightcutsTree& tree, const BSDF* bsdf, Float pmf, Float u) const {
     int nodeIndex = 0;
     Point3f p = ctx.p();
     Normal3f n = ctx.ns;
@@ -361,7 +361,9 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
         const LightcutsTreeNode *children[2] = {&tree.nodes[nodeIndex + 1],
                                                 &tree.nodes[node->childOrLightIndex]};
         
-        Float errBounds[2] = {ComputeErrorBounds(children[0], tree.allLightBounds, p), ComputeErrorBounds(children[1], tree.allLightBounds, p)};
+        Float errBounds[2] = {ComputeErrorBounds(children[0], tree.allLightBounds, bsdf, p),
+                              ComputeErrorBounds(children[1], tree.allLightBounds, bsdf, p)};
+
         if (errBounds[0] == 0 && errBounds[1] == 0) {
             return {};
         }
