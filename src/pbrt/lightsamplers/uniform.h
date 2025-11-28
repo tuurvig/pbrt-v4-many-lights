@@ -29,20 +29,12 @@ public:
         return SampledLight{m_lights[lightIndex], 1.f / static_cast<float>(m_lights.size())};
     }
 
-    PBRT_CPU_GPU pstd::optional<SampledLight> Sample(const LightSampleContext & /*ctx*/, Float u) const {
-        return Sample(u);
-    }
-
     PBRT_CPU_GPU pstd::optional<SampledLight> Sample(const LightSampleContext & /*ctx*/, const BSDF* /*bsdf*/, Float u) const {
         return Sample(u);
     }
 
     PBRT_CPU_GPU Float PMF(Light light) const {
         return m_lights.empty() ? 0 : 1.f / m_lights.size();
-    }
-
-    PBRT_CPU_GPU Float PMF(const LightSampleContext & /*ctx*/, Light light) const { 
-        return PMF(light);
     }
 
     PBRT_CPU_GPU Float PMF(const LightSampleContext & /*ctx*/, const BSDF* /*bsdf*/, Light light) const { 

@@ -20,7 +20,7 @@ ExhaustiveLightSampler::ExhaustiveLightSampler(pstd::span<const Light> lights,
 }
 
 PBRT_CPU_GPU pstd::optional<SampledLight> ExhaustiveLightSampler::Sample(const LightSampleContext &ctx,
-                                                            Float u) const {
+                                                            const BSDF* /*bsdf*/, Float u) const {
     Float pInfinite = Float(infiniteLights.size()) /
                       Float(infiniteLights.size() + (!lightBounds.empty() ? 1 : 0));
 
@@ -47,7 +47,7 @@ PBRT_CPU_GPU pstd::optional<SampledLight> ExhaustiveLightSampler::Sample(const L
     }
 }
 
-PBRT_CPU_GPU Float ExhaustiveLightSampler::PMF(const LightSampleContext &ctx, Light light) const {
+PBRT_CPU_GPU Float ExhaustiveLightSampler::PMF(const LightSampleContext &ctx, const BSDF* /*bsdf*/, Light light) const {
     if (!lightToBoundedIndex.HasKey(light))
         return 1.f / (infiniteLights.size() + (!lightBounds.empty() ? 1 : 0));
 
