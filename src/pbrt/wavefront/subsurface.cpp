@@ -123,7 +123,7 @@ void WavefrontPathIntegrator::SampleSubsurface(int wavefrontDepth) {
                         // possible...
                         bool anyNonSpecularBounces = true;
 
-                        LightSampleContext ctx(intr.pi, intr.n, intr.ns);
+                        LightSampleContext ctx(intr.pi, intr.n, intr.ns, Vector3f(0, 0, 0));
                         nextRayQueue->PushIndirectRay(
                             ray, w.depth + 1, ctx, bsdf, beta, indir_r_u, r_l, lambda,
                             etaScale, bsdfSample->IsSpecular(), anyNonSpecularBounces,
@@ -148,7 +148,7 @@ void WavefrontPathIntegrator::SampleSubsurface(int wavefrontDepth) {
 
             // Direct lighting...
             if (IsNonSpecular(bsdf.Flags())) {
-                LightSampleContext ctx(intr.pi, intr.n, intr.ns);
+                LightSampleContext ctx(intr.pi, intr.n, intr.ns, Vector3f(0, 0, 0));
                 pstd::optional<SampledLight> sampledLight =
                     lightSampler.Sample(ctx, &bsdf, raySamples.direct.uc);
                 if (!sampledLight)

@@ -273,7 +273,7 @@ void WavefrontPathIntegrator::SampleMediumScattering(int wavefrontDepth) {
 
             // Sample direct lighting at medium scattering event.  First,
             // choose a light source.
-            LightSampleContext ctx(Point3fi(w.p), Normal3f(0, 0, 0), Normal3f(0, 0, 0));
+            LightSampleContext ctx(Point3fi(w.p), Normal3f(0, 0, 0), Normal3f(0, 0, 0), w.wo);
             pstd::optional<SampledLight> sampledLight =
                 lightSampler.Sample(ctx, nullptr, raySamples.direct.uc);
 
