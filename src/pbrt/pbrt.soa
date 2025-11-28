@@ -69,6 +69,7 @@ soa TabulatedBSSRDF {
 soa LightSampleContext {
     Point3fi pi;
     Normal3f n, ns;
+    Vector3f wo;
 };
 
 soa BSDF {

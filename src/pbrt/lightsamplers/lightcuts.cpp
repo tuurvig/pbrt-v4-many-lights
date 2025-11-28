@@ -352,8 +352,13 @@ TreeNodeBuildSuccess LightcutsLightSampler::buildLightTree(std::vector<LightBuil
 pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightSampleContext& ctx, const LightcutsTree& tree, const BSDF* bsdf, Float pmf, Float u) const {
     int nodeIndex = 0;
     Point3f p = ctx.p();
-    Normal3f n = ctx.ns;
+    Vector3f wo = ctx.wo;
     const LightcutsTreeNode* node = &tree.nodes[nodeIndex];
+
+    Float estL = 0;
+    Float estParent = 0;
+    Float estLeftL = 0;
+    Float estRightL = 0;
 
     Float treeDiagonal = LengthSquared(tree.allLightBounds.Diagonal());
     while (!node->isLeaf) {
@@ -361,8 +366,15 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
         const LightcutsTreeNode *children[2] = {&tree.nodes[nodeIndex + 1],
                                                 &tree.nodes[node->childOrLightIndex]};
         
-        Float errBounds[2] = {ComputeErrorBounds(children[0], tree.allLightBounds, bsdf, p),
-                              ComputeErrorBounds(children[1], tree.allLightBounds, bsdf, p)};
+        const Light childLights = {tree.lights[tree.nodes[children[0]->representantIdx]],
+                                   tree.lights[tree.nodes[children[1]->representantIdx]]};
+
+        // retreive light position
+        
+        // retreive light estimation
+        //Float childEstL[2] = {children[0]->compactLightBounds.Phi() * }
+        Float errBounds[2] = {ComputeErrorBounds(children[0], tree.allLightBounds, bsdf, p, wo),
+                              ComputeErrorBounds(children[1], tree.allLightBounds, bsdf, p, wo)};
 
         if (errBounds[0] == 0 && errBounds[1] == 0) {
             return {};

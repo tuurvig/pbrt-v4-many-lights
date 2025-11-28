@@ -252,7 +252,7 @@ private:
     pstd::optional<SampledLight> SampleInfiniteLight(size_t nLights, Float &pmf, Float &u) const;
 
     PBRT_CPU_GPU
-    static Float ComputeErrorBounds(const LightcutsTreeNode* node, const Bounds3f& sceneBounds, const BSDF* bsdf, Point3f point) {
+    static Float ComputeErrorBounds(const LightcutsTreeNode* node, const Bounds3f& sceneBounds, const BSDF* bsdf, Point3f point, Vector3f wo) {
         Bounds3f bounds = node->compactLightBounds.Bounds(sceneBounds);
 
         // Geometric term
@@ -264,7 +264,7 @@ private:
 
         if (bsdf) {
             // Material term, do not compute for invalid bsdfs
-            SampledSpectrum sp = bsdf->Max_f(Vector3f(), bounds, point);
+            SampledSpectrum sp = bsdf->Max_f(wo, bounds, point);
             errBounds *= sp.MaxComponentValue();
         }
 

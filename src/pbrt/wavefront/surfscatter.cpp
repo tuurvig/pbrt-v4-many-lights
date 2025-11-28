@@ -239,7 +239,7 @@ void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQue
                         bool anyNonSpecularBounces =
                             !bsdfSample->IsSpecular() || w.anyNonSpecularBounces;
                         // NOTE: slightly different than context below. Problem?
-                        LightSampleContext ctx(w.pi, w.n, ns);
+                        LightSampleContext ctx(w.pi, w.n, ns, w.wo);
                         nextRayQueue->PushIndirectRay(
                             ray, w.depth + 1, ctx, bsdf, beta, r_u, r_l, lambda,
                             etaScale, bsdfSample->IsSpecular(), anyNonSpecularBounces,
@@ -263,7 +263,7 @@ void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQue
             BxDFFlags flags = bsdf.Flags();
             if (IsNonSpecular(flags)) {
                 // Choose a light source using the _LightSampler_
-                LightSampleContext ctx(w.pi, w.n, ns);
+                LightSampleContext ctx(w.pi, w.n, ns, w.wo);
                 if (IsReflective(flags) && !IsTransmissive(flags))
                     ctx.pi = OffsetRayOrigin(ctx.pi, w.n, wo);
                 else if (IsTransmissive(flags) && IsReflective(flags))
