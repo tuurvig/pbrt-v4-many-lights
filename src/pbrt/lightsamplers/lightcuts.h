@@ -132,6 +132,7 @@ public:
         
         int nodeIndex = 0;
         Point3f p = ctx.p();
+        Vector3f wo = ctx.wo;
 
         const LightcutsTreeNode* node = &t.nodes[nodeIndex];
         uint32_t bitTrail = loc.identifier;
@@ -139,8 +140,8 @@ public:
             // Compute child error bounds and update PMF for current node
             const LightcutsTreeNode* child[2] = {&t.nodes[nodeIndex + 1], &t.nodes[node->childOrLightIndex]};
 
-            Float ci[2] = {ComputeErrorBounds(child[0], t.allLightBounds, bsdf, p),
-                           ComputeErrorBounds(child[1], t.allLightBounds, bsdf, p)};
+            Float ci[2] = {ComputeErrorBounds(child[0], t.allLightBounds, bsdf, p, wo),
+                           ComputeErrorBounds(child[1], t.allLightBounds, bsdf, p, wo)};
 
             DCHECK_GT(ci[bitTrail & 1], 0);
             pmf *= ci[bitTrail & 1] / (ci[0] + ci[1]);
@@ -250,7 +251,7 @@ private:
     pstd::optional<SampledLight> SampleInfiniteLight(size_t nLights, Float &pmf, Float &u) const;
 
     PBRT_CPU_GPU
-    static Float ComputeErrorBounds(const LightcutsTreeNode* node, const Bounds3f& sceneBounds, const BSDF* bsdf, Point3f point) {
+    static Float ComputeErrorBounds(const LightcutsTreeNode* node, const Bounds3f& sceneBounds, const BSDF* bsdf, Point3f point, Vector3f wo) {
         Bounds3f bounds = node->compactLightBounds.Bounds(sceneBounds);
         Float intensity = node->compactLightBounds.Phi();
 
@@ -263,7 +264,7 @@ private:
 
         if (bsdf) {
             // Material term, do not compute for invalid bsdfs
-            SampledSpectrum sp = bsdf->Max_f(Vector3f(), bounds, point);
+            SampledSpectrum sp = bsdf->Max_f(wo, bounds, point);
             errBounds *= sp.MaxComponentValue();
         }
 
