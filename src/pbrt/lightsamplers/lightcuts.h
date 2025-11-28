@@ -76,20 +76,19 @@ public:
     LightcutsLightSampler(pstd::span<const Light> lights, Allocator alloc, Float threshold = 0.02);
 
     PBRT_CPU_GPU pstd::optional<SampledLight> Sample(const LightSampleContext& ctx, const BSDF* bsdf, Float u) const {
-        return Sample(ctx, u);
-    }
-
-    PBRT_CPU_GPU pstd::optional<SampledLight> Sample(const LightSampleContext& ctx, Float u) const {
         const size_t totalSize = m_pointTree.lights.size() + m_spotTree.lights.size() + m_otherLights.size();
         Float pmf = 1;
-        {
+        if (!m_infiniteLights.empty()) {
             pstd::optional<SampledLight> infiniteLightSample = SampleInfiniteLight(totalSize, pmf, u);
             if (infiniteLightSample) {
                 return infiniteLightSample;
             }
         }
 
-        Float weights[3] = {m_spotTree.nodes[0].compactLightBounds.Phi(), m_pointTree.nodes[0].compactLightBounds.Phi(), m_otherLightsPower}; 
+        Float weights[3] = {
+            m_spotTree.lights.empty() ? 0 : m_spotTree.nodes[0].compactLightBounds.Phi(),
+            m_pointTree.lights.empty() ? 0 : m_pointTree.nodes[0].compactLightBounds.Phi(),
+            m_otherLightsPower}; 
 
         Float groupPMF;
         int groupIdx = SampleDiscrete(weights, u, &groupPMF, &u);
@@ -107,10 +106,6 @@ public:
     }
 
     PBRT_CPU_GPU Float PMF(const LightSampleContext& ctx, const BSDF* bsdf, Light light) const {
-        return PMF(ctx, light);
-    }
-
-    PBRT_CPU_GPU Float PMF(const LightSampleContext& ctx, Light light) const {
         const size_t totalSize = m_pointTree.lights.size() + m_spotTree.lights.size() + m_otherLights.size();
         LightLocation loc = m_lightToLocation[light];
 

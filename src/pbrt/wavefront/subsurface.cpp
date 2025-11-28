@@ -150,7 +150,7 @@ void WavefrontPathIntegrator::SampleSubsurface(int wavefrontDepth) {
             if (IsNonSpecular(bsdf.Flags())) {
                 LightSampleContext ctx(intr.pi, intr.n, intr.ns);
                 pstd::optional<SampledLight> sampledLight =
-                    lightSampler.Sample(ctx, raySamples.direct.uc);
+                    lightSampler.Sample(ctx, &bsdf, raySamples.direct.uc);
                 if (!sampledLight)
                     return;
                 Light light = sampledLight->light;

@@ -34,11 +34,6 @@ class PowerLightSampler {
     }
 
     PBRT_CPU_GPU
-    pstd::optional<SampledLight> Sample(const LightSampleContext &/*ctx*/, Float u) const {
-        return Sample(u);
-    }
-
-    PBRT_CPU_GPU
     pstd::optional<SampledLight> Sample(const LightSampleContext &/*ctx*/, const BSDF* /*bsdf*/, Float u) const {
         return Sample(u);
     }
@@ -51,9 +46,6 @@ class PowerLightSampler {
 
         return m_aliasTable.PMF(m_lightToIndex[light]);
     }
-
-    PBRT_CPU_GPU
-    Float PMF(const LightSampleContext &/*ctx*/, Light light) const { return PMF(light); }
 
     PBRT_CPU_GPU
     Float PMF(const LightSampleContext &/*ctx*/, const BSDF* /*bsdf*/, Light light) const { return PMF(light); }

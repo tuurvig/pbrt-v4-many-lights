@@ -41,11 +41,6 @@ class LightSampler : public TaggedPointer<UniformLightSampler,
 
     std::string ToString() const;
 
-    PBRT_CPU_GPU inline pstd::optional<SampledLight> Sample(const LightSampleContext &ctx,
-                                                            Float u) const;
-
-    PBRT_CPU_GPU inline Float PMF(const LightSampleContext &ctx, Light light) const;
-
     PBRT_CPU_GPU inline pstd::optional<SampledLight> Sample(Float u) const;
     PBRT_CPU_GPU inline Float PMF(Light light) const;
 
