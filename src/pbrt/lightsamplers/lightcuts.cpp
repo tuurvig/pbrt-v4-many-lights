@@ -374,8 +374,8 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
         
         // retreive light estimation
         //Float childEstL[2] = {children[0]->compactLightBounds.Phi() * }
-        Float errBounds[2] = {ComputeErrorBounds(children[0], tree.allLightBounds, bsdf, p, wo),
-                              ComputeErrorBounds(children[1], tree.allLightBounds, bsdf, p, wo)};
+        Float errBounds[2] = {ComputeErrorBounds(children[0], !tree.isPoint, tree.allLightBounds, bsdf, p, wo),
+                              ComputeErrorBounds(children[1], !tree.isPoint, tree.allLightBounds, bsdf, p, wo)};
 
         if (errBounds[0] == 0 && errBounds[1] == 0) {
             return {};
