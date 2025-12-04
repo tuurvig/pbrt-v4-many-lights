@@ -140,8 +140,8 @@ public:
             // Compute child error bounds and update PMF for current node
             const LightcutsTreeNode* child[2] = {&t.nodes[nodeIndex + 1], &t.nodes[node->childOrLightIndex]};
 
-            Float ci[2] = {ComputeErrorBounds(child[0], t.allLightBounds, bsdf, p, wo),
-                           ComputeErrorBounds(child[1], t.allLightBounds, bsdf, p, wo)};
+            Float ci[2] = {ComputeErrorBounds(child[0], !t.isPoint, t.allLightBounds, bsdf, p, wo),
+                           ComputeErrorBounds(child[1], !t.isPoint, t.allLightBounds, bsdf, p, wo)};
 
             DCHECK_GT(ci[bitTrail & 1], 0);
             pmf *= ci[bitTrail & 1] / (ci[0] + ci[1]);
@@ -251,27 +251,41 @@ private:
     pstd::optional<SampledLight> SampleInfiniteLight(size_t nLights, Float &pmf, Float &u) const;
 
     PBRT_CPU_GPU
-    static Float ComputeErrorBounds(const LightcutsTreeNode* node, const Bounds3f& sceneBounds, const BSDF* bsdf, Point3f point, Vector3f wo) {
+    static Float ComputeErrorBounds(const LightcutsTreeNode* node, bool isOriented, const Bounds3f& sceneBounds, const BSDF* bsdf, Point3f point, Vector3f wo) {
+        // 1. Setup
         Bounds3f bounds = node->compactLightBounds.Bounds(sceneBounds);
-        Float intensity = node->compactLightBounds.Phi();
+        Vector3f w = node->compactLightBounds.W();
+        Float phi = node->compactLightBounds.Phi();
+        //DirectionCone wi = BoundSubtendedDirections(bounds, point);
+        bool isInside = Inside(point, bounds);
 
-        // Geometric term
+        // 2. Visibility term has trivial upper bound equal to 1
+
+        // 3. Geometric term (G)
+        // Calculate minimum squared distance to the bounding box
         Float minDistSqr = DistanceSquared(point, bounds);
         Float diagLengthSqr = LengthSquared(bounds.Diagonal());
         
+        // Prevent division by zero if point is inside or on the bounds
+        Float G = 1.0f / std::max(minDistSqr, 1e-4f);
+
+        if (isOriented && !isInside) {
+            Float cosTheta_o = node->compactLightBounds.CosTheta_o();
+            Float maxCosEmission = BoundEmissionCosine(bounds, w, cosTheta_o, point);
+        }
+
         // Light intensity 
-        Float errBounds = node->compactLightBounds.Phi();
+        Float errBounds = phi;
+
+        if (minDistSqr > diagLengthSqr){
+            errBounds /= minDistSqr;
+        }
 
         if (bsdf) {
             // Material term, do not compute for invalid bsdfs
             SampledSpectrum sp = bsdf->Max_f(wo, bounds, point);
             errBounds *= sp.MaxComponentValue();
         }
-
-        if (minDistSqr > diagLengthSqr){
-            errBounds /= minDistSqr;
-        }
-
         return errBounds;
     }
 
