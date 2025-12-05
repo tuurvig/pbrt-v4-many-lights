@@ -97,7 +97,7 @@ TEST(BVHLightSampling, Point) {
             EXPECT_GT(sampledLight->p, 0);
             sumWt[lightToIndex[sampledLight->light]] += 1 / (sampledLight->p * nSamples);
 
-            EXPECT_FLOAT_EQ(sampledLight->p, distrib.PMF(intr, sampledLight->light));
+            EXPECT_FLOAT_EQ(sampledLight->p, distrib.PMF(intr, sampledLight->light).pmf);
         }
 
         for (int i = 0; i < lights.size(); ++i) {
@@ -149,7 +149,7 @@ TEST(BVHLightSampling, PointVaryPower) {
             EXPECT_GT(pdf, 0);
             sumWt[lightToIndex[light]] += 1 / (pdf * nSamples);
 
-            EXPECT_LT(std::abs(distrib.PMF(intr, light) - pdf) / pdf, 1e-4);
+            EXPECT_LT(std::abs(distrib.PMF(intr, light).pmf - pdf) / pdf, 1e-4);
         }
 
         for (int i = 0; i < lights.size(); ++i) {
@@ -180,7 +180,7 @@ TEST(BVHLightSampling, PointVaryPower) {
             EXPECT_GT(pdf, 0);
             ++counts[lightToIndex[light]];
 
-            EXPECT_FLOAT_EQ(pdf, distrib.PMF(intr, light));
+            EXPECT_FLOAT_EQ(pdf, distrib.PMF(intr, light).pmf);
         }
 
         for (int i = 0; i < lights.size(); ++i) {
@@ -291,7 +291,7 @@ TEST(BVHLightSampling, PdfMethod) {
             // It's actually legit to sometimes get no lights; as the bounds
             // tighten up as we get deeper in the tree, it may turn out that
             // the path we followed didn't have any lights after all.
-            EXPECT_FLOAT_EQ(sampledLight->p, distrib.PMF(intr, sampledLight->light));
+            EXPECT_FLOAT_EQ(sampledLight->p, distrib.PMF(intr, sampledLight->light).pmf);
     }
 }
 
@@ -310,7 +310,7 @@ TEST(ExhaustiveLightSampling, PdfMethod) {
         pstd::optional<SampledLight> sampledLight =
             distrib.Sample(intr, rng.Uniform<Float>());
         ASSERT_TRUE((bool)sampledLight) << i << " - " << p;
-        EXPECT_FLOAT_EQ(sampledLight->p, distrib.PMF(intr, sampledLight->light));
+        EXPECT_FLOAT_EQ(sampledLight->p, distrib.PMF(intr, sampledLight->light).pmf);
     }
 }
 
@@ -329,7 +329,7 @@ TEST(UniformLightSampling, PdfMethod) {
         pstd::optional<SampledLight> sampledLight =
             distrib.Sample(intr, rng.Uniform<Float>());
         ASSERT_TRUE((bool)sampledLight) << i << " - " << p;
-        EXPECT_FLOAT_EQ(sampledLight->p, distrib.PMF(intr, sampledLight->light));
+        EXPECT_FLOAT_EQ(sampledLight->p, distrib.PMF(intr, sampledLight->light).pmf);
     }
 }
 
@@ -348,6 +348,6 @@ TEST(PowerLightSampling, PdfMethod) {
         pstd::optional<SampledLight> sampledLight =
             distrib.Sample(intr, rng.Uniform<Float>());
         ASSERT_TRUE((bool)sampledLight) << i << " - " << p;
-        EXPECT_FLOAT_EQ(sampledLight->p, distrib.PMF(intr, sampledLight->light));
+        EXPECT_FLOAT_EQ(sampledLight->p, distrib.PMF(intr, sampledLight->light).pmf);
     }
 }

@@ -279,6 +279,9 @@ void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQue
                     light.SampleLi(ctx, raySamples.direct.u, lambda, true);
                 if (!ls || !ls->L || ls->pdf == 0)
                     return;
+
+                ls->L *= sampledLight->scale;
+
                 Vector3f wi = ls->wi;
                 SampledSpectrum f = bsdf.f<ConcreteBxDF>(wo, wi);
                 if (!f)

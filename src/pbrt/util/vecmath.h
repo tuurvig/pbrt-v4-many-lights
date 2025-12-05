@@ -1998,6 +1998,44 @@ PBRT_CPU_GPU inline Frame::Frame(Vector3f x, Vector3f y, Vector3f z) : x(x), y(y
     DCHECK_LT(std::abs(Dot(z, x)), 1e-4);
 }
 
+PBRT_CPU_GPU
+inline Float BoundMaxCosine(Point3f p, bool isReflective, bool isTransmissive, const Frame& localFrame, const Bounds3f& bounds) {
+    Bounds3f localBounds;
+    for (int i = 0; i < 8; ++i) {
+        Point3f corner = bounds.Corner(i);
+        Vector3f v = corner - p;
+
+        Point3f localP = Point3f(localFrame.ToLocal(v));
+        localBounds = Union(localBounds, localP);
+    }
+
+    Float maxCos = 0.f;
+    if (isReflective && localBounds.pMax.z > 0) {
+        Float z = localBounds.pMax.z;
+
+        Float minX = (localBounds.pMin.x < 0 && localBounds.pMax.x > 0) ? 0.f :
+                     std::min(std::abs(localBounds.pMin.x), std::abs(localBounds.pMax.x));
+        Float minY = (localBounds.pMin.y < 0 && localBounds.pMax.y > 0) ? 0.f :
+                     std::min(std::abs(localBounds.pMin.y), std::abs(localBounds.pMax.y));
+
+        Float distSqr = minX * minX + minY * minY + z * z;
+        maxCos = std::max(maxCos, z / std::sqrt(distSqr));
+    }
+
+    if (isTransmissive && localBounds.pMin.z < 0) {
+        Float z = std::abs(localBounds.pMin.z);
+        Float minX = (localBounds.pMin.x < 0 && localBounds.pMax.x > 0) ? 0.f :
+                     std::min(std::abs(localBounds.pMin.x), std::abs(localBounds.pMax.x));
+        Float minY = (localBounds.pMin.y < 0 && localBounds.pMax.y > 0) ? 0.f :
+                     std::min(std::abs(localBounds.pMin.y), std::abs(localBounds.pMax.y));
+
+        Float distSqr = minX * minX + minY * minY + z * z;
+        maxCos = std::max(maxCos, z / std::sqrt(distSqr));
+    }
+
+    return maxCos;
+}
+
 }  // namespace pbrt
 
 #endif  // PBRT_UTIL_VECMATH_H

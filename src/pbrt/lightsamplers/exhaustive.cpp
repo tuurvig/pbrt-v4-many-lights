@@ -47,7 +47,7 @@ PBRT_CPU_GPU pstd::optional<SampledLight> ExhaustiveLightSampler::Sample(const L
     }
 }
 
-PBRT_CPU_GPU Float ExhaustiveLightSampler::PMF(const LightSampleContext &ctx, const BSDF* /*bsdf*/, Light light) const {
+PBRT_CPU_GPU LightPMF ExhaustiveLightSampler::PMF(const LightSampleContext &ctx, const BSDF* /*bsdf*/, Light light) const {
     if (!lightToBoundedIndex.HasKey(light))
         return 1.f / (infiniteLights.size() + (!lightBounds.empty() ? 1 : 0));
 
