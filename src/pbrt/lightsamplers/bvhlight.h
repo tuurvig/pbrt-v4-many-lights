@@ -109,7 +109,7 @@ class BVHLightSampler {
                         DCHECK_GT(node.lightBounds.Importance(p, n, m_allLightBounds), 0);
                     if (nodeIndex > 0 ||
                         node.lightBounds.Importance(p, n, m_allLightBounds) > 0)
-                        return SampledLight{m_lights[node.childOrLightIndex], pmf};
+                        return SampledLight(m_lights[node.childOrLightIndex], pmf);
                     return {};
                 }
             }
@@ -117,7 +117,7 @@ class BVHLightSampler {
     }
 
     PBRT_CPU_GPU
-    Float PMF(const LightSampleContext &ctx, const BSDF* /*bsdf*/, Light light) const {
+    LightPMF PMF(const LightSampleContext &ctx, const BSDF* /*bsdf*/, Light light) const {
         // Handle infinite _light_ PMF computation
         if (!m_lightToBitTrail.HasKey(light))
             return 1.f / (m_infiniteLights.size() + (m_nodes.empty() ? 0 : 1));
@@ -163,7 +163,7 @@ class BVHLightSampler {
     }
 
     PBRT_CPU_GPU
-    Float PMF(Light light) const {
+    LightPMF PMF(Light light) const {
         if (m_lights.empty())
             return 0;
         return 1.f / m_lights.size();

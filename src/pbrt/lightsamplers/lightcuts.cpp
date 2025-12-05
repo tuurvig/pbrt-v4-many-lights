@@ -356,12 +356,15 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
     Vector3f wo = ctx.wo;
     const LightcutsTreeNode* node = &tree.nodes[nodeIndex];
 
+    BxDFFlags bsdfFlags = BxDFFlags::All;
+    if (bsdf) {
+        bsdfFlags = bsdf->Flags();
+    }
+
     Float estL = 0;
     Float estParent = 0;
-    Float estLeftL = 0;
-    Float estRightL = 0;
+    Float clusterEst[2] = {};
 
-    Float treeDiagonal = LengthSquared(tree.allLightBounds.Diagonal());
     while (!node->isLeaf) {
         int childrenIndices[2] = {nodeIndex + 1, node->childOrLightIndex};
         const LightcutsTreeNode *children[2] = {&tree.nodes[nodeIndex + 1],
@@ -370,16 +373,21 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
         const LightcutsTreeNode *representants[2] = {&tree.nodes[children[0]->representantIdx],
                                                      &tree.nodes[children[1]->representantIdx]};
 
-        // retreive light position
-        
-        // retreive light estimation
-        //Float childEstL[2] = {children[0]->compactLightBounds.Phi() * }
-        Float errBounds[2] = {ComputeErrorBounds(children[0], !tree.isPoint, tree.allLightBounds, bsdf, p, wo),
-                              ComputeErrorBounds(children[1], !tree.isPoint, tree.allLightBounds, bsdf, p, wo)};
+        const Float nodeIntensities[2] = {children[0]->compactLightBounds.Phi(),
+                                          children[1]->compactLightBounds.Phi()};
+        const Float clusterEst[2] = {
+            ComputeClusterEstimate(bsdf, bsdfFlags, representants[0]->compactLightBounds.Bound(tree.allLightBounds, false), p, wo, nodeIntensities[0]),
+            ComputeClusterEstimate(bsdf, bsdfFlags, representants[1]->compactLightBounds.Bound(tree.allLightBounds, false), p, wo, nodeIntensities[1])
+        };
+
+        Float errBounds[2] = {ComputeErrorBounds(children[0], !tree.isPoint, tree.allLightBounds, bsdf, bsdfFlags, p, wo),
+                              ComputeErrorBounds(children[1], !tree.isPoint, tree.allLightBounds, bsdf, bsdfFlags, p, wo)};
 
         if (errBounds[0] == 0 && errBounds[1] == 0) {
             return {};
         }
+
+        estL = estL - estParent + clusterEst[0] + clusterEst[1];
 
         // Randomly sample a children node
         Float nodePMF;
@@ -387,14 +395,16 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
         pmf *= nodePMF;
         nodeIndex = (child == 0) ? (nodeIndex + 1) : node->childOrLightIndex;
         node = &tree.nodes[nodeIndex];
+        estParent = clusterEst[child];
 
-        if (errBounds[child] < m_threshold) {
-            int representantLightIndex = tree.nodes[node->representantIdx].childOrLightIndex;
-            return SampledLight{tree.lights[representantLightIndex], pmf};
+        if (errBounds[child] < m_threshold * estL) {
+            int representantLightIndex = representants[child]->childOrLightIndex;
+            Float repIntensity = representants[child]->compactLightBounds.Phi();
+            return SampledLight(tree.lights[representantLightIndex], pmf, nodeIntensities[child] / repIntensity);
         }
     }
 
-    return SampledLight{tree.lights[node->childOrLightIndex], pmf};
+    return SampledLight(tree.lights[node->childOrLightIndex], pmf);
 }
 
 pstd::optional<SampledLight> LightcutsLightSampler::SampleInfiniteLight(size_t nLights, Float &pmf, Float &u) const {

@@ -651,7 +651,8 @@ SampledSpectrum PathIntegrator::Li(RayDifferential ray, SampledWavelengths &lamb
                     L += beta * Le;
                 else {
                     // Compute MIS weight for infinite light
-                    Float p_l = lightSampler.PMF(prevIntrCtx, nullptr, light) *
+                    LightPMF l_pmf = lightSampler.PMF(prevIntrCtx, nullptr, light);
+                    Float p_l = l_pmf.pmf *
                                 light.PDF_Li(prevIntrCtx, ray.d, true);
                     Float w_b = PowerHeuristic(1, p_b, 1, p_l);
 
@@ -669,7 +670,9 @@ SampledSpectrum PathIntegrator::Li(RayDifferential ray, SampledWavelengths &lamb
             else {
                 // Compute MIS weight for area light
                 Light areaLight(si->intr.areaLight);
-                Float p_l = lightSampler.PMF(prevIntrCtx, bsdfPrev, areaLight) *
+                LightPMF l_pmf = lightSampler.PMF(prevIntrCtx, bsdfPrev, areaLight);
+                Le *= l_pmf.scale;
+                Float p_l = l_pmf.pmf *
                             areaLight.PDF_Li(prevIntrCtx, ray.d, true);
                 Float w_l = PowerHeuristic(1, p_b, 1, p_l);
 
@@ -790,6 +793,8 @@ SampledSpectrum PathIntegrator::SampleLd(const SurfaceInteraction &intr, const B
     pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
     if (!ls || !ls->L || ls->pdf == 0)
         return {};
+
+    ls->L *= sampledLight->scale;
 
     // Evaluate BSDF for light sample and check light visibility
     Vector3f wo = intr.wo, wi = ls->wi;
@@ -1093,7 +1098,8 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, SampledWavelengths &l
                         L += beta * Le / r_u.Average();
                     else {
                         // Add infinite light contribution using both PDFs with MIS
-                        Float p_l = lightSampler.PMF(prevIntrContext, nullptr, light) *
+                        LightPMF l_pmf = lightSampler.PMF(prevIntrContext, bsdfPrev, light);
+                        Float p_l = l_pmf.pmf *
                                     light.PDF_Li(prevIntrContext, ray.d, true);
                         r_l *= p_l;
                         L += beta * Le / (r_u + r_l).Average();
@@ -1113,7 +1119,9 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, SampledWavelengths &l
             else {
                 // Add surface light contribution using both PDFs with MIS
                 Light areaLight(isect.areaLight);
-                Float p_l = lightSampler.PMF(prevIntrContext, bsdfPrev, areaLight) *
+                LightPMF l_pmf = lightSampler.PMF(prevIntrContext, bsdfPrev, areaLight);
+                Le *= l_pmf.scale;
+                Float p_l = l_pmf.pmf *
                             areaLight.PDF_Li(prevIntrContext, ray.d, true);
                 r_l *= p_l;
                 L += beta * Le / (r_u + r_l).Average();
@@ -1317,6 +1325,7 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, const BSDF 
     if (!ls || !ls->L || ls->pdf == 0)
         return SampledSpectrum(0.f);
     Float p_l = sampledLight->p * ls->pdf;
+    ls->L *= sampledLight->scale;
 
     // Evaluate BSDF or phase function for light sample direction
     Float scatterPDF;
@@ -1840,7 +1849,7 @@ struct Vertex {
         } else {
             // Return sampling density for noninfinite light source
             Light light = (type == VertexType::Light) ? ei.light : si.areaLight;
-            Float pdfPos, pdfDir, pdfChoice = lightSampler.PMF(light);
+            Float pdfPos, pdfDir, pdfChoice = lightSampler.PMF(light).pmf;
             if (IsOnSurface())
                 light.PDF_Le(ei, w, &pdfPos, &pdfDir);
             else
@@ -2224,7 +2233,7 @@ Float InfiniteLightDensity(const std::vector<Light> &infiniteLights,
                            LightSampler lightSampler, Vector3f w) {
     Float pdf = 0;
     for (const auto &light : infiniteLights)
-        pdf += light.PDF_Li(Interaction(), -w) * lightSampler.PMF(light);
+        pdf += light.PDF_Li(Interaction(), -w) * lightSampler.PMF(light).pmf;
     return pdf;
 }
 
@@ -2924,7 +2933,8 @@ void SPPMIntegrator::Render() {
                                 L += beta * Le;
                             else {
                                 // Compute MIS weight for infinite light
-                                Float p_l = lightSampler.PMF(prevIntrCtx, nullptr, light) *
+                                LightPMF l_pmf = lightSampler.PMF(prevIntrCtx, nullptr, light);
+                                Float p_l = l_pmf.pmf *
                                             light.PDF_Li(prevIntrCtx, ray.d, true);
                                 Float w_b = PowerHeuristic(1, p_b, 1, p_l);
 
@@ -2958,7 +2968,9 @@ void SPPMIntegrator::Render() {
                         else {
                             // Compute MIS weight for area light
                             Light areaLight(si->intr.areaLight);
-                            Float p_l = lightSampler.PMF(prevIntrCtx, bsdfPrevPtr, areaLight) *
+                            LightPMF l_pmf = lightSampler.PMF(prevIntrCtx, bsdfPrevPtr, areaLight);
+                            Le *= l_pmf.scale;
+                            Float p_l = l_pmf.pmf *
                                         areaLight.PDF_Li(prevIntrCtx, ray.d, true);
                             Float w_l = PowerHeuristic(1, p_b, 1, p_l);
 
@@ -3321,6 +3333,8 @@ SampledSpectrum SPPMIntegrator::SampleLd(const SurfaceInteraction &intr, const B
     pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
     if (!ls || !ls->L || ls->pdf == 0)
         return {};
+
+    ls->L *= sampledLight->scale;
 
     // Evaluate BSDF for light sample and check light visibility
     Vector3f wo = intr.wo, wi = ls->wi;

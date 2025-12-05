@@ -220,21 +220,29 @@ class CompactLightBounds {
     PBRT_CPU_GPU
     bool TwoSided() const { return twoSided; }
     PBRT_CPU_GPU
-    Float CosTheta_o() const { return 2 * (qCosTheta_o / 32767.f) - 1; }
+    Float CosTheta_o() const {
+        constexpr Float OneOverRange = static_cast<Float>(1.0 / 32767.0);
+        return 2 * (qCosTheta_o * OneOverRange) - 1;
+    }
     PBRT_CPU_GPU
-    Float CosTheta_e() const { return 2 * (qCosTheta_e / 32767.f) - 1; }
+    Float CosTheta_e() const {
+        constexpr Float OneOverRange = static_cast<Float>(1.0 / 32767.0);
+        return 2 * (qCosTheta_e * OneOverRange) - 1;
+    }
+
+    PBRT_CPU_GPU
+    Point3f Bound(const Bounds3f& allb, bool max) const {
+        constexpr Float OneOverRange = static_cast<Float>(1.0 / 65535.0);
+        return Point3f(Lerp(qb[max][0] * OneOverRange, allb.pMin.x, allb.pMax.x),
+                       Lerp(qb[max][1] * OneOverRange, allb.pMin.y, allb.pMax.y),
+                       Lerp(qb[max][2] * OneOverRange, allb.pMin.z, allb.pMax.z));
+    }
 
     PBRT_CPU_GPU
     Bounds3f Bounds(const Bounds3f &allb) const {
-        return {Point3f(Lerp(qb[0][0] / 65535.f, allb.pMin.x, allb.pMax.x),
-                        Lerp(qb[0][1] / 65535.f, allb.pMin.y, allb.pMax.y),
-                        Lerp(qb[0][2] / 65535.f, allb.pMin.z, allb.pMax.z)),
-                Point3f(Lerp(qb[1][0] / 65535.f, allb.pMin.x, allb.pMax.x),
-                        Lerp(qb[1][1] / 65535.f, allb.pMin.y, allb.pMax.y),
-                        Lerp(qb[1][2] / 65535.f, allb.pMin.z, allb.pMax.z))};
+        return {Bound(allb, false), Bound(allb, true)};
     }
 
-    
     PBRT_CPU_GPU
     LightBounds Dequantize(const Bounds3f& allb) const {
         return LightBounds(Bounds(allb), Vector3f(w), Phi(), CosTheta_o(), CosTheta_e(), twoSided);
@@ -329,7 +337,6 @@ class CompactLightBounds {
 
 PBRT_CPU_GPU
 inline Float BoundEmissionCosine(const Bounds3f& bounds, Vector3f w, Float halfAngle, Point3f point) {
-    Vector3f localX, localY;
     Frame localFrame = Frame::FromZ(w);
     Bounds3f localBounds;
     for (int i = 0; i < 8; ++i) {

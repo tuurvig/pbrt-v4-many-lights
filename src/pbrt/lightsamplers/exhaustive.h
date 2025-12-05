@@ -26,7 +26,7 @@ class ExhaustiveLightSampler {
     pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, Float u) const;
 
     PBRT_CPU_GPU
-    Float PMF(const LightSampleContext &ctx, const BSDF* bsdf, Light light) const;
+    LightPMF PMF(const LightSampleContext &ctx, const BSDF* bsdf, Light light) const;
 
     PBRT_CPU_GPU
     pstd::optional<SampledLight> Sample(Float u) const {
@@ -38,7 +38,7 @@ class ExhaustiveLightSampler {
     }
 
     PBRT_CPU_GPU
-    Float PMF(Light light) const {
+    LightPMF PMF(Light light) const {
         if (lights.empty())
             return 0;
         return 1.f / lights.size();
