@@ -52,7 +52,7 @@ struct LightTreeBuildState {
 };
 
 template <typename MortonInt, typename CostEvaluator>
-__global__ void LightTreeBuilderGPUHplocOuterLoop(LightTreeBuildState state, MortonInt* dMortonCodes);
+__global__ void LightTreeBuilderGPUHplocOuterLoop(LightTreeBuildState state, MortonInt* dMortonCodes, CostEvaluator evaluator);
 
 // Thin RAII wrapper that owns the device buffers required to build the light
 // tree and provides a convenience entry point to launch the kernel.
@@ -67,7 +67,7 @@ class LightTreeBuilderGPU {
     void Allocate(uint32_t nLights, const Bounds3f &bounds);
     void Release();
 
-    void BuildNodes(const char *description = "Build Nodes");
+    void BuildNodes(CostEvaluator evaluator, const char *description = "Build Nodes");
 
     LightTreeBuildState &State() { return m_state; }
     const LightTreeBuildState &State() const { return m_state; }
@@ -190,10 +190,10 @@ static PBRT_GPU_INLINE uint32_t DecodeRelativeOffset(uint32_t idx, uint32_t offs
 
 template <typename CostEvaluator>
 PBRT_GPU uint32_t FindNearestNeighbor(uint32_t nLights, uint32_t clusterIdx,
-    uint8_t laneWarpIdx, LightTreeConstructionNodeGPU* dNodes) {
+    uint8_t laneWarpIdx, LightTreeConstructionNodeGPU* dNodes, CostEvaluator evaluator) {
 
     // Templated functor to evaluate cost
-    CostEvaluator costEvaluator;
+    //CostEvaluator costEvaluator;
     
     // Each lane keeps track of the bounds of its current cluster and scans
     // progressively wider radii to find the cheapest merge partner.
@@ -218,7 +218,7 @@ PBRT_GPU uint32_t FindNearestNeighbor(uint32_t nLights, uint32_t clusterIdx,
             LightBounds neighborBounds = dNodes[neighborClusterIdx].bounds;
             neighborBounds = Union(neighborBounds, clusterBounds);
 
-            float newCost = costEvaluator(neighborBounds);
+            float newCost = evaluator(neighborBounds);
             uint32_t newCostInt = __float_as_uint(newCost);
 
             uint32_t encode0 = EncodeRelativeOffset(laneWarpIdx, neighborIdx);
@@ -251,11 +251,8 @@ PBRT_GPU uint32_t FindNearestNeighbor(uint32_t nLights, uint32_t clusterIdx,
 
 // Performs the actual merge between mutually nearest neighbors and compacts
 // the active cluster list for the next PlocMerge round.
-template <typename CostEvaluator>
 PBRT_GPU uint32_t MergeClusters(uint32_t nLights, uint32_t &clusterIdx, uint8_t laneWarpIdx,
-    uint32_t* nMergedClustersPtr, LightTreeConstructionNodeGPU* dNodes) {
-
-    uint32_t nearestNeighborIdx = FindNearestNeighbor<CostEvaluator>(nLights, clusterIdx, laneWarpIdx, dNodes);
+    uint32_t nearestNeighborIdx, uint32_t* nMergedClustersPtr, LightTreeConstructionNodeGPU* dNodes) {
 
     uint32_t neighborNNIdx = __shfl_sync(kFullMask, nearestNeighborIdx, nearestNeighborIdx);
     uint32_t neighborClusterIdx = __shfl_sync(kFullMask, clusterIdx, nearestNeighborIdx);
@@ -303,12 +300,13 @@ PBRT_GPU uint32_t MergeClusters(uint32_t nLights, uint32_t &clusterIdx, uint8_t 
 // the segment reaches the requested threshold (usually kHalfWarp).
 template <typename CostEvaluator>
 PBRT_GPU void PlocMerge(uint32_t start, uint32_t nLeft, uint32_t nRight, uint32_t threshold,
-    uint32_t clusterIdx, uint8_t laneWarpIdx, const LightTreeBuildState &state) {
+    uint32_t clusterIdx, uint8_t laneWarpIdx, const LightTreeBuildState &state, CostEvaluator evaluator) {
     uint32_t nLightsInCurrentStep = nLeft + nRight;
     uint32_t nLightsToProcess = nLightsInCurrentStep;
 
     while (nLightsToProcess > threshold) {
-        nLightsToProcess = MergeClusters<CostEvaluator>(nLightsToProcess, clusterIdx, laneWarpIdx,
+        uint32_t nearestNeighborIdx = FindNearestNeighbor<CostEvaluator>(nLightsToProcess, clusterIdx, laneWarpIdx, state.dNodes, evaluator);
+        nLightsToProcess = MergeClusters(nLightsToProcess, clusterIdx, laneWarpIdx, nearestNeighborIdx,
                            state.nMergedClusters, state.dNodes);
     }
 
@@ -333,7 +331,7 @@ PBRT_GPU_INLINE bool LoadIndex(uint32_t &clusterIdx, uint32_t start, uint32_t en
 }
 
 template <typename MortonInt, typename CostEvaluator>
-__global__ void LightTreeBuilderGPUHplocOuterLoop(LightTreeBuildState state, MortonInt* dMortonCodes) {
+__global__ void LightTreeBuilderGPUHplocOuterLoop(LightTreeBuildState state, MortonInt* dMortonCodes, CostEvaluator evaluator) {
     uint32_t memStart = blockIdx.x * blockDim.x;
     uint32_t tid = memStart + threadIdx.x;
 
@@ -391,7 +389,7 @@ __global__ void LightTreeBuilderGPUHplocOuterLoop(LightTreeBuildState state, Mor
             bool isRightValidIndex = LoadIndex(idx, startR, endR, nLeftClusters, state.dClusterIndices, laneWarpId);
             uint32_t nRightClusters = __popc(__ballot_sync(kFullMask, isRightValidIndex && idx != kInvalidIndex));
 
-            PlocMerge<CostEvaluator>(startL, nLeftClusters, nRightClusters, threshold, idx, laneWarpId, state);
+            PlocMerge<CostEvaluator>(startL, nLeftClusters, nRightClusters, threshold, idx, laneWarpId, state, evaluator);
 
             warpMask = warpMask & (warpMask - 1);
         }
@@ -399,7 +397,7 @@ __global__ void LightTreeBuilderGPUHplocOuterLoop(LightTreeBuildState state, Mor
 }
 
 template <typename MortonInt, typename CostEvaluator>
-void LightTreeBuilderGPU<MortonInt, CostEvaluator>::BuildNodes(const char *description) {
+void LightTreeBuilderGPU<MortonInt, CostEvaluator>::BuildNodes(CostEvaluator evaluator, const char *description) {
     if (m_state.nLights == 0)
         return;
 
@@ -416,7 +414,7 @@ void LightTreeBuilderGPU<MortonInt, CostEvaluator>::BuildNodes(const char *descr
     {
         KernelTimerWrapper timer(GetProfilerEvents(description, ProfilerKernelGroup::HPLOC));
         int gridSize = (m_state.nLights + blockSize - 1) / blockSize;
-        kernel<<<gridSize, blockSize>>>(m_state, m_mortonCodes);
+        kernel<<<gridSize, blockSize>>>(m_state, m_mortonCodes, evaluator);
     }
 
 #ifdef PBRT_DEBUG_BUILD
