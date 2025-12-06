@@ -11,6 +11,7 @@
 #include <pbrt/base/light.h>
 #include <pbrt/base/lightsampler.h>
 #include <pbrt/lights.h>
+#include <pbrt/bsdf.h>
 
 #include <pbrt/util/pstd.h>
 #include <pbrt/util/math.h>
@@ -95,9 +96,9 @@ public:
         pmf *= groupPMF;
 
         if (groupIdx == 0) {
-            return SampleLightTree(ctx, m_spotTree, pmf, u);
+            return SampleLightTree(ctx, m_spotTree, bsdf, pmf, u);
         } else if (groupIdx == 1) {
-            return SampleLightTree(ctx, m_pointTree, pmf, u);
+            return SampleLightTree(ctx, m_pointTree, bsdf, pmf, u);
         }
 
         int index = std::min<int>(u * m_otherLights.size(), m_otherLights.size() - 1);
@@ -138,8 +139,8 @@ public:
             // Compute child error bounds and update PMF for current node
             const LightcutsTreeNode* child[2] = {&t.nodes[nodeIndex + 1], &t.nodes[node->childOrLightIndex]};
 
-            Float ci[2] = {ComputeErrorBounds(child[0], t.allLightBounds, p),
-                           ComputeErrorBounds(child[1], t.allLightBounds, p)};
+            Float ci[2] = {ComputeErrorBounds(child[0], t.allLightBounds, bsdf, p),
+                           ComputeErrorBounds(child[1], t.allLightBounds, bsdf, p)};
 
             DCHECK_GT(ci[bitTrail & 1], 0);
             pmf *= ci[bitTrail & 1] / (ci[0] + ci[1]);
@@ -243,12 +244,13 @@ private:
     bool buildLightTreeGPU(std::vector<LightBuildContainer> &lights, LightcutsTree& tree, HashMap<Light, LightLocation>& lightToLocation, float& u);
 #endif
     PBRT_CPU_GPU
-    pstd::optional<SampledLight> SampleLightTree(const LightSampleContext& ctx, const LightcutsTree& tree, Float pmf, Float u) const;
+    pstd::optional<SampledLight> SampleLightTree(const LightSampleContext& ctx, const LightcutsTree& tree, const BSDF* bsdf, Float pmf, Float u) const;
+
     PBRT_CPU_GPU
     pstd::optional<SampledLight> SampleInfiniteLight(size_t nLights, Float &pmf, Float &u) const;
 
     PBRT_CPU_GPU
-    static Float ComputeErrorBounds(const LightcutsTreeNode* node, const Bounds3f& sceneBounds, Point3f point) {
+    static Float ComputeErrorBounds(const LightcutsTreeNode* node, const Bounds3f& sceneBounds, const BSDF* bsdf, Point3f point) {
         Bounds3f bounds = node->compactLightBounds.Bounds(sceneBounds);
         Float intensity = node->compactLightBounds.Phi();
 
@@ -256,7 +258,14 @@ private:
         Float minDistSqr = DistanceSquared(point, bounds);
         Float diagLengthSqr = LengthSquared(bounds.Diagonal());
         
-        Float errBounds = intensity;
+        // Light intensity 
+        Float errBounds = node->compactLightBounds.Phi();
+
+        if (bsdf) {
+            // Material term, do not compute for invalid bsdfs
+            SampledSpectrum sp = bsdf->Max_f(Vector3f(), bounds, point);
+            errBounds *= sp.MaxComponentValue();
+        }
 
         if (minDistSqr > diagLengthSqr){
             errBounds /= minDistSqr;
