@@ -35,7 +35,7 @@ class BVHLightTreeBuilder final : public LightTreeBuilderGPU<uint64_t, LightBVHC
 
         Allocate(static_cast<uint32_t>(lights.size()), m_allLightBounds);
         MortonCodes() = UploadSortedLeaves(State(), MortonCodes(), lights);
-        BuildNodes();
+        BuildNodes(LightBVHCostEvaluator());
         return true;
     }
 
