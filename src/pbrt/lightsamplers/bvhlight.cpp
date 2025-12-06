@@ -56,20 +56,6 @@ class BVHLightTreeBuilder final : public LightTreeBuilderGPU<uint64_t, LightBVHC
         FlattenNode(lights, hostNodes, rootIndex, 0, 0, nodes, bitTrailContainer);
     }
 
-    static std::array<uint8_t, 3> DetermineAxisOrder(const Bounds3f &bounds) {
-        std::array<uint8_t, 3> axis{uint8_t(0), uint8_t(1), uint8_t(2)};
-        Vector3f diagonal = bounds.Diagonal();
-
-        if (diagonal[axis[0]] < diagonal[axis[1]])
-            std::swap(axis[0], axis[1]);
-        if (diagonal[axis[1]] < diagonal[axis[2]])
-            std::swap(axis[1], axis[2]);
-        if (diagonal[axis[0]] < diagonal[axis[1]])
-            std::swap(axis[0], axis[1]);
-
-        return axis;
-    }
-
     static uint64_t* UploadSortedLeaves(LightTreeBuildState& buildState, uint64_t* dMortonCodes, const std::vector<LightBVHBuildContainer> &lights) {
         LightTreeBuildState localState = buildState;
         std::array<uint8_t, 3> ax = DetermineAxisOrder(localState.allLightBounds);

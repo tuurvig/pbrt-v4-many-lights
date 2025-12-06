@@ -150,7 +150,7 @@ void LightTreeBuilderGPU<MortonInt, CostEvaluator>::Release() {
 // Compares two Morton codes and returns the bit position of their highest
 // differing bit (spatial split level).
 template <typename MortonInt>
-static PBRT_GPU_INLINE uint64_t MortonCodeDelta(int32_t L, int32_t R, const uint64_t *mortonCodes) {
+static PBRT_GPU_INLINE uint64_t MortonCodeDelta(int32_t L, int32_t R, const MortonInt *mortonCodes) {
     MortonInt splitLevel = mortonCodes[L] ^ mortonCodes[R];
     if (splitLevel == 0) {
         // Fake split is used for duplicate Morton codes so the
@@ -165,7 +165,7 @@ static PBRT_GPU_INLINE uint64_t MortonCodeDelta(int32_t L, int32_t R, const uint
 // merged next (i.e. which side becomes the parent).
 template <typename MortonInt>
 static PBRT_GPU_INLINE uint32_t FindParentIdx(int32_t L, int32_t R, int32_t N,
-                                              const uint64_t *mortonCodes) {
+                                              const MortonInt* mortonCodes) {
     if (L == 0 ||
        (R != N && MortonCodeDelta<MortonInt>(L - 1, L, mortonCodes) >
                   MortonCodeDelta<MortonInt>(R, R + 1, mortonCodes))) {
@@ -251,7 +251,7 @@ PBRT_GPU uint32_t FindNearestNeighbor(uint32_t nLights, uint32_t clusterIdx,
 
 // Performs the actual merge between mutually nearest neighbors and compacts
 // the active cluster list for the next PlocMerge round.
-PBRT_GPU uint32_t MergeClusters(uint32_t nLights, uint32_t &clusterIdx, uint8_t laneWarpIdx,
+PBRT_GPU_INLINE uint32_t MergeClusters(uint32_t nLights, uint32_t &clusterIdx, uint8_t laneWarpIdx,
     uint32_t nearestNeighborIdx, uint32_t* nMergedClustersPtr, LightTreeConstructionNodeGPU* dNodes) {
 
     uint32_t neighborNNIdx = __shfl_sync(kFullMask, nearestNeighborIdx, nearestNeighborIdx);

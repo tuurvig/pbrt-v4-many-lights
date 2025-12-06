@@ -54,6 +54,20 @@ struct LightcutsTree {
     bool isPoint;
 };
 
+struct LightBuildContainer{
+    LightBuildContainer(const LightBounds& bounds, const Light& light) 
+        : bounds(bounds), light(light) {}
+    LightBounds bounds;
+    Light light;
+    uint32_t index;
+};
+
+struct TreeNodeBuildSuccess {
+    LightBounds bounds;
+    int representantIdx;
+    int nodeIdx;
+};
+
 // LightcutsLightSampler Definition
 class LightcutsLightSampler {
     
@@ -203,28 +217,8 @@ public:
 
     std::string ToString() const;
 
-private:
-    struct LightBuildContainer{
-        LightBuildContainer(const LightBounds& bounds, const Light& light) 
-            : bounds(bounds), light(light) {}
-        LightBounds bounds;
-        Light light;
-    };
-
-    struct TreeNodeBuildSuccess {
-        LightBounds bounds;
-        int representantIdx;
-        int nodeIdx;
-    };
-    
-    // LightcutsLightSampler Private Methods
-    TreeNodeBuildSuccess buildLightTree(std::vector<LightBuildContainer>& lightcutsLights, LightcutsTree& tree, int start, int end, uint32_t bitTrail, int depth, float& u);
-
-    pstd::optional<SampledLight> SampleLightTree(const LightSampleContext& ctx, const LightcutsTree& tree, Float pmf, Float u) const;
-
-    pstd::optional<SampledLight> SampleInfiniteLight(size_t nLights, Float &pmf, Float &u) const;
-
     // Similarity Metric
+    PBRT_CPU_GPU
     static Float EvaluateCost(const LightBounds& bounds, Float sceneDiagonalSqr, bool isPointLight) {
         const Float diagonalLengthSqr = LengthSquared(bounds.bounds.Diagonal());
 
@@ -238,7 +232,19 @@ private:
 
         return bounds.phi * similarity;
     }
+private:
+    // LightcutsLightSampler Private Methods
+    TreeNodeBuildSuccess buildLightTree(std::vector<LightBuildContainer>& lightcutsLights, LightcutsTree& tree, int start, int end, uint32_t bitTrail, int depth, float& u);
 
+#ifdef PBRT_BUILD_GPU_RENDERER
+    bool buildLightTreeGPU(std::vector<LightBuildContainer> &lights, LightcutsTree& tree, HashMap<Light, LightLocation>& lightToLocation, float& u);
+#endif
+    PBRT_CPU_GPU
+    pstd::optional<SampledLight> SampleLightTree(const LightSampleContext& ctx, const LightcutsTree& tree, Float pmf, Float u) const;
+    PBRT_CPU_GPU
+    pstd::optional<SampledLight> SampleInfiniteLight(size_t nLights, Float &pmf, Float &u) const;
+
+    PBRT_CPU_GPU
     static Float ComputeErrorBounds(const LightcutsTreeNode* node, const Bounds3f& sceneBounds, Point3f point) {
         Bounds3f bounds = node->compactLightBounds.Bounds(sceneBounds);
         Float intensity = node->compactLightBounds.Phi();
