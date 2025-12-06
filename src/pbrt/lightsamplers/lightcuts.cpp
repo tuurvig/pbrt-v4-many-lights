@@ -3,7 +3,166 @@
 #include <pbrt/util/stats.h>
 #include <pbrt/util/vecmath.h>
 
+#ifdef PBRT_BUILD_GPU_RENDERER
+#include <pbrt/gpu/lighttreebuilder.h>
+#include <pbrt/util/math.h>
+#include <pbrt/util/pstd.h>
+
+#include <algorithm>
+#include <array>
+
+#include <cub/device/device_radix_sort.cuh>
+#endif //PBRT_BUILD_GPU_RENDERER
+
 namespace pbrt{
+#ifdef PBRT_BUILD_GPU_RENDERER
+
+struct LightcutsTreeNodeCostEvaluator {
+    PBRT_CPU_GPU
+    LightcutsTreeNodeCostEvaluator(Bounds3f bounds, bool isPoint) :
+        sceneBoundsDiagonalSqr(LengthSquared(bounds.Diagonal())),
+        isPoint(isPoint) {}
+
+    PBRT_CPU_GPU Float operator()(const LightBounds &bounds) const {
+        return LightcutsLightSampler::EvaluateCost(bounds, sceneBoundsDiagonalSqr, isPoint);
+    }
+
+    Float sceneBoundsDiagonalSqr;
+    bool isPoint;
+};
+
+class LightcutsTreeBuilderGPU final : public LightTreeBuilderGPU<uint32_t, LightcutsTreeNodeCostEvaluator> {
+  public:
+    explicit LightcutsTreeBuilderGPU(const Bounds3f &bounds, bool isPoint) : m_allLightBounds(bounds), m_isPoint(isPoint) {}
+
+    bool Build(std::vector<LightBuildContainer> &lights) {
+        if (lights.empty())
+            return false;
+
+        Allocate(static_cast<uint32_t>(lights.size()), m_allLightBounds);
+        MortonCodes() = GetSortedMortonCodes(State(), MortonCodes(), lights);
+        BuildNodes(LightcutsTreeNodeCostEvaluator(m_allLightBounds, m_isPoint));
+        return true;
+    }
+
+    void FlattenTree(LightcutsTree& tree, std::vector<LightBuildContainer> &lights, HashMap<Light, LightLocation>& bitTrailContainer, float& u) {
+        const LightTreeBuildState &state(State());
+        if (state.nLights == 0)
+            return;
+
+        uint32_t nNodes = 0;
+        uint32_t rootIndex = 0;
+        GPUCopyToHost(&nNodes, state.nMergedClusters, 1);
+        GPUCopyToHost(&rootIndex, state.dClusterIndices, 1);
+        std::vector<LightTreeConstructionNodeGPU> hostNodes(nNodes);
+        GPUCopyToHost(hostNodes.data(), state.dNodes, nNodes);
+
+        tree.nodes.reserve(nNodes);
+
+        uint32_t rootRepresentant = 0;
+        FlattenNode(tree, lights, hostNodes, bitTrailContainer, rootIndex, 0, 0, rootRepresentant, u);
+    }
+
+    static uint32_t* GetSortedMortonCodes(LightTreeBuildState& buildState, uint32_t* dMortonCodes, const std::vector<LightBuildContainer>& lights) {
+        LightTreeBuildState localState = buildState;
+        std::array<uint8_t, 3> ax = DetermineAxisOrder(localState.allLightBounds);
+
+        LightBuildContainer* dLightsContainer = GPUAllocAsync<LightBuildContainer>(buildState.nLights);
+        GPUCopyToDevice(dLightsContainer, lights.data(), lights.size());
+
+        GPUParallelFor("Assign Morton Codes", ProfilerKernelGroup::HPLOC, localState.nLights, [=] PBRT_GPU(int idx) {
+            LightBuildContainer cont = dLightsContainer[idx];
+            LightTreeConstructionNodeGPU leaf{cont.bounds, kInvalidIndex, idx};
+            Point3f centroid = cont.bounds.Centroid();
+            Vector3f offset = buildState.allLightBounds.Offset(centroid);
+
+            Point3f position = {offset[ax[0]], offset[ax[1]], offset[ax[2]]};
+
+            Float x = QuantizeUnitToBitRange(position.x, 10);
+            Float y = QuantizeUnitToBitRange(position.y, 10);
+            Float z = QuantizeUnitToBitRange(position.z, 10);
+
+            dMortonCodes[idx] = EncodeMorton3(x, y, z);
+            localState.dClusterIndices[idx] = idx;
+            localState.dNodes[idx] = leaf;
+        });
+
+        GPUFreeAsync(dLightsContainer);
+        dLightsContainer = nullptr;
+
+        uint32_t *dMortonCodesSorted = GPUAllocAsync<uint32_t>(localState.nLights);
+        uint32_t *dClusterIndicesSorted = GPUAllocAsync<uint32_t>(localState.nLights);
+
+        void *dTempStorage = nullptr;
+        size_t tempStorageBytes = 0;
+        uint32_t beginBit = 1, endBit = 32;
+
+        const char *description = "Radix Sort Morton keys";
+        {
+            KernelTimerWrapper timer(GetProfilerEvents(description, ProfilerKernelGroup::HPLOC));
+            cub::DeviceRadixSort::SortPairs(dTempStorage, tempStorageBytes, dMortonCodes,
+                dMortonCodesSorted, localState.dClusterIndices, dClusterIndicesSorted,
+                localState.nLights, beginBit, endBit);
+
+            dTempStorage = GPUAllocAsync<uint8_t>(tempStorageBytes);
+
+            cub::DeviceRadixSort::SortPairs(dTempStorage, tempStorageBytes, dMortonCodes,
+                dMortonCodesSorted, localState.dClusterIndices, dClusterIndicesSorted,
+                localState.nLights, beginBit, endBit);
+        }
+
+        GPUFreeAsync(dTempStorage);
+        GPUFreeAsync(dMortonCodes);
+        GPUFreeAsync(buildState.dClusterIndices);
+
+        buildState.dClusterIndices = dClusterIndicesSorted;
+
+        return dMortonCodesSorted;
+    }
+
+  private:
+    uint32_t FlattenNode(LightcutsTree& tree, const std::vector<LightBuildContainer> &lights, const std::vector<LightTreeConstructionNodeGPU>& gpuNodes,
+         HashMap<Light, LightLocation>& bitTrailContainer, uint32_t nodeIdx, uint32_t bitTrail, uint32_t depth, uint32_t& representantIdx, float& u) const {
+
+         const LightTreeConstructionNodeGPU &gpuNode = gpuNodes[nodeIdx];
+         CompactLightBounds cb(gpuNode.bounds, m_allLightBounds);
+
+         const bool isLeaf = gpuNode.left == kInvalidIndex;
+         if (isLeaf) {
+             int flatLeafIndex = tree.nodes.size();
+             int lightIndex = tree.lights.size();
+             representantIdx = lightIndex;
+             tree.lights.push_back(lights[gpuNode.right].light);
+             tree.nodes.push_back(LightcutsTreeNode::MakeLeaf(lightIndex, representantIdx, cb));
+             bitTrailContainer.Insert(tree.lights[lightIndex], {tree.isPoint, bitTrail});
+             return flatLeafIndex;
+         }
+
+         // Allocate interior and recursively initialize children
+         size_t flatNodeIndex = tree.nodes.size();
+         tree.nodes.emplace_back();
+         CHECK_LT(depth, 32);
+         uint32_t representantLeftIdx = 0, representantRightIdx = 0;
+         uint32_t child0 = FlattenNode(tree, lights, gpuNodes, bitTrailContainer, gpuNode.left, bitTrail, depth + 1, representantLeftIdx, u);
+         DCHECK_EQ(flatNodeIndex + 1, child0);
+         uint32_t child1 = FlattenNode(tree, lights, gpuNodes, bitTrailContainer, gpuNode.right, bitTrail | (1u << depth), depth + 1, representantRightIdx, u);
+         
+         Float intensities[2] = {gpuNode.bounds.phi, gpuNode.bounds.phi};
+         Float nodePMF;
+         int child = SampleDiscrete(intensities, u, &nodePMF, &u);
+         representantIdx = (child == 0) ? representantLeftIdx : representantRightIdx;
+         
+         tree.nodes[flatNodeIndex] = LightcutsTreeNode::MakeInterior(child1, representantIdx, cb);
+         return flatNodeIndex;
+    }
+
+private:
+    Bounds3f m_allLightBounds;
+    bool m_isPoint;
+};
+
+#endif  // PBRT_BUILD_GPU_RENDERER
+
 ///////////////////////////////////////////////////////////////////////////
 // LightcutsLightSampler
 
@@ -50,12 +209,20 @@ LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, All
 
     RNG rng;
     Float u = rng.Uniform<Float>();
-    if (!m_pointTree.lights.empty()) {
-        buildLightTree(pointLights, m_pointTree, 0, pointLights.size(), 0, 0, u);
+    if (!pointLights.empty()) {
+#ifdef PBRT_BUILD_GPU_RENDERER
+        bool buildOnGPU = buildLightTreeGPU(pointLights, m_pointTree, m_lightToLocation, u);
+        if (!buildOnGPU)
+#endif
+            buildLightTree(pointLights, m_pointTree, 0, pointLights.size(), 0, 0, u);
     }
 
-    if (!m_spotTree.lights.empty()) {
-        buildLightTree(spotLights, m_spotTree, 0, spotLights.size(), 0, 0, u);
+    if (!spotLights.empty()) {
+#ifdef PBRT_BUILD_GPU_RENDERER
+        bool buildOnGPU = buildLightTreeGPU(spotLights, m_spotTree, m_lightToLocation, u);
+        if (!buildOnGPU)
+#endif
+            buildLightTree(spotLights, m_spotTree, 0, spotLights.size(), 0, 0, u);
     }
 
     lightCutsLightTreeBytes += (m_pointTree.lights.size() + m_spotTree.lights.size() + m_otherLights.size() + m_infiniteLights.size()) * sizeof(Light) + 
@@ -63,8 +230,8 @@ LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, All
                                m_lightToLocation.capacity() * (sizeof(Light) + sizeof(LightLocation));
 }
 
-LightcutsLightSampler::TreeNodeBuildSuccess LightcutsLightSampler::buildLightTree(
-    std::vector<LightBuildContainer>& lightcutsLights, LightcutsTree& tree, int start, int end, uint32_t bitTrail, int depth, float& u) {
+TreeNodeBuildSuccess LightcutsLightSampler::buildLightTree(std::vector<LightBuildContainer>& lightcutsLights,
+    LightcutsTree& tree, int start, int end, uint32_t bitTrail, int depth, float& u) {
     DCHECK_LT(start, end);
 
     if (end - start == 1) {
@@ -182,6 +349,7 @@ LightcutsLightSampler::TreeNodeBuildSuccess LightcutsLightSampler::buildLightTre
     return {lb, successorIdx, static_cast<int>(nodeIndex)};
 }
 
+PBRT_CPU_GPU
 pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightSampleContext& ctx, const LightcutsTree& tree, Float pmf, Float u) const {
     int nodeIndex = 0;
     Point3f p = ctx.p();
@@ -234,6 +402,20 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleInfiniteLight(size_t n
 
     return {};
 }
+
+#ifdef PBRT_BUILD_GPU_RENDERER
+bool LightcutsLightSampler::buildLightTreeGPU(std::vector<LightBuildContainer> &lights, LightcutsTree& tree, HashMap<Light, LightLocation>& lightToLocation, float& u) {
+    if (lights.size() < 100)
+        return false;
+
+    LightcutsTreeBuilderGPU builder(tree.allLightBounds, tree.isPoint);
+    if (!builder.Build(lights))
+        return false;
+
+    builder.FlattenTree(tree, lights, m_lightToLocation, u);
+    return true;
+}
+#endif
 
 std::string LightcutsLightSampler::ToString() const {
     return StringPrintf("[ LightcutsLightSampler point tree nodes: %s spot tree nodes: %s ]", m_pointTree.nodes, m_spotTree.nodes);
