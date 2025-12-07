@@ -537,6 +537,8 @@ void WavefrontPathIntegrator::HandleEscapedRays() {
 }
 
 void WavefrontPathIntegrator::HandleEmissiveIntersection() {
+    const bool discretizedAreaLights = Options->discretizeAreaLights > 0;
+
     ForAllQueued(
         "Handle emitters hit by indirect rays", ProfilerKernelGroup::WAVEFRONT,
         hitAreaLightQueue, maxQueueSize, PBRT_CPU_GPU_LAMBDA(const HitAreaLightWorkItem w) {
@@ -549,7 +551,7 @@ void WavefrontPathIntegrator::HandleEmissiveIntersection() {
 
             // Compute area light's weighted radiance contribution to the path
             SampledSpectrum L(0.f);
-            if (w.depth == 0 || w.specularBounce) {
+            if (discretizedAreaLights || w.depth == 0 || w.specularBounce) {
                 L = w.beta * Le / w.r_u.Average();
             } else {
                 // Compute MIS-weighted radiance contribution from area light

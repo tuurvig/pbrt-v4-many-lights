@@ -131,9 +131,9 @@ class LightcutsTreeBuilderGPU final : public LightTreeBuilderGPU<uint32_t, Light
          if (isLeaf) {
              int flatLeafIndex = tree.nodes.size();
              int lightIndex = tree.lights.size();
-             representantIdx = lightIndex;
+             representantIdx = flatLeafIndex;
              tree.lights.push_back(lights[gpuNode.right].light);
-             tree.nodes.push_back(LightcutsTreeNode::MakeLeaf(lightIndex, representantIdx, cb));
+             tree.nodes.push_back(LightcutsTreeNode::MakeLeaf(lightIndex, flatLeafIndex, cb));
              bitTrailContainer.Insert(tree.lights[lightIndex], {tree.isPoint, bitTrail});
              return flatLeafIndex;
          }
@@ -147,7 +147,8 @@ class LightcutsTreeBuilderGPU final : public LightTreeBuilderGPU<uint32_t, Light
          DCHECK_EQ(flatNodeIndex + 1, child0);
          uint32_t child1 = FlattenNode(tree, lights, gpuNodes, bitTrailContainer, gpuNode.right, bitTrail | (1u << depth), depth + 1, representantRightIdx, u);
          
-         Float intensities[2] = {gpuNode.bounds.phi, gpuNode.bounds.phi};
+         Float intensities[2] = {tree.nodes[child0].compactLightBounds.Phi(),
+                                 tree.nodes[child1].compactLightBounds.Phi()};
          Float nodePMF;
          int child = SampleDiscrete(intensities, u, &nodePMF, &u);
          representantIdx = (child == 0) ? representantLeftIdx : representantRightIdx;
@@ -174,8 +175,9 @@ constexpr uint32_t otherLightsIndex = 3;
 LightcutsTree::LightcutsTree(bool isPoint, Allocator alloc) 
     : lights(alloc), nodes(alloc), isPoint(isPoint) {}
 
-LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, Allocator alloc, Float threshold) 
-    : m_pointTree(true, alloc), m_spotTree(false, alloc), m_otherLights(alloc), m_lightToLocation(alloc), m_threshold(threshold) {
+LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, Allocator alloc, Float threshold) :
+    m_pointTree(true, alloc), m_spotTree(false, alloc), m_otherLights(alloc), m_infiniteLights(alloc),
+    m_lightToLocation(alloc), m_otherLightsPower(0), m_threshold(threshold) {
     
     // Initialize infiniteLights array and lightcuts lights
     std::vector<LightBuildContainer> pointLights, spotLights;
@@ -283,14 +285,8 @@ TreeNodeBuildSuccess LightcutsLightSampler::buildLightTree(std::vector<LightBuil
         rightBoundsSum[nBuckets - 1] = bucketLightBounds[nBuckets - 1];
 
         for (int lower = 1, upper = nBuckets - 2; lower < nBuckets; ++lower, --upper) {
-            LightBounds& leftBoundsPrefix(leftBoundsSum[lower]);
-            LightBounds& rightBoundsPrefix(rightBoundsSum[upper]);
-
-            const LightBounds& prevLeftBoundsPrefix(leftBoundsSum[lower - 1]);
-            const LightBounds& prevRightBoundsPrefix(rightBoundsSum[upper + 1]);
-
-            leftBoundsPrefix = Union(leftBoundsPrefix, prevLeftBoundsPrefix);
-            rightBoundsPrefix = Union(rightBoundsPrefix, prevRightBoundsPrefix);
+            leftBoundsSum[lower] = Union(bucketLightBounds[lower], leftBoundsSum[lower - 1]);
+            rightBoundsSum[upper] = Union(bucketLightBounds[upper], rightBoundsSum[upper + 1]);
         }
 
         Float diagonalLenSqr = LengthSquared(tree.allLightBounds.Diagonal());
@@ -429,7 +425,7 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleInfiniteLight(size_t n
 
 #ifdef PBRT_BUILD_GPU_RENDERER
 bool LightcutsLightSampler::buildLightTreeGPU(std::vector<LightBuildContainer> &lights, LightcutsTree& tree, HashMap<Light, LightLocation>& lightToLocation, float& u) {
-    if (lights.size() < 100)
+    if (lights.size() < 100 || !Options->useGPU)
         return false;
 
     LightcutsTreeBuilderGPU builder(tree.allLightBounds, tree.isPoint);

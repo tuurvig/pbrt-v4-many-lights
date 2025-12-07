@@ -638,6 +638,8 @@ SampledSpectrum PathIntegrator::Li(RayDifferential ray, SampledWavelengths &lamb
     BSDF bsdf;
     BSDF* bsdfPrev = nullptr;
 
+    const bool discretizedAreaLights = Options->discretizeAreaLights > 0;
+
     // Sample path from camera and accumulate radiance estimate
     while (true) {
         // Trace ray and find closest path vertex and its BSDF
@@ -665,7 +667,7 @@ SampledSpectrum PathIntegrator::Li(RayDifferential ray, SampledWavelengths &lamb
         // Incorporate emission from surface hit by ray
         SampledSpectrum Le = si->intr.Le(-ray.d, lambda);
         if (Le) {
-            if (depth == 0 || specularBounce)
+            if (discretizedAreaLights || depth == 0 || specularBounce)
                 L += beta * Le;
             else {
                 // Compute MIS weight for area light
@@ -972,6 +974,8 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, SampledWavelengths &l
     BSDF bsdf;
     BSDF* bsdfPrev = nullptr;
 
+    const bool discretizedAreaLights = Options->discretizeAreaLights > 0;
+
     while (true) {
         // Sample segment of volumetric scattering path
         PBRT_DBG("%s\n", StringPrintf("Path tracer depth %d, current L = %s, beta = %s\n",
@@ -1114,7 +1118,7 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, SampledWavelengths &l
 
         if (SampledSpectrum Le = isect.Le(-ray.d, lambda); Le) {
             // Add contribution of emission from intersected surface
-            if (depth == 0 || specularBounce)
+            if (discretizedAreaLights || depth == 0 || specularBounce)
                 L += beta * Le / r_u.Average();
             else {
                 // Add surface light contribution using both PDFs with MIS
@@ -2865,6 +2869,8 @@ void SPPMIntegrator::Render() {
     pstd::vector<DigitPermutation> *digitPermutations(
         ComputeRadicalInversePermutations(digitPermutationsSeed));
 
+    const bool discretizedAreaLights = Options->discretizeAreaLights > 0;
+
     for (int iter = 0; iter < nIterations; ++iter) {
         // Connect to display server for SPPM if requested
         if (iter == 0 && !Options->displayServer.empty()) {
@@ -2963,7 +2969,7 @@ void SPPMIntegrator::Render() {
                     // Incorporate emission from surface hit by ray
                     SampledSpectrum Le = si->intr.Le(-ray.d, lambda);
                     if (Le) {
-                        if (depth == 0 || specularBounce)
+                        if (discretizedAreaLights || depth == 0 || specularBounce)
                             L += beta * Le;
                         else {
                             // Compute MIS weight for area light

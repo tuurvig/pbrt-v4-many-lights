@@ -870,11 +870,19 @@ class vector {
 
     PBRT_CPU_GPU
     reference operator[](size_type index) {
+        size_type s = size();
+        if (index >= s) {
+            DCHECK_LT(index, size());
+        }
         DCHECK_LT(index, size());
         return ptr[index];
     }
     PBRT_CPU_GPU
     const_reference operator[](size_type index) const {
+        size_type s = size();
+        if (index >= s) {
+            DCHECK_LT(index, size());
+        }
         DCHECK_LT(index, size());
         return ptr[index];
     }

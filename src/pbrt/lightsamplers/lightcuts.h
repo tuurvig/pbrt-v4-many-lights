@@ -108,6 +108,11 @@ public:
 
     PBRT_CPU_GPU LightPMF PMF(const LightSampleContext& ctx, const BSDF* bsdf, Light light) const {
         const size_t totalSize = m_pointTree.lights.size() + m_spotTree.lights.size() + m_otherLights.size();
+
+        // Handle infinite _light_ PMF computation
+        if (!m_lightToLocation.HasKey(light))
+            return 1.f / (m_infiniteLights.size() + (totalSize == 0 ? 0 : 1));
+
         LightLocation loc = m_lightToLocation[light];
 
         // Compute infinite light sampling probability _pInfinite_
