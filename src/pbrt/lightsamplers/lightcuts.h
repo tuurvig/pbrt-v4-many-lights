@@ -132,64 +132,66 @@ public:
             return pmf / m_otherLights.size();
         }
 
-        const LightcutsTree& t(loc.treeIdx == 1 ? m_pointTree : m_spotTree);
-        pmf *= weights[loc.treeIdx] / sumWeights;
-        
-        int nodeIndex = 0;
-        Point3f p = ctx.p();
-        Vector3f wo = ctx.wo;
+        return 0;
 
-        BxDFFlags bsdfFlags = BxDFFlags::All;
-        if (bsdf) {
-            bsdfFlags = bsdf->Flags();
-        }
-
-        Float estL = 0;
-        Float estParentL = 0;
-
-        const LightcutsTreeNode* node = &t.nodes[nodeIndex];
-        uint32_t bitTrail = loc.identifier;
-        while (!node->isLeaf) {
-            // Compute child error bounds and update PMF for current node
-            const LightcutsTreeNode* children[2] = {&t.nodes[nodeIndex + 1], &t.nodes[node->childOrLightIndex]};
-
-            const LightcutsTreeNode *representants[2] = {&t.nodes[children[0]->representantIdx],
-                                                           &t.nodes[children[1]->representantIdx]};
-
-            const Float nodeIntensities[2] = {children[0]->compactLightBounds.Phi(),
-                                              children[1]->compactLightBounds.Phi()};
-            const Float clusterEst[2] = {
-                ComputeClusterEstimate(bsdf, bsdfFlags, representants[0]->compactLightBounds.Bound(t.allLightBounds, false), p, wo, nodeIntensities[0]),
-                ComputeClusterEstimate(bsdf, bsdfFlags, representants[1]->compactLightBounds.Bound(t.allLightBounds, false), p, wo, nodeIntensities[1])
-            };
-
-            Float errorBounds[2] = {ComputeErrorBounds(children[0], !t.isPoint, t.allLightBounds, bsdf, bsdfFlags, p, wo),
-                                    ComputeErrorBounds(children[1], !t.isPoint, t.allLightBounds, bsdf, bsdfFlags, p, wo)};
-
-            int child = bitTrail & 1;
-            DCHECK_GT(errorBounds[child], 0);
-            pmf *= errorBounds[child] / (errorBounds[0] + errorBounds[1]);
-
-            estL = estL - estParentL + clusterEst[0] + clusterEst[1];
-            estParentL = clusterEst[child];
-
-            nodeIndex = child ? node->childOrLightIndex : (nodeIndex + 1);
-            node = &t.nodes[nodeIndex];
-            
-            if (errorBounds[child] < m_threshold * estL) {
-                if(light != t.lights[representants[child]->childOrLightIndex]) {
-                    return 0;
-                }
-                Float repIntensity = representants[child]->compactLightBounds.Phi();
-                return LightPMF(pmf, nodeIntensities[child] / repIntensity);
-            }
-
-            bitTrail >>=1;
-        }
-
-        DCHECK_EQ(light, t.lights[node->childOrLightIndex]);
-
-        return pmf;
+        //const LightcutsTree& t(loc.treeIdx == 1 ? m_pointTree : m_spotTree);
+        //pmf *= weights[loc.treeIdx] / sumWeights;
+        //
+        //int nodeIndex = 0;
+        //Point3f p = ctx.p();
+        //Vector3f wo = ctx.wo;
+        //
+        //BxDFFlags bsdfFlags = BxDFFlags::All;
+        //if (bsdf) {
+        //    bsdfFlags = bsdf->Flags();
+        //}
+        //
+        //Float estL = 0;
+        //Float estParentL = 0;
+        //
+        //const LightcutsTreeNode* node = &t.nodes[nodeIndex];
+        //uint32_t bitTrail = loc.identifier;
+        //while (!node->isLeaf) {
+        //    // Compute child error bounds and update PMF for current node
+        //    const LightcutsTreeNode* children[2] = {&t.nodes[nodeIndex + 1], &t.nodes[node->childOrLightIndex]};
+        //
+        //    const LightcutsTreeNode *representants[2] = {&t.nodes[children[0]->representantIdx],
+        //                                                   &t.nodes[children[1]->representantIdx]};
+        //
+        //    const Float nodeIntensities[2] = {children[0]->compactLightBounds.Phi(),
+        //                                      children[1]->compactLightBounds.Phi()};
+        //    const Float clusterEst[2] = {
+        //        ComputeClusterEstimate(bsdf, bsdfFlags, representants[0]->compactLightBounds.Bound(t.allLightBounds, false), p, wo, nodeIntensities[0]),
+        //        ComputeClusterEstimate(bsdf, bsdfFlags, representants[1]->compactLightBounds.Bound(t.allLightBounds, false), p, wo, nodeIntensities[1])
+        //    };
+        //
+        //    //Float errorBounds[2] = {ComputeErrorBounds(children[0], !t.isPoint, t.allLightBounds, bsdf, bsdfFlags, p, wo),
+        //    //                        ComputeErrorBounds(children[1], !t.isPoint, t.allLightBounds, bsdf, bsdfFlags, p, wo)};
+        //
+        //    int child = bitTrail & 1;
+        //    DCHECK_GT(errorBounds[child], 0);
+        //    pmf *= errorBounds[child] / (errorBounds[0] + errorBounds[1]);
+        //
+        //    estL = estL - estParentL + clusterEst[0] + clusterEst[1];
+        //    estParentL = clusterEst[child];
+        //
+        //    nodeIndex = child ? node->childOrLightIndex : (nodeIndex + 1);
+        //    node = &t.nodes[nodeIndex];
+        //    
+        //    if (errorBounds[child] < m_threshold * estL) {
+        //        if(light != t.lights[representants[child]->childOrLightIndex]) {
+        //            return 0;
+        //        }
+        //        Float repIntensity = representants[child]->compactLightBounds.Phi();
+        //        return LightPMF(pmf, nodeIntensities[child] / repIntensity);
+        //    }
+        //
+        //    bitTrail >>=1;
+        //}
+        //
+        //DCHECK_EQ(light, t.lights[node->childOrLightIndex]);
+        //
+        //return pmf;
     }
 
     PBRT_CPU_GPU pstd::optional<SampledLight> Sample(Float u) const {
@@ -284,7 +286,7 @@ private:
         Float I = phi;
 
         Float minDistSqr = DistanceSquared(point, lightPos);
-        Float clampedDistSqr = std::max(minDistSqr, 1e-4f);
+        Float clampedDistSqr = std::max(minDistSqr, 1e-2f);
         Float G = 1.0f / clampedDistSqr;
 
         if (!bsdf) {
@@ -313,46 +315,81 @@ private:
     }
 
     PBRT_CPU_GPU
-    static Float ComputeErrorBounds(const LightcutsTreeNode* node, bool isOriented, const Bounds3f& sceneBounds, const BSDF* bsdf, BxDFFlags flags, Point3f point, Vector3f wo) {
-        Bounds3f bounds = node->compactLightBounds.Bounds(sceneBounds);
-        
+    static Float ComputeErrorBound(const LightcutsTreeNode* node, const Bounds3f& nodeBounds, bool isOriented, const BSDF* bsdf, BxDFFlags flags, Point3f point, Vector3f wo) {
         // 1. Light intensity (I)
         Float I = node->compactLightBounds.Phi();
+
+        return I;
 
         // 2. Visibility term (V) has trivial upper bound equal to 1
 
         // Calculate minimum squared distance to the bounding box
-        Float minDistSqr = DistanceSquared(point, bounds);
+        //Float minDistSqr = DistanceSquared(point, bounds);
         
         // 3. Geometric term (G)
         // Prevent division by zero if point is inside or on the bounds
-        Float G = 1.0f / std::max(minDistSqr, 1e-4f);
+        //Float G = 1.0f / std::max(minDistSqr, 1e-4f);
 
-        if (isOriented) {
-            Float cosTheta_o = node->compactLightBounds.CosTheta_o();
-            Vector3f w = node->compactLightBounds.W();
-            Float maxCosEmission = BoundEmissionCosine(bounds, w, std::acos(cosTheta_o), point);
-            G *= maxCosEmission;
-        }
+        //if (isOriented) {
+        //    Float cosTheta_o = node->compactLightBounds.CosTheta_o();
+        //    Vector3f w = node->compactLightBounds.W();
+        //    Float maxCosEmission = BoundEmissionCosine(bounds, w, std::acos(cosTheta_o), point);
+        //    G *= maxCosEmission;
+        //}
 
-        if (!bsdf) {
-            return I * G;
-        }
-
-        // 4. Material term (M)
-        // do not compute for invalid bsdfs
-        Float M = 1.f;
+        //if (!bsdf) {
+        //    return I * G;
+        //}
 
         // Bounding the max cosine is separate from founding the bsdf
-        Float cosBound = BoundMaxCosine(point, IsReflective(flags), IsTransmissive(flags), bsdf->shadingFrame, bounds);
-        if (cosBound != 0) {
-            SampledSpectrum sp = bsdf->Max_f(wo, bounds, point);
-
-            Float M = sp.MaxComponentValue() * cosBound;
-        }
+        //Float cosBound = BoundMaxCosine(point, IsReflective(flags), IsTransmissive(flags), bsdf->shadingFrame, bounds);
+        //if (cosBound == 0) {
+        //    return 0;
+        //}
         
-        return I * G * M;
+        // 4. Material term (M)
+        // do not compute for invalid bsdfs
+        //SampledSpectrum sp = bsdf->Max_f(wo, bounds, point);
+        //Float M = sp.MaxComponentValue() * cosBound;
+        //
+        //return I * G * M;
     }
+
+    PBRT_CPU_GPU
+    static Float GeomTermBoundInFrame(Point3f point, const Frame& frame, const Bounds3f& bounds) {
+        // furthest point on the box along normal N
+        Float zMax = MaxDistAlong(point, frame.z, bounds);
+        if (zMax <= 0) return 0.0f;
+
+        const Float xMin = AbsMinDistAlong(point, frame.x, bounds);
+        const Float yMin = AbsMinDistAlong(point, frame.y, bounds);
+        const Float hyp = SafeSqrt(Sqr(xMin) + Sqr(yMin) + Sqr(zMax));
+        return zMax / hyp;
+    }
+
+
+    PBRT_CPU_GPU
+    static Float ComputeGeometricBound(const LightcutsTreeNode* node, const Bounds3f& nodeBounds, const Frame& frame, bool isOriented, Point3f point, Vector3f wo) {
+        
+        Float G = GeomTermBoundInFrame(point, frame, nodeBounds);
+
+        if (isOriented) {
+            const Point3f refMin = point + (point - nodeBounds.pMax);
+            const Point3f refMax = point + (point - nodeBounds.pMin);
+            const Bounds3f refBounds(refMin, refMax);
+
+            Frame coneFrame = Frame::FromZ(node->compactLightBounds.W());
+            const Float boundCos = GeomTermBoundInFrame(point, coneFrame, refBounds);
+            
+            const Float halfAngle = std::acos(node->compactLightBounds.CosTheta_o());
+            const Float maxCos = std::max(0.f, std::cos(std::max(0.f, std::acos(boundCos) - halfAngle)));
+
+            G *= maxCos;
+        }
+
+        return G;
+    }
+
 
     // LightcutsLightSampler Private Members
     LightcutsTree m_pointTree;

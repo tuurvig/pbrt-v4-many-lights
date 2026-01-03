@@ -335,51 +335,6 @@ class CompactLightBounds {
     uint16_t qb[2][3];
 };
 
-PBRT_CPU_GPU
-inline Float BoundEmissionCosine(const Bounds3f& bounds, Vector3f w, Float halfAngle, Point3f point) {
-    Frame localFrame = Frame::FromZ(w);
-    Bounds3f localBounds;
-    for (int i = 0; i < 8; ++i) {
-        Point3f corner = bounds.Corner(i);
-        Vector3f v = point - corner;
-
-        Point3f localP = Point3f(localFrame.ToLocal(v));
-        localBounds = Union(localBounds, localP);
-    }
-
-    const Float minX = localBounds.pMin.x;
-    const Float maxX = localBounds.pMax.x;
-    const Float minY = localBounds.pMin.y;
-    const Float maxY = localBounds.pMax.y;
-
-    const Float maxZ = localBounds.pMax.z;
-
-    Float boundXSqr = 0, boundYSqr = 0;
-    if (maxZ >= 0) {
-        // if the range spans 0 the true min(p^2) is 0
-        if (minX > 0 || maxX < 0) {
-            boundXSqr = std::min(maxX * maxX, minX * minX);
-        }
-        if (minY > 0 || maxY < 0) {
-            boundYSqr = std::min(maxY * maxY, minY * minY);
-        }
-    } else {
-        boundXSqr = std::max(maxX * maxX, minX * minX);
-        boundYSqr = std::max(maxY * maxY, minY * minY);
-    }
-
-    Float distSqr = boundXSqr + boundYSqr + maxZ * maxZ;
-
-    if (distSqr <= MachineEpsilon) return 1.f;
-
-    Float cosThetaBox = maxZ / std::sqrt(distSqr);
-    Float thetaBox = std::acos(cosThetaBox);
-
-    if (thetaBox <= halfAngle) return 1.f;
-
-    return std::max(0.f, std::cos(thetaBox - halfAngle));
-}
-
 // PointLight Definition
 class PointLight : public LightBase {
   public:
