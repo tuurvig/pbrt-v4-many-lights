@@ -1522,6 +1522,23 @@ PBRT_CPU_GPU inline bool InsideExclusive(Point3<T> p, const Bounds3<T> &b) {
             p.z >= b.pMin.z && p.z < b.pMax.z);
 }
 
+template <typename T>
+PBRT_CPU_GPU inline auto ClosestPoint(Point3<T> p, const Bounds3<T> &b) {
+    // Clamp p to bounds
+    T x = std::max<T>(b.pMin.x, std::min<T>(p.x, b.pMax.x));
+    T y = std::max<T>(b.pMin.y, std::min<T>(p.y, b.pMax.y));
+    T z = std::max<T>(b.pMin.z, std::min<T>(p.z, b.pMax.z));
+    return Point3<T>(x, y, z);
+}
+
+template <typename T>
+PBRT_CPU_GPU inline auto FurthestPoint(Point3<T> p, const Bounds3<T> &b) {
+    T x = std::abs(p.x - b.pMin.x) > std::abs(p.x - b.pMax.x) ? b.pMin.x : b.pMax.x;
+    T y = std::abs(p.y - b.pMin.y) > std::abs(p.y - b.pMax.y) ? b.pMin.y : b.pMax.y;
+    T z = std::abs(p.z - b.pMin.z) > std::abs(p.z - b.pMax.z) ? b.pMin.z : b.pMax.z;
+    return Point3<T>(x, y, z);
+}
+
 template <typename T, typename U>
 PBRT_CPU_GPU inline auto DistanceSquared(const Bounds3<T>& a, const Bounds3<U>& b) {
     using TDist = decltype(T{} - U{});
@@ -1996,6 +2013,81 @@ PBRT_CPU_GPU inline Frame::Frame(Vector3f x, Vector3f y, Vector3f z) : x(x), y(y
     DCHECK_LT(std::abs(Dot(x, y)), 1e-4);
     DCHECK_LT(std::abs(Dot(y, z)), 1e-4);
     DCHECK_LT(std::abs(Dot(z, x)), 1e-4);
+}
+
+PBRT_CPU_GPU
+inline Float MaxDistAlong(Point3f p, Vector3f dir, const Bounds3f& bounds) {
+    Vector3f mx0, mx1;
+
+    Float dirP = dir.x * p.x;
+    Float minVal = (dir.x * bounds.pMin.x) - dirP;
+    Float maxVal = (dir.x * bounds.pMax.x) - dirP;
+    Float maxX = std::max(minVal, maxVal);
+
+    dirP = dir.y * p.y;
+    minVal = (dir.y * bounds.pMin.y) - dirP;
+    maxVal = (dir.y * bounds.pMax.y) - dirP;
+    Float maxY = std::max(minVal, maxVal);
+
+    dirP = dir.z * p.z;
+    minVal = (dir.z * bounds.pMin.z) - dirP;
+    maxVal = (dir.z * bounds.pMax.z) - dirP;
+    Float maxZ = std::max(minVal, maxVal);
+
+    return maxX + maxY + maxZ;
+}
+
+PBRT_CPU_GPU
+inline Float AbsMinDistAlong(Point3f p, Vector3f dir, const Bounds3f& bounds) {
+    // 1. Calculate projection of the point p onto dir
+    Float projP = Dot(Vector3f(p), dir);
+
+    // 2. Calculate the interval [projBoxMin, projBoxMax]
+    // This represents the projection of the AABB onto the 'dir' vector.
+    // We do this by summing the min/max contributions of each axis independently,
+    // which is mathematically equivalent to checking all 8 corners
+    Float projBoxMin = 0;
+    Float projBoxMax = 0;
+
+    Float minVal = dir.x * bounds.pMin.x;
+    Float maxVal = dir.x * bounds.pMax.x;
+    if (minVal > maxVal) {
+        pstd::swap(minVal, maxVal);
+    }
+
+    projBoxMin += minVal;
+    projBoxMax += maxVal;
+
+    minVal = dir.y * bounds.pMin.y;
+    maxVal = dir.y * bounds.pMax.y;
+
+    if (minVal > maxVal) {
+        pstd::swap(minVal, maxVal);
+    }
+
+    projBoxMin += minVal;
+    projBoxMax += maxVal;
+
+    minVal = dir.z * bounds.pMin.z;
+    maxVal = dir.z * bounds.pMax.z;
+
+    if (minVal > maxVal) {
+        pstd::swap(minVal, maxVal);
+    }
+
+    projBoxMin += minVal;
+    projBoxMax += maxVal;
+
+    // 3. Shift the interval relative to p
+    // The range of signed distances is now [distMin, distMax]
+    Float distMin = projBoxMin - projP;
+    Float distMax = projBoxMax - projP;
+
+    if (distMin <= 0 && distMax >= 0) {
+        return 0.f;
+    }
+
+    return std::min(std::abs(distMin), std::abs(distMax));
 }
 
 PBRT_CPU_GPU

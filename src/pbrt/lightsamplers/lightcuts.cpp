@@ -352,10 +352,8 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
     Vector3f wo = ctx.wo;
     const LightcutsTreeNode* node = &tree.nodes[nodeIndex];
 
-    BxDFFlags bsdfFlags = BxDFFlags::All;
-    if (bsdf) {
-        bsdfFlags = bsdf->Flags();
-    }
+    BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
+    Frame shadingFrame(bsdf ? bsdf->shadingFrame : Frame::FromZ(ctx.n));
 
     Float estL = 0;
     Float estParent = 0;
@@ -363,34 +361,76 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
 
     while (!node->isLeaf) {
         int childrenIndices[2] = {nodeIndex + 1, node->childOrLightIndex};
+        Float weights[2] = {0};
+
         const LightcutsTreeNode *children[2] = {&tree.nodes[nodeIndex + 1],
                                                 &tree.nodes[node->childOrLightIndex]};
         
+        const Float nodeIntensities[2] = {children[0]->compactLightBounds.Phi(),
+                                          children[1]->compactLightBounds.Phi()};
+
         const LightcutsTreeNode *representants[2] = {&tree.nodes[children[0]->representantIdx],
                                                      &tree.nodes[children[1]->representantIdx]};
 
-        const Float nodeIntensities[2] = {children[0]->compactLightBounds.Phi(),
-                                          children[1]->compactLightBounds.Phi()};
         const Float clusterEst[2] = {
             ComputeClusterEstimate(bsdf, bsdfFlags, representants[0]->compactLightBounds.Bound(tree.allLightBounds, false), p, wo, nodeIntensities[0]),
             ComputeClusterEstimate(bsdf, bsdfFlags, representants[1]->compactLightBounds.Bound(tree.allLightBounds, false), p, wo, nodeIntensities[1])
         };
 
-        Float errBounds[2] = {ComputeErrorBounds(children[0], !tree.isPoint, tree.allLightBounds, bsdf, bsdfFlags, p, wo),
-                              ComputeErrorBounds(children[1], !tree.isPoint, tree.allLightBounds, bsdf, bsdfFlags, p, wo)};
+        Float errBounds[2] = {0};
 
-        if (errBounds[0] == 0 && errBounds[1] == 0) {
-            return {};
+        if (nodeIntensities[0] != 0 && nodeIntensities[1] != 0) {
+            const Bounds3f nodeBound0 = children[0]->compactLightBounds.Bounds(tree.allLightBounds);
+            const Bounds3f nodeBound1 = children[1]->compactLightBounds.Bounds(tree.allLightBounds);
+
+            const Float diagonalLengthSqr0 = LengthSquared(nodeBound0.Diagonal());
+            const Float diagonalLengthSqr1 = LengthSquared(nodeBound1.Diagonal());
+
+            Float dist2Min0 = DistanceSquared(p, ClosestPoint(p, nodeBound0));
+            Float dist2Min1 = DistanceSquared(p, ClosestPoint(p, nodeBound1));
+
+            if (dist2Min0 >= diagonalLengthSqr0 && dist2Min1 >= diagonalLengthSqr1) {
+
+                Float geomBound0 = ComputeGeometricBound(children[0], nodeBound0, shadingFrame, !tree.isPoint, p, wo);
+                Float geomBound1 = ComputeGeometricBound(children[1], nodeBound1, shadingFrame, !tree.isPoint, p, wo);
+
+                Float bound0 = nodeIntensities[0] * (geomBound0 / dist2Min0);
+                Float bound1 = nodeIntensities[1] * (geomBound1 / dist2Min1);
+
+                if (bsdf) {
+                    SampledSpectrum matBound0 = bsdf->Max_f(wo, nodeBound0, p);
+                    SampledSpectrum matBound1 = bsdf->Max_f(wo, nodeBound1, p);
+                    bound0 *= matBound0.MaxComponentValue();
+                    bound1 *= matBound1.MaxComponentValue();
+                }
+
+                errBounds[0] = std::max(bound0, MachineEpsilon);
+                errBounds[1] = std::max(bound1, MachineEpsilon);
+
+            } else {
+                errBounds[0] = nodeIntensities[0];
+                errBounds[1] = nodeIntensities[1];
+            }
+        } else {
+            if (nodeIntensities[0] == 0 && nodeIntensities[1] == 0) {
+                return {};
+            }
+            // weight of the first child will be 1 or 0 based on whether the other child is 0.
+            errBounds[0] = static_cast<Float>(nodeIntensities[1] == 0);
+            errBounds[1] = 1 - errBounds[0];
         }
 
-        estL = estL - estParent + clusterEst[0] + clusterEst[1];
+        weights[0] = std::min(1.f, errBounds[0] / (errBounds[0] + errBounds[1]));
+        weights[1] = 1.f - weights[0];
 
         // Randomly sample a children node
         Float nodePMF;
-        int child = SampleDiscrete(errBounds, u, &nodePMF, &u);
+        int child = SampleDiscrete(weights, u, &nodePMF, &u);
         pmf *= nodePMF;
         nodeIndex = (child == 0) ? (nodeIndex + 1) : node->childOrLightIndex;
         node = &tree.nodes[nodeIndex];
+
+        estL = estL - estParent + clusterEst[0] + clusterEst[1];
         estParent = clusterEst[child];
 
         if (errBounds[child] < m_threshold * estL) {
