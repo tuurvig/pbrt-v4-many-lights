@@ -125,7 +125,7 @@ class LightcutsTreeBuilderGPU final : public LightTreeBuilderGPU<uint32_t, Light
          HashMap<Light, LightLocation>& bitTrailContainer, uint32_t nodeIdx, uint32_t bitTrail, uint32_t depth, uint32_t& representantIdx, float& u) const {
 
          const LightTreeConstructionNodeGPU &gpuNode = gpuNodes[nodeIdx];
-         CompactLightBounds cb(gpuNode.bounds, m_allLightBounds);
+         CompactLightBounds cb(gpuNode.bounds, gpuNode.bounds.I, m_allLightBounds);
 
          const bool isLeaf = gpuNode.left == kInvalidIndex;
          if (isLeaf) {
@@ -147,8 +147,8 @@ class LightcutsTreeBuilderGPU final : public LightTreeBuilderGPU<uint32_t, Light
          DCHECK_EQ(flatNodeIndex + 1, child0);
          uint32_t child1 = FlattenNode(tree, lights, gpuNodes, bitTrailContainer, gpuNode.right, bitTrail | (1u << depth), depth + 1, representantRightIdx, u);
          
-         Float intensities[2] = {tree.nodes[child0].compactLightBounds.Phi(),
-                                 tree.nodes[child1].compactLightBounds.Phi()};
+         Float intensities[2] = {tree.nodes[child0].compactLightBounds.PhiOrI(),
+                                 tree.nodes[child1].compactLightBounds.PhiOrI()};
          Float nodePMF;
          int child = SampleDiscrete(intensities, u, &nodePMF, &u);
          representantIdx = (child == 0) ? representantLeftIdx : representantRightIdx;
@@ -177,7 +177,7 @@ LightcutsTree::LightcutsTree(bool isPoint, Allocator alloc)
 
 LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, Allocator alloc, Float threshold) :
     m_pointTree(true, alloc), m_spotTree(false, alloc), m_otherLights(alloc), m_infiniteLights(alloc),
-    m_lightToLocation(alloc), m_otherLightsPower(0), m_threshold(threshold) {
+    m_lightToLocation(alloc), m_otherLightIntensities(0), m_threshold(threshold) {
     
     // Initialize infiniteLights array and lightcuts lights
     std::vector<LightBuildContainer> pointLights, spotLights;
@@ -204,7 +204,7 @@ LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, All
                 uint32_t index = m_otherLights.size();
                 m_otherLights.push_back(light);
                 m_lightToLocation.Insert(light, {otherLightsIndex, index});
-                m_otherLightsPower += lightBounds->phi;
+                m_otherLightIntensities += lightBounds->phi;
             }
         }
     }
@@ -238,7 +238,7 @@ TreeNodeBuildSuccess LightcutsLightSampler::buildLightTree(std::vector<LightBuil
 
     if (end - start == 1) {
         const LightBuildContainer& leaf(lightcutsLights[start]);
-        CompactLightBounds cb(leaf.bounds, tree.allLightBounds);
+        CompactLightBounds cb(leaf.bounds, leaf.bounds.I, tree.allLightBounds);
 
         int nodeIndex = tree.nodes.size();
         int lightIndex = tree.lights.size();
@@ -340,7 +340,7 @@ TreeNodeBuildSuccess LightcutsLightSampler::buildLightTree(std::vector<LightBuil
     int successorIdx = (child == 0) ? left.representantIdx : right.representantIdx;
 
     LightBounds lb = Union(left.bounds, right.bounds);
-    CompactLightBounds cb(lb, tree.allLightBounds);
+    CompactLightBounds cb(lb, lb.I, tree.allLightBounds);
     tree.nodes[nodeIndex] = LightcutsTreeNode::MakeInterior(right.nodeIdx, successorIdx, cb);
     return {lb, successorIdx, static_cast<int>(nodeIndex)};
 }
@@ -350,6 +350,7 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
     int nodeIndex = 0;
     Point3f p = ctx.p();
     Vector3f wo = ctx.wo;
+    Normal3f n = ctx.n;
     const LightcutsTreeNode* node = &tree.nodes[nodeIndex];
 
     BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
@@ -366,15 +367,15 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
         const LightcutsTreeNode *children[2] = {&tree.nodes[nodeIndex + 1],
                                                 &tree.nodes[node->childOrLightIndex]};
         
-        const Float nodeIntensities[2] = {children[0]->compactLightBounds.Phi(),
-                                          children[1]->compactLightBounds.Phi()};
+        const Float nodeIntensities[2] = {children[0]->compactLightBounds.PhiOrI(),
+                                          children[1]->compactLightBounds.PhiOrI()};
 
         const LightcutsTreeNode *representants[2] = {&tree.nodes[children[0]->representantIdx],
                                                      &tree.nodes[children[1]->representantIdx]};
 
         const Float clusterEst[2] = {
-            ComputeClusterEstimate(bsdf, bsdfFlags, representants[0]->compactLightBounds.Bound(tree.allLightBounds, false), p, wo, nodeIntensities[0]),
-            ComputeClusterEstimate(bsdf, bsdfFlags, representants[1]->compactLightBounds.Bound(tree.allLightBounds, false), p, wo, nodeIntensities[1])
+            ComputeClusterEstimate(bsdf, bsdfFlags, representants[0]->compactLightBounds.Bound(tree.allLightBounds, false), p, n, wo, nodeIntensities[0]),
+            ComputeClusterEstimate(bsdf, bsdfFlags, representants[1]->compactLightBounds.Bound(tree.allLightBounds, false), p, n, wo, nodeIntensities[1])
         };
 
         Float errBounds[2] = {0};
@@ -435,7 +436,7 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
 
         if (errBounds[child] < m_threshold * estL) {
             int representantLightIndex = representants[child]->childOrLightIndex;
-            Float repIntensity = representants[child]->compactLightBounds.Phi();
+            Float repIntensity = representants[child]->compactLightBounds.PhiOrI();
             return SampledLight(tree.lights[representantLightIndex], pmf, nodeIntensities[child] / repIntensity);
         }
     }
