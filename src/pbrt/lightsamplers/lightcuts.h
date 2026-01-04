@@ -286,7 +286,7 @@ private:
         Float I = phi;
 
         Float minDistSqr = DistanceSquared(point, lightPos);
-        Float clampedDistSqr = std::max(minDistSqr, 1e-6f);
+        Float clampedDistSqr = std::max(minDistSqr, MachineEpsilon);
         Float G = 1.0f / clampedDistSqr;
 
         n = bsdf ? Normal3f(bsdf->shadingFrame.z) : n;
