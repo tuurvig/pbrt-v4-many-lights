@@ -66,18 +66,18 @@ std::string ToString(LightType lf) {
 
 std::string CompactLightBounds::ToString() const {
     return StringPrintf(
-        "[ CompactLightBounds qb: [ [ %u %u %u ] [ %u %u %u ] ] w: %s (%s) phi: %f "
+        "[ CompactLightBounds qb: [ [ %u %u %u ] [ %u %u %u ] ] w: %s (%s) phiOrI: %f "
         "qCosTheta_o: %u (%f) qCosTheta_e: %u (%f) twoSided: %u ]",
-        qb[0][0], qb[0][1], qb[0][2], qb[1][0], qb[1][1], qb[1][2], w, Vector3f(w), phi,
+        qb[0][0], qb[0][1], qb[0][2], qb[1][0], qb[1][1], qb[1][2], w, Vector3f(w), phiOrI,
         qCosTheta_o, CosTheta_o(), qCosTheta_e, CosTheta_e(), twoSided);
 }
 
 std::string CompactLightBounds::ToString(const Bounds3f &allBounds) const {
     return StringPrintf(
-        "[ CompactLightBounds b: %s qb: [ [ %u %u %u ] [ %u %u %u ] ] w: %s (%s) phi: %f "
+        "[ CompactLightBounds b: %s qb: [ [ %u %u %u ] [ %u %u %u ] ] w: %s (%s) phiOrI: %f "
         "qCosTheta_o: %u (%f) qCosTheta_e: %u (%f) twoSided: %u ]",
         Bounds(allBounds), qb[0][0], qb[0][1], qb[0][2], qb[1][0], qb[1][1], qb[1][2], w,
-        Vector3f(w), phi, qCosTheta_o, CosTheta_o(), qCosTheta_e, CosTheta_e(), twoSided);
+        Vector3f(w), phiOrI, qCosTheta_o, CosTheta_o(), qCosTheta_e, CosTheta_e(), twoSided);
 }
 
 // LightBase Method Definitions
@@ -183,8 +183,9 @@ SampledSpectrum PointLight::Phi(SampledWavelengths lambda) const {
 
 pstd::optional<LightBounds> PointLight::Bounds() const {
     Point3f p = renderFromLight(Point3f(0, 0, 0));
-    Float phi = 4 * Pi * scale * I->MaxValue();
-    return LightBounds(Bounds3f(p, p), Vector3f(0, 0, 1), phi, std::cos(Pi),
+    Float boundI = scale * I->MaxValue();
+    Float phi = 4 * Pi * boundI;
+    return LightBounds(Bounds3f(p, p), Vector3f(0, 0, 1), phi, boundI, std::cos(Pi),
                        std::cos(Pi / 2), false);
 }
 
@@ -411,7 +412,7 @@ pstd::optional<LightBounds> ProjectionLight::Bounds() const {
 
     Point3f p = renderFromLight(Point3f(0, 0, 0));
     Vector3f w = Normalize(renderFromLight(Vector3f(0, 0, 1)));
-    return LightBounds(Bounds3f(p, p), w, phi, std::cos(0.f), cosTotalWidth, false);
+    return LightBounds(Bounds3f(p, p), w, phi, phi, std::cos(0.f), cosTotalWidth, false);
 }
 
 PBRT_CPU_GPU pstd::optional<LightLeSample> ProjectionLight::SampleLe(Point2f u1, Point2f u2,
@@ -581,12 +582,13 @@ pstd::optional<LightBounds> GoniometricLight::Bounds() const {
     for (int y = 0; y < image.Resolution().y; ++y)
         for (int x = 0; x < image.Resolution().x; ++x)
             sumY += image.GetChannel({x, y}, 0);
-    Float phi = scale * Iemit->MaxValue() * 4 * Pi * sumY /
-                (image.Resolution().x * image.Resolution().y);
+    Float boundI = scale * Iemit->MaxValue() * sumY / (image.Resolution().x * image.Resolution().y);
+    Float phi = 4 * Pi * boundI;
+                
 
     Point3f p = renderFromLight(Point3f(0, 0, 0));
     // Bound it as an isotropic point light.
-    return LightBounds(Bounds3f(p, p), Vector3f(0, 0, 1), phi, std::cos(Pi),
+    return LightBounds(Bounds3f(p, p), Vector3f(0, 0, 1), phi, boundI, std::cos(Pi),
                        std::cos(Pi / 2), false);
 }
 
@@ -803,22 +805,24 @@ SampledSpectrum DiffuseAreaLight::Phi(SampledWavelengths lambda) const {
 
 pstd::optional<LightBounds> DiffuseAreaLight::Bounds() const {
     // Compute _phi_ for diffuse area light bounds
-    Float phi = 0;
+    Float boundI = 0;
     if (image) {
         // Compute average _DiffuseAreaLight_ image channel value
         // Assume no distortion in the mapping, FWIW...
         for (int y = 0; y < image.Resolution().y; ++y)
             for (int x = 0; x < image.Resolution().x; ++x)
                 for (int c = 0; c < 3; ++c)
-                    phi += image.GetChannel({x, y}, c);
-        phi /= 3 * image.Resolution().x * image.Resolution().y;
+                    boundI += image.GetChannel({x, y}, c);
+        boundI /= 3 * image.Resolution().x * image.Resolution().y;
 
     } else
-        phi = Lemit->MaxValue();
-    phi *= scale * area * Pi;
+        boundI = Lemit->MaxValue();
+    boundI *= scale * area;
+
+    Float phi = boundI * Pi;
 
     DirectionCone nb = shape.NormalBounds();
-    return LightBounds(shape.Bounds(), nb.w, phi, nb.cosTheta, std::cos(Pi / 2),
+    return LightBounds(shape.Bounds(), nb.w, phi, boundI, nb.cosTheta, std::cos(Pi / 2),
                        twoSided);
 }
 
@@ -1386,13 +1390,15 @@ SampledSpectrum SpotLight::Phi(SampledWavelengths lambda) const {
 pstd::optional<LightBounds> SpotLight::Bounds() const {
     Point3f p = renderFromLight(Point3f(0, 0, 0));
     Vector3f w = Normalize(renderFromLight(Vector3f(0, 0, 1)));
-    Float phi = scale * Iemit->MaxValue() * 4 * Pi;
+    //Float phi = scale * Iemit->MaxValue() * 4 * Pi;
+    Float boundI = scale * Iemit->MaxValue();
+    Float phi = boundI * 2 * Pi * ((1 - cosFalloffStart) + (cosFalloffStart - cosFalloffEnd) / 2);
     Float cosTheta_e = std::cos(std::acos(cosFalloffEnd) - std::acos(cosFalloffStart));
     // Allow a little slop here to deal with fp round-off error in the computation of
     // cosTheta_p in the importance function.
     if (cosTheta_e == 1 && cosFalloffEnd != cosFalloffStart)
         cosTheta_e = 0.999f;
-    return LightBounds(Bounds3f(p, p), w, phi, cosFalloffStart, cosTheta_e, false);
+    return LightBounds(Bounds3f(p, p), w, phi, boundI, cosFalloffStart, cosTheta_e, false);
 }
 
 PBRT_CPU_GPU pstd::optional<LightLeSample> SpotLight::SampleLe(Point2f u1, Point2f u2,

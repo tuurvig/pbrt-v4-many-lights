@@ -87,9 +87,9 @@ public:
         }
 
         Float weights[3] = {
-            m_spotTree.lights.empty() ? 0 : m_spotTree.nodes[0].compactLightBounds.Phi(),
-            m_pointTree.lights.empty() ? 0 : m_pointTree.nodes[0].compactLightBounds.Phi(),
-            m_otherLightsPower}; 
+            m_spotTree.lights.empty() ? 0 : m_spotTree.nodes[0].compactLightBounds.PhiOrI(),
+            m_pointTree.lights.empty() ? 0 : m_pointTree.nodes[0].compactLightBounds.PhiOrI(),
+            m_otherLightIntensities}; 
 
         Float groupPMF;
         int groupIdx = SampleDiscrete(weights, u, &groupPMF, &u);
@@ -123,7 +123,7 @@ public:
             return pInfinite / m_infiniteLights.size();
         }
 
-        Float weights[3] = {m_spotTree.nodes[0].compactLightBounds.Phi(), m_pointTree.nodes[0].compactLightBounds.Phi(), m_otherLightsPower}; 
+        Float weights[3] = {m_spotTree.nodes[0].compactLightBounds.PhiOrI(), m_pointTree.nodes[0].compactLightBounds.PhiOrI(), m_otherLightIntensities}; 
         Float sumWeights = weights[0] + weights[1] + weights[2];
         Float pmf = (1 - pInfinite);
         
@@ -204,7 +204,7 @@ public:
             }
         }
 
-        Float weights[3] = {m_spotTree.nodes[0].compactLightBounds.Phi(), m_pointTree.nodes[0].compactLightBounds.Phi(), m_otherLightsPower}; 
+        Float weights[3] = {m_spotTree.nodes[0].compactLightBounds.PhiOrI(), m_pointTree.nodes[0].compactLightBounds.PhiOrI(), m_otherLightIntensities}; 
 
         Float groupPMF;
         int groupIdx = SampleDiscrete(weights, u, &groupPMF, &u);
@@ -237,7 +237,7 @@ public:
             return pInfinite / m_infiniteLights.size();
         }
 
-        Float weights[3] = {m_spotTree.nodes[0].compactLightBounds.Phi(), m_pointTree.nodes[0].compactLightBounds.Phi(), m_otherLightsPower}; 
+        Float weights[3] = {m_spotTree.nodes[0].compactLightBounds.PhiOrI(), m_pointTree.nodes[0].compactLightBounds.PhiOrI(), m_otherLightIntensities}; 
         Float sumWeights = weights[0] + weights[1] + weights[2];
         Float pmf = (1 - pInfinite);
         
@@ -282,77 +282,32 @@ private:
     pstd::optional<SampledLight> SampleInfiniteLight(size_t nLights, Float &pmf, Float &u) const;
 
     PBRT_CPU_GPU
-    static Float ComputeClusterEstimate(const BSDF* bsdf, BxDFFlags flags, Point3f lightPos, Point3f point, Vector3f wo, Float phi) {
+    static Float ComputeClusterEstimate(const BSDF* bsdf, BxDFFlags flags, Point3f lightPos, Point3f point, Normal3f n, Vector3f wo, Float phi) {
         Float I = phi;
 
         Float minDistSqr = DistanceSquared(point, lightPos);
-        Float clampedDistSqr = std::max(minDistSqr, 1e-2f);
+        Float clampedDistSqr = std::max(minDistSqr, 1e-6f);
         Float G = 1.0f / clampedDistSqr;
 
-        if (!bsdf) {
-            return I * G;
-        }
+        n = bsdf ? Normal3f(bsdf->shadingFrame.z) : n;
 
         Vector3f wi = lightPos - point;
         wi /= std::sqrt(clampedDistSqr);
+        Float cosTheta = Dot(n, wi);
 
-        SampledSpectrum sp = bsdf->f(wo, wi);
-        Float M = sp.Average();
-
-        if (M > 0) {
-            Vector3f n = bsdf->shadingFrame.z;
-            Float cosTheta = Dot(n, wi);
-            if (!IsTransmissive(flags) && cosTheta < 0) {
+        Float M = 1.f;
+        if (bsdf) {
+            SampledSpectrum sp = bsdf->f(wo, wi);
+            Float M = sp.Average();
+            if ((!IsTransmissive(flags) && cosTheta < 0) ||
+                (!IsReflective(flags) && cosTheta >= 0)) {
                 cosTheta = 0;
             }
-            if (!IsReflective(flags) && cosTheta >= 0) {
-                cosTheta = 0;
-            }
-            M *= cosTheta;
+        } else {
+            cosTheta = std::max(0.f, cosTheta);
         }
 
-        return I * G * M;
-    }
-
-    PBRT_CPU_GPU
-    static Float ComputeErrorBound(const LightcutsTreeNode* node, const Bounds3f& nodeBounds, bool isOriented, const BSDF* bsdf, BxDFFlags flags, Point3f point, Vector3f wo) {
-        // 1. Light intensity (I)
-        Float I = node->compactLightBounds.Phi();
-
-        return I;
-
-        // 2. Visibility term (V) has trivial upper bound equal to 1
-
-        // Calculate minimum squared distance to the bounding box
-        //Float minDistSqr = DistanceSquared(point, bounds);
-        
-        // 3. Geometric term (G)
-        // Prevent division by zero if point is inside or on the bounds
-        //Float G = 1.0f / std::max(minDistSqr, 1e-4f);
-
-        //if (isOriented) {
-        //    Float cosTheta_o = node->compactLightBounds.CosTheta_o();
-        //    Vector3f w = node->compactLightBounds.W();
-        //    Float maxCosEmission = BoundEmissionCosine(bounds, w, std::acos(cosTheta_o), point);
-        //    G *= maxCosEmission;
-        //}
-
-        //if (!bsdf) {
-        //    return I * G;
-        //}
-
-        // Bounding the max cosine is separate from founding the bsdf
-        //Float cosBound = BoundMaxCosine(point, IsReflective(flags), IsTransmissive(flags), bsdf->shadingFrame, bounds);
-        //if (cosBound == 0) {
-        //    return 0;
-        //}
-        
-        // 4. Material term (M)
-        // do not compute for invalid bsdfs
-        //SampledSpectrum sp = bsdf->Max_f(wo, bounds, point);
-        //Float M = sp.MaxComponentValue() * cosBound;
-        //
-        //return I * G * M;
+        return I * G * M * cosTheta;
     }
 
     PBRT_CPU_GPU
@@ -397,7 +352,7 @@ private:
     pstd::vector<Light> m_otherLights;
     pstd::vector<Light> m_infiniteLights;
     HashMap<Light, LightLocation> m_lightToLocation;
-    Float m_otherLightsPower;
+    Float m_otherLightIntensities;
     Float m_threshold;
 };
 

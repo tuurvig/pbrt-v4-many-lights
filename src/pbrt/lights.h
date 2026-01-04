@@ -107,7 +107,7 @@ class LightBounds {
     // LightBounds Public Methods
     LightBounds() = default;
     PBRT_CPU_GPU
-    LightBounds(const Bounds3f &b, Vector3f w, Float phi, Float cosTheta_o,
+    LightBounds(const Bounds3f &b, Vector3f w, Float phi, Float I, Float cosTheta_o,
                 Float cosTheta_e, bool twoSided);
 
     PBRT_CPU_GPU
@@ -121,6 +121,7 @@ class LightBounds {
     // LightBounds Public Members
     Bounds3f bounds;
     Float phi = 0;
+    Float I = 0;
     Vector3f w;
     Float cosTheta_o, cosTheta_e;
     bool twoSided;
@@ -128,11 +129,12 @@ class LightBounds {
 
 // LightBounds Inline Methods
 inline PBRT_CPU_GPU
-LightBounds::LightBounds(const Bounds3f &b, Vector3f w, Float phi,
+LightBounds::LightBounds(const Bounds3f &b, Vector3f w, Float phi, Float I,
                                 Float cosTheta_o, Float cosTheta_e, bool twoSided)
     : bounds(b),
       w(Normalize(w)),
       phi(phi),
+      I(I),
       cosTheta_o(cosTheta_o),
       cosTheta_e(cosTheta_e),
       twoSided(twoSided) {}
@@ -151,7 +153,7 @@ inline PBRT_CPU_GPU LightBounds Union(const LightBounds &a, const LightBounds &b
     Float cosTheta_e = std::min(a.cosTheta_e, b.cosTheta_e);
 
     // Return final _LightBounds_ union
-    return LightBounds(Union(a.bounds, b.bounds), cone.w, a.phi + b.phi, cosTheta_o,
+    return LightBounds(Union(a.bounds, b.bounds), cone.w, a.phi + b.phi, a.I + b.I, cosTheta_o,
                        cosTheta_e, a.twoSided | b.twoSided);
 }
 
@@ -195,9 +197,9 @@ class CompactLightBounds {
     CompactLightBounds() = default;
 
     PBRT_CPU_GPU
-    CompactLightBounds(const LightBounds &lb, const Bounds3f &allb)
+    CompactLightBounds(const LightBounds &lb, Float phiOrI, const Bounds3f &allb)
         : w(Normalize(lb.w)),
-          phi(lb.phi),
+          phiOrI(phiOrI),
           qCosTheta_o(QuantizeCos(lb.cosTheta_o)),
           qCosTheta_e(QuantizeCos(lb.cosTheta_e)),
           twoSided(lb.twoSided) {
@@ -214,7 +216,7 @@ class CompactLightBounds {
     std::string ToString(const Bounds3f &allBounds) const;
 
     PBRT_CPU_GPU
-    Float Phi() const { return phi; }
+    Float PhiOrI() const { return phiOrI; }
     PBRT_CPU_GPU
     Vector3f W() const { return Vector3f(w); }
     PBRT_CPU_GPU
@@ -241,11 +243,6 @@ class CompactLightBounds {
     PBRT_CPU_GPU
     Bounds3f Bounds(const Bounds3f &allb) const {
         return {Bound(allb, false), Bound(allb, true)};
-    }
-
-    PBRT_CPU_GPU
-    LightBounds Dequantize(const Bounds3f& allb) const {
-        return LightBounds(Bounds(allb), Vector3f(w), Phi(), CosTheta_o(), CosTheta_e(), twoSided);
     }
 
     PBRT_CPU_GPU
@@ -293,7 +290,7 @@ class CompactLightBounds {
             return 0;
 
         // Return final importance at reference point
-        Float importance = phi * cosThetap / d2;
+        Float importance = phiOrI * cosThetap / d2;
         DCHECK_GE(importance, -1e-3);
         // Account for $\cos\theta_\roman{i}$ in importance at surfaces
         if (n != Normal3f(0, 0, 0)) {
@@ -326,7 +323,7 @@ class CompactLightBounds {
 
     // CompactLightBounds Private Members
     OctahedralVector w;
-    Float phi = 0;
+    Float phiOrI = 0;
     struct {
         unsigned int qCosTheta_o : 15;
         unsigned int qCosTheta_e : 15;

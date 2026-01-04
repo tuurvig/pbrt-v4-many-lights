@@ -116,7 +116,7 @@ class BVHLightTreeBuilder final : public LightTreeBuilderGPU<uint64_t, LightBVHC
     uint32_t FlattenNode(const pstd::vector<Light>& lights, const std::vector<LightTreeConstructionNodeGPU>& gpuNodes, uint32_t nodeIdx,
         uint32_t bitTrail, uint32_t depth, pstd::vector<LightBVHNode>& nodes, HashMap<Light, uint32_t>& bitTrailContainer) const {
          const LightTreeConstructionNodeGPU &gpuNode = gpuNodes[nodeIdx];
-         CompactLightBounds cb(gpuNode.bounds, m_allLightBounds);
+         CompactLightBounds cb(gpuNode.bounds, gpuNode.bounds.phi, m_allLightBounds);
 
          const bool isLeaf = gpuNode.left == kInvalidIndex;
          if (isLeaf) {
@@ -191,7 +191,8 @@ LightBVHBuildContainer BVHLightSampler::buildBVH(
     // Initialize leaf node if only a single light remains
     if (end - start == 1) {
         int nodeIndex = m_nodes.size();
-        CompactLightBounds cb(bvhLights[start].bounds, m_allLightBounds);
+        const LightBVHBuildContainer& cont(bvhLights[start]);
+        CompactLightBounds cb(cont.bounds, cont.bounds.phi, m_allLightBounds);
         int lightIndex = bvhLights[start].index;
         m_nodes.push_back(LightBVHNode::MakeLeaf(lightIndex, cb));
         m_lightToBitTrail.Insert(m_lights[lightIndex], bitTrail);
@@ -284,7 +285,7 @@ LightBVHBuildContainer BVHLightSampler::buildBVH(
 
     // Initialize interior node and return node index and bounds
     LightBounds lb = Union(child0.bounds, child1.bounds);
-    CompactLightBounds cb(lb, m_allLightBounds);
+    CompactLightBounds cb(lb, lb.phi, m_allLightBounds);
     m_nodes[nodeIndex] = LightBVHNode::MakeInterior(child1.index, cb);
     return {lb, nodeIndex};
 }
