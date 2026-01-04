@@ -378,8 +378,9 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
             ComputeClusterEstimate(bsdf, bsdfFlags, representants[1]->compactLightBounds.Bound(tree.allLightBounds, false), p, n, wo, nodeIntensities[1])
         };
 
-        Float errBounds[2] = {0};
-
+        Float errBounds[2] = {1, 1};
+        bool canEnd = true;
+        
         if (nodeIntensities[0] != 0 && nodeIntensities[1] != 0) {
             const Bounds3f nodeBound0 = children[0]->compactLightBounds.Bounds(tree.allLightBounds);
             const Bounds3f nodeBound1 = children[1]->compactLightBounds.Bounds(tree.allLightBounds);
@@ -387,30 +388,51 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
             const Float diagonalLengthSqr0 = LengthSquared(nodeBound0.Diagonal());
             const Float diagonalLengthSqr1 = LengthSquared(nodeBound1.Diagonal());
 
-            Float dist2Min0 = DistanceSquared(p, ClosestPoint(p, nodeBound0));
-            Float dist2Min1 = DistanceSquared(p, ClosestPoint(p, nodeBound1));
+            Float dist2Min0 = std::max(DistanceSquared(p, ClosestPoint(p, nodeBound0)), 1e-6f);
+            Float dist2Min1 = std::max(DistanceSquared(p, ClosestPoint(p, nodeBound1)), 1e-6f);
 
-            if (dist2Min0 >= diagonalLengthSqr0 && dist2Min1 >= diagonalLengthSqr1) {
+            //Float dist2Max0 = std::max(DistanceSquared(p, FurthestPoint(p, nodeBound0)), 1e-6f);
+            //Float dist2Max1 = std::max(DistanceSquared(p, FurthestPoint(p, nodeBound1)), 1e-6f);
 
-                Float geomBound0 = ComputeGeometricBound(children[0], nodeBound0, shadingFrame, !tree.isPoint, p, wo);
-                Float geomBound1 = ComputeGeometricBound(children[1], nodeBound1, shadingFrame, !tree.isPoint, p, wo);
+            Float geomBound0 = ComputeGeometricBound(children[0], nodeBound0, shadingFrame, !tree.isPoint, p, wo);
+            Float geomBound1 = ComputeGeometricBound(children[1], nodeBound1, shadingFrame, !tree.isPoint, p, wo);
 
-                Float bound0 = nodeIntensities[0] * (geomBound0 / dist2Min0);
-                Float bound1 = nodeIntensities[1] * (geomBound1 / dist2Min1);
+            Float ub0 = geomBound0 * nodeIntensities[0];
+            Float ub1 = geomBound1 * nodeIntensities[1];
 
-                if (bsdf) {
-                    SampledSpectrum matBound0 = bsdf->Max_f(wo, nodeBound0, p);
-                    SampledSpectrum matBound1 = bsdf->Max_f(wo, nodeBound1, p);
-                    bound0 *= matBound0.MaxComponentValue();
-                    bound1 *= matBound1.MaxComponentValue();
-                }
+            if (bsdf) {
+                SampledSpectrum matBound0 = bsdf->Max_f(wo, nodeBound0, p);
+                SampledSpectrum matBound1 = bsdf->Max_f(wo, nodeBound1, p);
+                ub0 *= matBound0.MaxComponentValue();
+                ub1 *= matBound1.MaxComponentValue();
+            }
 
-                errBounds[0] = std::max(bound0, MachineEpsilon);
-                errBounds[1] = std::max(bound1, MachineEpsilon);
+            if (dist2Min0 > diagonalLengthSqr0 && dist2Min1 >= diagonalLengthSqr1) {
+            //if (dist2Min0 > 0 && dist2Min1 > 0) {
+                
+                Float dBoundMin0 = 1 / dist2Min0;
+                Float dBoundMin1 = 1 / dist2Min1;
+                //Float dBoundMax0 = 1 / dist2Max0;
+                //Float dBoundMax1 = 1 / dist2Max1;
+
+                errBounds[0] = std::max(dBoundMin0 * ub0, MachineEpsilon);
+                errBounds[1] = std::max(dBoundMin1 * ub1, MachineEpsilon);
+
+                //Float ebMin0 = std::max(dBoundMin0 * ub0, MachineEpsilon);
+                //Float ebMin1 = std::max(dBoundMin1 * ub1, MachineEpsilon);
+                //Float ebMax0 = std::max(dBoundMin0 * ub0, MachineEpsilon);
+                //Float ebMax1 = std::max(dBoundMin1 * ub1, MachineEpsilon);
+
+                //Float nwMin = std::min(1.f, ebMin0 / (ebMin0 + ebMin1));
+                //Float nwMax = std::min(1.f, ebMax0 / (ebMax0 + ebMax1));
+
+                //errBounds[0] = (nwMin + nwMax) * 0.5f;
+                //errBounds[1] = 1 - errBounds[0];
 
             } else {
-                errBounds[0] = nodeIntensities[0];
-                errBounds[1] = nodeIntensities[1];
+                errBounds[0] = ub0;
+                errBounds[1] = ub1;
+                canEnd = false;
             }
         } else {
             if (nodeIntensities[0] == 0 && nodeIntensities[1] == 0) {
@@ -419,6 +441,7 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
             // weight of the first child will be 1 or 0 based on whether the other child is 0.
             errBounds[0] = static_cast<Float>(nodeIntensities[1] == 0);
             errBounds[1] = 1 - errBounds[0];
+            canEnd = false;
         }
 
         weights[0] = std::min(1.f, errBounds[0] / (errBounds[0] + errBounds[1]));
@@ -434,7 +457,7 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
         estL = estL - estParent + clusterEst[0] + clusterEst[1];
         estParent = clusterEst[child];
 
-        if (errBounds[child] < m_threshold * estL) {
+        if (canEnd && errBounds[child] < m_threshold * estL) {
             int representantLightIndex = representants[child]->childOrLightIndex;
             Float repIntensity = representants[child]->compactLightBounds.PhiOrI();
             return SampledLight(tree.lights[representantLightIndex], pmf, nodeIntensities[child] / repIntensity);
