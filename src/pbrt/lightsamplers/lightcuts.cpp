@@ -381,15 +381,20 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
         Float errBounds[2] = {1, 1};
         bool canEnd = true;
         
+        constexpr Float minLengthSqr = 1e-6f;
+
         if (nodeIntensities[0] != 0 && nodeIntensities[1] != 0) {
             const Bounds3f nodeBound0 = children[0]->compactLightBounds.Bounds(tree.allLightBounds);
             const Bounds3f nodeBound1 = children[1]->compactLightBounds.Bounds(tree.allLightBounds);
 
-            const Float diagonalLengthSqr0 = LengthSquared(nodeBound0.Diagonal());
-            const Float diagonalLengthSqr1 = LengthSquared(nodeBound1.Diagonal());
+            const Float diagonalLengthSqr0 = std::max(LengthSquared(nodeBound0.Diagonal()), minLengthSqr);
+            const Float diagonalLengthSqr1 = std::max(LengthSquared(nodeBound1.Diagonal()), minLengthSqr);
 
-            Float dist2Min0 = std::max(DistanceSquared(p, ClosestPoint(p, nodeBound0)), 1e-6f);
-            Float dist2Min1 = std::max(DistanceSquared(p, ClosestPoint(p, nodeBound1)), 1e-6f);
+            Float dist2Min0 = DistanceSquared(p, ClosestPoint(p, nodeBound0));
+            Float dist2Min1 = DistanceSquared(p, ClosestPoint(p, nodeBound1));
+
+            //Float dist2Min0 = std::max(DistanceSquared(p, ClosestPoint(p, nodeBound0)), minLengthSqr);
+            //Float dist2Min1 = std::max(DistanceSquared(p, ClosestPoint(p, nodeBound1)), minLengthSqr);
 
             //Float dist2Max0 = std::max(DistanceSquared(p, FurthestPoint(p, nodeBound0)), 1e-6f);
             //Float dist2Max1 = std::max(DistanceSquared(p, FurthestPoint(p, nodeBound1)), 1e-6f);
@@ -432,7 +437,7 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
             } else {
                 errBounds[0] = ub0;
                 errBounds[1] = ub1;
-                canEnd = false;
+                //canEnd = false;
             }
         } else {
             if (nodeIntensities[0] == 0 && nodeIntensities[1] == 0) {
@@ -441,7 +446,7 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
             // weight of the first child will be 1 or 0 based on whether the other child is 0.
             errBounds[0] = static_cast<Float>(nodeIntensities[1] == 0);
             errBounds[1] = 1 - errBounds[0];
-            canEnd = false;
+            //canEnd = false;
         }
 
         weights[0] = std::min(1.f, errBounds[0] / (errBounds[0] + errBounds[1]));

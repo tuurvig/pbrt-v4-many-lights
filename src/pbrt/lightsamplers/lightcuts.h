@@ -303,11 +303,9 @@ private:
                 (!IsReflective(flags) && cosTheta >= 0)) {
                 cosTheta = 0;
             }
-        } else {
-            cosTheta = std::max(0.f, cosTheta);
         }
 
-        return I * G * M * cosTheta;
+        return I * G * M * std::abs(cosTheta);
     }
 
     PBRT_CPU_GPU
