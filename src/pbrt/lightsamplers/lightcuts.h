@@ -270,10 +270,10 @@ public:
     }
 private:
     // LightcutsLightSampler Private Methods
-    TreeNodeBuildSuccess buildLightTree(std::vector<LightBuildContainer>& lightcutsLights, LightcutsTree& tree, int start, int end, uint32_t bitTrail, int depth, float& u);
+    TreeNodeBuildSuccess buildLightTree(std::vector<LightBuildContainer>& lightcutsLights, LightcutsTree& tree, int start, int end, uint32_t bitTrail, int depth, Float& u);
 
 #ifdef PBRT_BUILD_GPU_RENDERER
-    bool buildLightTreeGPU(std::vector<LightBuildContainer> &lights, LightcutsTree& tree, HashMap<Light, LightLocation>& lightToLocation, float& u);
+    bool buildLightTreeGPU(std::vector<LightBuildContainer> &lights, LightcutsTree& tree, HashMap<Light, LightLocation>& lightToLocation, Float& u);
 #endif
     PBRT_CPU_GPU
     pstd::optional<SampledLight> SampleLightTree(const LightSampleContext& ctx, const LightcutsTree& tree, const BSDF* bsdf, Float pmf, Float u) const;
@@ -335,7 +335,7 @@ private:
             const Float boundCos = GeomTermBoundInFrame(point, coneFrame, refBounds);
             
             const Float halfAngle = std::acos(node->compactLightBounds.CosTheta_o());
-            const Float maxCos = std::max(0.f, std::cos(std::max(0.f, std::acos(boundCos) - halfAngle)));
+            const Float maxCos = std::max((Float)0, std::cos(std::max((Float)0, std::acos(boundCos) - halfAngle)));
 
             G *= maxCos;
         }
