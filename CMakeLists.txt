@@ -19,13 +19,11 @@ list (INSERT CMAKE_MODULE_PATH 0 "${PBRT_SOURCE_CODE}/cmake")
 option (PBRT_FLOAT_AS_DOUBLE "Use 64-bit floats" OFF)
 option (PBRT_BUILD_NATIVE_EXECUTABLE "Build executable optimized for CPU architecture of system pbrt was built on" ON)
 option (PBRT_DBG_LOGGING "Enable (very verbose!) debug logging" OFF)
-option (PBRT_NVTX "Insert NVTX annotations for NVIDIA Profiling and Debugging Tools" OFF)
+option (PBRT_NVTX "Insert NVTX annotations for NVIDIA Profiling and Debugging Tools" ON)
 option (PBRT_NVML "Use NVML for GPU performance measurement" OFF)
 option (PBRT_USE_PREGENERATED_RGB_TO_SPECTRUM_TABLES "Use pregenerated rgbspectrum_*.cpp files rather than running rgb2spec_opt to generate them at build time" OFF)
 set (PBRT_OPTIX7_PATH $ENV{PBRT_OPTIX7_PATH} CACHE PATH "Path to OptiX 7 SDK")
 set (PBRT_GPU_SHADER_MODEL "" CACHE STRING "")
-
-
 
 if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   message (STATUS "Setting build type to 'Release' as none was specified.")
@@ -938,7 +936,7 @@ if (PBRT_CUDA_ENABLED)
   add_dependencies (pbrt_embedded_ptx_lib pbrt_soa_generated)
   list (APPEND ALL_PBRT_LIBS pbrt_embedded_ptx_lib)
   if (PBRT_NVML)
-    list (APPEND ALL_PBRT_LIBS "nvidia-ml")
+    list (APPEND ALL_PBRT_LIBS "nvml")
   endif ()
 endif ()
 

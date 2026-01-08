@@ -45,7 +45,7 @@ class LightcutsTreeBuilderGPU final : public LightTreeBuilderGPU<uint32_t, Light
         return true;
     }
 
-    void FlattenTree(LightcutsTree& tree, std::vector<LightBuildContainer> &lights, HashMap<Light, LightLocation>& bitTrailContainer, float& u) {
+    void FlattenTree(LightcutsTree& tree, std::vector<LightBuildContainer> &lights, HashMap<Light, LightLocation>& bitTrailContainer, Float& u) {
         const LightTreeBuildState &state(State());
         if (state.nLights == 0)
             return;
@@ -122,7 +122,7 @@ class LightcutsTreeBuilderGPU final : public LightTreeBuilderGPU<uint32_t, Light
 
   private:
     uint32_t FlattenNode(LightcutsTree& tree, const std::vector<LightBuildContainer> &lights, const std::vector<LightTreeConstructionNodeGPU>& gpuNodes,
-         HashMap<Light, LightLocation>& bitTrailContainer, uint32_t nodeIdx, uint32_t bitTrail, uint32_t depth, uint32_t& representantIdx, float& u) const {
+         HashMap<Light, LightLocation>& bitTrailContainer, uint32_t nodeIdx, uint32_t bitTrail, uint32_t depth, uint32_t& representantIdx, Float& u) const {
 
          const LightTreeConstructionNodeGPU &gpuNode = gpuNodes[nodeIdx];
          CompactLightBounds cb(gpuNode.bounds, gpuNode.bounds.I, m_allLightBounds);
@@ -233,7 +233,7 @@ LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, All
 }
 
 TreeNodeBuildSuccess LightcutsLightSampler::buildLightTree(std::vector<LightBuildContainer>& lightcutsLights,
-    LightcutsTree& tree, int start, int end, uint32_t bitTrail, int depth, float& u) {
+    LightcutsTree& tree, int start, int end, uint32_t bitTrail, int depth, Float& u) {
     DCHECK_LT(start, end);
 
     if (end - start == 1) {
@@ -449,7 +449,7 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
             //canEnd = false;
         }
 
-        weights[0] = std::min(1.f, errBounds[0] / (errBounds[0] + errBounds[1]));
+        weights[0] = std::min((Float)1, errBounds[0] / (errBounds[0] + errBounds[1]));
         weights[1] = 1.f - weights[0];
 
         // Randomly sample a children node
@@ -493,8 +493,8 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleInfiniteLight(size_t n
 }
 
 #ifdef PBRT_BUILD_GPU_RENDERER
-bool LightcutsLightSampler::buildLightTreeGPU(std::vector<LightBuildContainer> &lights, LightcutsTree& tree, HashMap<Light, LightLocation>& lightToLocation, float& u) {
-    if (lights.size() < 100 || !Options->useGPU)
+bool LightcutsLightSampler::buildLightTreeGPU(std::vector<LightBuildContainer> &lights, LightcutsTree& tree, HashMap<Light, LightLocation>& lightToLocation, Float& u) {
+    if (true || lights.size() < 100 || !Options->useGPU)
         return false;
 
     LightcutsTreeBuilderGPU builder(tree.allLightBounds, tree.isPoint);

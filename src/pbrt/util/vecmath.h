@@ -1846,7 +1846,7 @@ class OctahedralVector {
   private:
     // OctahedralVector Private Methods
     PBRT_CPU_GPU
-    static Float Sign(Float v) { return std::copysign(1.f, v); }
+    static Float Sign(Float v) { return std::copysign((Float)1, v); }
 
     PBRT_CPU_GPU
     static uint16_t Encode(Float f) {
