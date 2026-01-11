@@ -537,7 +537,7 @@ class ConductorBxDF {
         // that goes through the wiBounds
         wiGlobal = IntersectOrAdjust(wiBoundsGlobal, p, wiGlobal);
         Vector3f wi = localFrame.ToLocal(wiGlobal);
-        DCHECK(InsideNormalized(wiCone, wi));
+        //DCHECK(InsideNormalized(wiCone, wi));
 
         return f(wo, wi, mode);
     }

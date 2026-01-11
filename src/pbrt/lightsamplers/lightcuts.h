@@ -10,37 +10,15 @@
 
 #include <pbrt/base/light.h>
 #include <pbrt/base/lightsampler.h>
-#include <pbrt/lights.h>
 #include <pbrt/bsdf.h>
 
+#include <pbrt/util/manylights.h>
 #include <pbrt/util/pstd.h>
 #include <pbrt/util/math.h>
 #include <pbrt/util/sampling.h>
 #include <pbrt/util/containers.h>
 
 namespace pbrt {
-
-struct alignas(32) LightcutsTreeNode {
-    LightcutsTreeNode() = default;
-
-    PBRT_CPU_GPU static LightcutsTreeNode MakeLeaf(uint32_t lightIdx, uint32_t representantIdx, const CompactLightBounds& bounds) {
-        return LightcutsTreeNode{bounds, representantIdx, {lightIdx, true}};
-    }
-
-    PBRT_CPU_GPU static LightcutsTreeNode MakeInterior(uint32_t childIdx, uint32_t representantIdx, const CompactLightBounds& bounds) {
-        return LightcutsTreeNode{bounds, representantIdx, {childIdx, false}};
-    }
-
-    std::string ToString() const;
-
-    // LightcutsTreeNode Public Members
-    CompactLightBounds compactLightBounds; // 24 bytes
-    uint32_t representantIdx; // 4 bytes
-    struct { // 4 bytes
-        uint32_t childOrLightIndex : 31;
-        uint32_t isLeaf : 1;
-    };
-};
 
 struct LightLocation {
     uint32_t treeIdx;
@@ -63,12 +41,6 @@ struct LightBuildContainer{
     uint32_t index;
 };
 
-struct TreeNodeBuildSuccess {
-    LightBounds bounds;
-    int representantIdx;
-    int nodeIdx;
-};
-
 // LightcutsLightSampler Definition
 class LightcutsLightSampler {
     
@@ -80,7 +52,7 @@ public:
         const size_t totalSize = m_pointTree.lights.size() + m_spotTree.lights.size() + m_otherLights.size();
         Float pmf = 1;
         if (!m_infiniteLights.empty()) {
-            pstd::optional<SampledLight> infiniteLightSample = SampleInfiniteLight(totalSize, pmf, u);
+            pstd::optional<SampledLight> infiniteLightSample = InfiniteLightSimpleSample(m_infiniteLights, totalSize, pmf, u);
             if (infiniteLightSample) {
                 return infiniteLightSample;
             }
@@ -198,7 +170,7 @@ public:
         const size_t totalSize = m_pointTree.lights.size() + m_spotTree.lights.size() + m_otherLights.size();
         Float pmf = 1;
         {
-            pstd::optional<SampledLight> infiniteLightSample = SampleInfiniteLight(totalSize, pmf, u);
+            pstd::optional<SampledLight> infiniteLightSample = InfiniteLightSimpleSample(m_infiniteLights, totalSize, pmf, u);
             if (infiniteLightSample) {
                 return infiniteLightSample;
             }
@@ -253,96 +225,15 @@ public:
 
     std::string ToString() const;
 
-    // Similarity Metric
-    PBRT_CPU_GPU
-    static Float EvaluateCost(const LightBounds& bounds, Float sceneDiagonalSqr, bool isPointLight) {
-        const Float diagonalLengthSqr = LengthSquared(bounds.bounds.Diagonal());
-
-        Float similarity = diagonalLengthSqr;
-        if (!isPointLight) {
-            const Float c_2 = sceneDiagonalSqr;
-            const Float boundingConeHalfAngle = bounds.cosTheta_o;
-            const Float oneMinusHalfAngle = 1.f - boundingConeHalfAngle;
-            similarity += c_2 * oneMinusHalfAngle * oneMinusHalfAngle;
-        }
-
-        return bounds.phi * similarity;
-    }
 private:
     // LightcutsLightSampler Private Methods
-    TreeNodeBuildSuccess buildLightTree(std::vector<LightBuildContainer>& lightcutsLights, LightcutsTree& tree, int start, int end, uint32_t bitTrail, int depth, Float& u);
+    LightcutsTreeNodeBuildSuccess buildLightTree(std::vector<LightBuildContainer>& lightcutsLights, LightcutsTree& tree, int start, int end, uint32_t bitTrail, int depth, Float& u);
 
 #ifdef PBRT_BUILD_GPU_RENDERER
     bool buildLightTreeGPU(std::vector<LightBuildContainer> &lights, LightcutsTree& tree, HashMap<Light, LightLocation>& lightToLocation, Float& u);
 #endif
     PBRT_CPU_GPU
     pstd::optional<SampledLight> SampleLightTree(const LightSampleContext& ctx, const LightcutsTree& tree, const BSDF* bsdf, Float pmf, Float u) const;
-
-    PBRT_CPU_GPU
-    pstd::optional<SampledLight> SampleInfiniteLight(size_t nLights, Float &pmf, Float &u) const;
-
-    PBRT_CPU_GPU
-    static Float ComputeClusterEstimate(const BSDF* bsdf, BxDFFlags flags, Point3f lightPos, Point3f point, Normal3f n, Vector3f wo, Float phi) {
-        Float I = phi;
-
-        Float minDistSqr = DistanceSquared(point, lightPos);
-        Float clampedDistSqr = std::max(minDistSqr, MachineEpsilon);
-        Float G = 1.0f / clampedDistSqr;
-
-        n = bsdf ? Normal3f(bsdf->shadingFrame.z) : n;
-
-        Vector3f wi = lightPos - point;
-        wi /= std::sqrt(clampedDistSqr);
-        Float cosTheta = Dot(n, wi);
-
-        Float M = 1.f;
-        if (bsdf) {
-            SampledSpectrum sp = bsdf->f(wo, wi);
-            Float M = sp.Average();
-            if ((!IsTransmissive(flags) && cosTheta < 0) ||
-                (!IsReflective(flags) && cosTheta >= 0)) {
-                cosTheta = 0;
-            }
-        }
-
-        return I * G * M * std::abs(cosTheta);
-    }
-
-    PBRT_CPU_GPU
-    static Float GeomTermBoundInFrame(Point3f point, const Frame& frame, const Bounds3f& bounds) {
-        // furthest point on the box along normal N
-        Float zMax = MaxDistAlong(point, frame.z, bounds);
-        if (zMax <= 0) return 0.0f;
-
-        const Float xMin = AbsMinDistAlong(point, frame.x, bounds);
-        const Float yMin = AbsMinDistAlong(point, frame.y, bounds);
-        const Float hyp = SafeSqrt(Sqr(xMin) + Sqr(yMin) + Sqr(zMax));
-        return zMax / hyp;
-    }
-
-
-    PBRT_CPU_GPU
-    static Float ComputeGeometricBound(const LightcutsTreeNode* node, const Bounds3f& nodeBounds, const Frame& frame, bool isOriented, Point3f point, Vector3f wo) {
-        
-        Float G = GeomTermBoundInFrame(point, frame, nodeBounds);
-
-        if (isOriented) {
-            const Point3f refMin = point + (point - nodeBounds.pMax);
-            const Point3f refMax = point + (point - nodeBounds.pMin);
-            const Bounds3f refBounds(refMin, refMax);
-
-            Frame coneFrame = Frame::FromZ(node->compactLightBounds.W());
-            const Float boundCos = GeomTermBoundInFrame(point, coneFrame, refBounds);
-            
-            const Float halfAngle = std::acos(node->compactLightBounds.CosTheta_o());
-            const Float maxCos = std::max((Float)0, std::cos(std::max((Float)0, std::acos(boundCos) - halfAngle)));
-
-            G *= maxCos;
-        }
-
-        return G;
-    }
-
 
     // LightcutsLightSampler Private Members
     LightcutsTree m_pointTree;

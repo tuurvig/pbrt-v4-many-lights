@@ -21,7 +21,7 @@ namespace pbrt{
 
 struct LightBVHCostEvaluator {
     PBRT_GPU Float operator()(const LightBounds &bounds) const {
-        return BVHLightSampler::EvaluateCost(bounds);
+        return CostSAOH(bounds);
     }
 };
 
@@ -307,12 +307,6 @@ bool BVHLightSampler::buildBVHGPU(
 
 std::string BVHLightSampler::ToString() const {
     return StringPrintf("[ BVHLightSampler nodes: %s ]", m_nodes);
-}
-
-std::string LightBVHNode::ToString() const {
-    return StringPrintf(
-        "[ LightBVHNode lightBounds: %s childOrLightIndex: %d isLeaf: %d ]", lightBounds,
-        childOrLightIndex, isLeaf);
 }
 
 }

@@ -650,6 +650,7 @@ SET (PBRT_UTIL_SOURCE
   src/pbrt/util/log.cpp
   src/pbrt/util/loopsubdiv.cpp
   src/pbrt/util/lowdiscrepancy.cpp
+  src/pbrt/util/manylights.cpp
   src/pbrt/util/math.cpp
   src/pbrt/util/memory.cpp
   src/pbrt/util/mesh.cpp
@@ -691,6 +692,7 @@ SET (PBRT_UTIL_SOURCE_HEADERS
   src/pbrt/util/log.h
   src/pbrt/util/loopsubdiv.h
   src/pbrt/util/lowdiscrepancy.h
+  src/pbrt/util/manylights.h
   src/pbrt/util/math.h
   src/pbrt/util/memory.h
   src/pbrt/util/mesh.h
@@ -765,6 +767,7 @@ if (PBRT_CUDA_ENABLED)
    src/pbrt/util/log.cpp
 #   src/pbrt/util/loopsubdiv.cpp
    src/pbrt/util/lowdiscrepancy.cpp
+   src/pbrt/util/manylights.cpp
    src/pbrt/util/math.cpp
 #   src/pbrt/util/memory.cpp
    src/pbrt/util/mesh.cpp
