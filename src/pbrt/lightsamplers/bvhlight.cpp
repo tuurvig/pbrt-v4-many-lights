@@ -8,6 +8,7 @@
 #include <pbrt/gpu/lighttreebuilder.h>
 #include <pbrt/util/math.h>
 #include <pbrt/util/pstd.h>
+#include <pbrt/options.h>
 
 #include <algorithm>
 #include <array>
@@ -293,7 +294,7 @@ LightBVHBuildContainer BVHLightSampler::buildBVH(
 #ifdef PBRT_BUILD_GPU_RENDERER
 bool BVHLightSampler::buildBVHGPU(
     std::vector<LightBVHBuildContainer> &bvhLights) {
-    if (bvhLights.size() < 100)
+    if (bvhLights.size() < 100 || !Options->useGPU)
         return false;
 
     BVHLightTreeBuilder builder(m_allLightBounds);
