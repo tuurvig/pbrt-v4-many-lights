@@ -24,7 +24,7 @@ struct LightcutsTreeNodeCostEvaluator {
         isPoint(isPoint) {}
 
     PBRT_CPU_GPU Float operator()(const LightBounds &bounds) const {
-        return LightcutsLightSampler::EvaluateCost(bounds, sceneBoundsDiagonalSqr, isPoint);
+        return SimilarityMetric(bounds, sceneBoundsDiagonalSqr, isPoint);
     }
 
     Float sceneBoundsDiagonalSqr;
@@ -232,7 +232,7 @@ LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, All
                                m_lightToLocation.capacity() * (sizeof(Light) + sizeof(LightLocation));
 }
 
-TreeNodeBuildSuccess LightcutsLightSampler::buildLightTree(std::vector<LightBuildContainer>& lightcutsLights,
+LightcutsTreeNodeBuildSuccess LightcutsLightSampler::buildLightTree(std::vector<LightBuildContainer>& lightcutsLights,
     LightcutsTree& tree, int start, int end, uint32_t bitTrail, int depth, Float& u) {
     DCHECK_LT(start, end);
 
@@ -291,8 +291,8 @@ TreeNodeBuildSuccess LightcutsLightSampler::buildLightTree(std::vector<LightBuil
 
         Float diagonalLenSqr = LengthSquared(tree.allLightBounds.Diagonal());
         for (int i = 0, max = nBuckets - 1; i < max; ++i) {
-            const Float leftCost = EvaluateCost(leftBoundsSum[i], diagonalLenSqr, tree.isPoint);
-            const Float rightCost = EvaluateCost(rightBoundsSum[i + 1], diagonalLenSqr, tree.isPoint);
+            const Float leftCost = SimilarityMetric(leftBoundsSum[i], diagonalLenSqr, tree.isPoint);
+            const Float rightCost = SimilarityMetric(rightBoundsSum[i + 1], diagonalLenSqr, tree.isPoint);
 
             const Float cost = rightCost + leftCost;
 
@@ -330,9 +330,9 @@ TreeNodeBuildSuccess LightcutsLightSampler::buildLightTree(std::vector<LightBuil
     size_t nodeIndex = tree.nodes.size();
     tree.nodes.emplace_back();
     CHECK_LT(depth, 64);
-    TreeNodeBuildSuccess left = buildLightTree(lightcutsLights, tree, start, mid, bitTrail, depth + 1, u);
+    LightcutsTreeNodeBuildSuccess left = buildLightTree(lightcutsLights, tree, start, mid, bitTrail, depth + 1, u);
     DCHECK_EQ(nodeIndex + 1, left.nodeIdx);
-    TreeNodeBuildSuccess right = buildLightTree(lightcutsLights, tree, mid, end, bitTrail | (1u << depth), depth + 1, u);
+    LightcutsTreeNodeBuildSuccess right = buildLightTree(lightcutsLights, tree, mid, end, bitTrail | (1u << depth), depth + 1, u);
 
     Float intensities[2] = {left.bounds.phi, right.bounds.phi};
     Float nodePMF;
@@ -472,26 +472,6 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
     return SampledLight(tree.lights[node->childOrLightIndex], pmf);
 }
 
-pstd::optional<SampledLight> LightcutsLightSampler::SampleInfiniteLight(size_t nLights, Float &pmf, Float &u) const {
-    // Compute infinite light sampling probability _pInfinite_
-    Float pInfinite = Float(m_infiniteLights.size()) /
-                      Float(m_infiniteLights.size() + (nLights == 0 ? 0 : 1));
-
-    if (u < pInfinite) {
-        // Sample infinite lights with uniform probability
-        u /= pInfinite;
-        int index =
-            std::min<int>(u * m_infiniteLights.size(), m_infiniteLights.size() - 1);
-        Float pmf = pInfinite / m_infiniteLights.size();
-        return SampledLight{m_infiniteLights[index], pmf};
-    }
-
-    u = std::min<Float>((u - pInfinite) / (1 - pInfinite), OneMinusEpsilon);
-    pmf = 1 - pInfinite;
-
-    return {};
-}
-
 #ifdef PBRT_BUILD_GPU_RENDERER
 bool LightcutsLightSampler::buildLightTreeGPU(std::vector<LightBuildContainer> &lights, LightcutsTree& tree, HashMap<Light, LightLocation>& lightToLocation, Float& u) {
     if (true || lights.size() < 100 || !Options->useGPU)
@@ -508,11 +488,6 @@ bool LightcutsLightSampler::buildLightTreeGPU(std::vector<LightBuildContainer> &
 
 std::string LightcutsLightSampler::ToString() const {
     return StringPrintf("[ LightcutsLightSampler point tree nodes: %s spot tree nodes: %s ]", m_pointTree.nodes, m_spotTree.nodes);
-}
-
-std::string LightcutsTreeNode::ToString() const {
-    return StringPrintf(
-        "[ LightcutsLightSampler lightBounds: %s childOrLightIndex: %d isLeaf: %d ]", compactLightBounds, childOrLightIndex, isLeaf);
 }
 
 }
