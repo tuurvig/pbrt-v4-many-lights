@@ -19,7 +19,7 @@ list (INSERT CMAKE_MODULE_PATH 0 "${PBRT_SOURCE_CODE}/cmake")
 option (PBRT_FLOAT_AS_DOUBLE "Use 64-bit floats" OFF)
 option (PBRT_BUILD_NATIVE_EXECUTABLE "Build executable optimized for CPU architecture of system pbrt was built on" ON)
 option (PBRT_DBG_LOGGING "Enable (very verbose!) debug logging" OFF)
-option (PBRT_NVTX "Insert NVTX annotations for NVIDIA Profiling and Debugging Tools" ON)
+option (PBRT_NVTX "Insert NVTX annotations for NVIDIA Profiling and Debugging Tools" OFF)
 option (PBRT_NVML "Use NVML for GPU performance measurement" OFF)
 option (PBRT_USE_PREGENERATED_RGB_TO_SPECTRUM_TABLES "Use pregenerated rgbspectrum_*.cpp files rather than running rgb2spec_opt to generate them at build time" OFF)
 set (PBRT_OPTIX7_PATH $ENV{PBRT_OPTIX7_PATH} CACHE PATH "Path to OptiX 7 SDK")
@@ -242,7 +242,7 @@ of CUDA installed, please update your PATH.")
             INTERFACE
                 "$<$<COMPILE_LANGUAGE:CUDA>:--std=c++17;--use_fast_math;--expt-relaxed-constexpr;--extended-lambda;--forward-unknown-to-host-compiler>"
                 # The "$<NOT:$<BOOL:$<TARGET_PROPERTY:CUDA_PTX_COMPILATION>>>" part is to not add debugging symbols when generating PTX files for OptiX; see https://github.com/mmp/pbrt-v4/issues/69#issuecomment-715499748.
-                "$<$<COMPILE_LANGUAGE:CUDA>:$<IF:$<AND:$<CONFIG:Debug>,$<NOT:$<BOOL:$<TARGET_PROPERTY:CUDA_PTX_COMPILATION>>>>,-G;-g,-lineinfo;-maxrregcount;128>>"
+                "$<$<COMPILE_LANGUAGE:CUDA>:$<IF:$<AND:$<CONFIG:Debug>,$<NOT:$<BOOL:$<TARGET_PROPERTY:CUDA_PTX_COMPILATION>>>>,-g,-lineinfo;-maxrregcount;128>>"
         )
 
         if (PBRT_GPU_SHADER_MODEL STREQUAL "")
@@ -689,6 +689,7 @@ SET (PBRT_UTIL_SOURCE_HEADERS
   src/pbrt/util/gui.h
   src/pbrt/util/hash.h
   src/pbrt/util/image.h
+  #src/pbrt/util/lighttree_generic.h
   src/pbrt/util/log.h
   src/pbrt/util/loopsubdiv.h
   src/pbrt/util/lowdiscrepancy.h

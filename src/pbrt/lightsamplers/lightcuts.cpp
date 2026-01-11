@@ -3,6 +3,8 @@
 #include <pbrt/util/stats.h>
 #include <pbrt/util/vecmath.h>
 
+#include <pbrt/util/hash.h>
+
 #ifdef PBRT_BUILD_GPU_RENDERER
 #include <pbrt/gpu/lighttreebuilder.h>
 #include <pbrt/util/math.h>
@@ -251,9 +253,10 @@ LightcutsTreeNodeBuildSuccess LightcutsLightSampler::buildLightTree(std::vector<
 
     // Choose split dimension and position using Similarity Metric
     // Compute bounds and centroid bounds for lights
-    Bounds3f centroidBounds;
+    Bounds3f bounds, centroidBounds;
     for (int i = start; i < end; ++i) {
         const LightBounds& lb(lightcutsLights[i].bounds);
+        bounds = Union(bounds, lb.bounds);
         centroidBounds = Union(centroidBounds, lb.Centroid());
     }
 
@@ -360,12 +363,14 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
     Float estParent = 0;
     Float clusterEst[2] = {};
 
+    constexpr Float floatUintMax = 0x1p32f;
+    uint32_t currentU = static_cast<uint32_t>(u * floatUintMax);
+
     while (!node->isLeaf) {
         int childrenIndices[2] = {nodeIndex + 1, node->childOrLightIndex};
-        Float weights[2] = {0};
 
-        const LightcutsTreeNode *children[2] = {&tree.nodes[nodeIndex + 1],
-                                                &tree.nodes[node->childOrLightIndex]};
+        const LightcutsTreeNode *children[2] = {&tree.nodes[childrenIndices[0]],
+                                                &tree.nodes[childrenIndices[1]]};
         
         const Float nodeIntensities[2] = {children[0]->compactLightBounds.PhiOrI(),
                                           children[1]->compactLightBounds.PhiOrI()};
@@ -379,7 +384,6 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
         };
 
         Float errBounds[2] = {1, 1};
-        bool canEnd = true;
         
         constexpr Float minLengthSqr = 1e-6f;
 
@@ -420,8 +424,8 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
                 //Float dBoundMax0 = 1 / dist2Max0;
                 //Float dBoundMax1 = 1 / dist2Max1;
 
-                errBounds[0] = std::max(dBoundMin0 * ub0, MachineEpsilon);
-                errBounds[1] = std::max(dBoundMin1 * ub1, MachineEpsilon);
+                errBounds[0] = dBoundMin0 * ub0;
+                errBounds[1] = dBoundMin1 * ub1;
 
                 //Float ebMin0 = std::max(dBoundMin0 * ub0, MachineEpsilon);
                 //Float ebMin1 = std::max(dBoundMin1 * ub1, MachineEpsilon);
@@ -449,20 +453,42 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
             //canEnd = false;
         }
 
-        weights[0] = std::min((Float)1, errBounds[0] / (errBounds[0] + errBounds[1]));
-        weights[1] = 1.f - weights[0];
+        if (errBounds[0] < MachineEpsilon) {
+            
+            if (errBounds[1] < MachineEpsilon) {
+                return {};
+            }
+            errBounds[0] = MachineEpsilon;
+        } else if (errBounds[1] < MachineEpsilon){
+            errBounds[1] = MachineEpsilon;
+        }
+
+        Float weights[2] = {0};
+        weights[0] = std::min(OneMinusEpsilon, errBounds[0] / (errBounds[0] + errBounds[1]));
+        weights[1] = 1 - weights[0];
+        
+        uint32_t threshold = static_cast<uint32_t>(weights[0] * floatUintMax);
 
         // Randomly sample a children node
-        Float nodePMF;
-        int child = SampleDiscrete(weights, u, &nodePMF, &u);
-        pmf *= nodePMF;
-        nodeIndex = (child == 0) ? (nodeIndex + 1) : node->childOrLightIndex;
+        int child = 0;
+        if (currentU < threshold) {
+            currentU = static_cast<uint32_t>((static_cast<float>(currentU) / weights[0]));
+        } else {
+            child = 1;
+
+            currentU -= threshold;
+            currentU = static_cast<uint32_t>((static_cast<float>(currentU) / weights[1]));
+        }
+        
+        currentU ^= FastIntegerHash(nodeIndex);
+        pmf *= weights[child];
+        nodeIndex = childrenIndices[child];
         node = &tree.nodes[nodeIndex];
 
         estL = estL - estParent + clusterEst[0] + clusterEst[1];
         estParent = clusterEst[child];
 
-        if (canEnd && errBounds[child] < m_threshold * estL) {
+        if (errBounds[child] < m_threshold * estL) {
             int representantLightIndex = representants[child]->childOrLightIndex;
             Float repIntensity = representants[child]->compactLightBounds.PhiOrI();
             return SampledLight(tree.lights[representantLightIndex], pmf, nodeIntensities[child] / repIntensity);

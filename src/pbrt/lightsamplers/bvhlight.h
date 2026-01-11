@@ -11,6 +11,7 @@
 #include <pbrt/base/lightsampler.h>
 
 #include <pbrt/util/manylights.h>
+#include <pbrt/util/hash.h>
 #include <pbrt/util/pstd.h>
 #include <pbrt/util/sampling.h>
 #include <pbrt/util/containers.h>
@@ -49,31 +50,62 @@ class BVHLightSampler {
         Normal3f n = ctx.ns;
         int nodeIndex = 0;
 
+        constexpr Float floatUintMax = 0x1p32f;
+        uint32_t currentU = static_cast<uint32_t>(u * floatUintMax);
+
+        Float importance = 0.f;
         while (true) {
             // Process light BVH node for light sampling
             LightBVHNode node = m_nodes[nodeIndex];
             if (!node.isLeaf) {
+                int childrenIndices[2] = {nodeIndex + 1, node.childOrLightIndex};
+
                 // Compute light BVH child node importances
-                const LightBVHNode *children[2] = {&m_nodes[nodeIndex + 1],
-                                                   &m_nodes[node.childOrLightIndex]};
+                const LightBVHNode *children[2] = {&m_nodes[childrenIndices[0]],
+                                                   &m_nodes[childrenIndices[1]]};
                 Float ci[2] = {
                     children[0]->lightBounds.Importance(p, n, m_allLightBounds),
                     children[1]->lightBounds.Importance(p, n, m_allLightBounds)};
-                if (ci[0] == 0 && ci[1] == 0)
-                    return {};
 
-                // Randomly sample light BVH child node
-                Float nodePMF;
-                int child = SampleDiscrete(ci, u, &nodePMF, &u);
-                pmf *= nodePMF;
-                nodeIndex = (child == 0) ? (nodeIndex + 1) : node.childOrLightIndex;
+                if (ci[0] < MachineEpsilon) {
+                    if (ci[1] < MachineEpsilon) {
+                        return {};
+                    }
+                    nodeIndex = childrenIndices[1];
+                    importance = ci[1];
+                    continue;
+                } else if (ci[1] < MachineEpsilon){
+                    nodeIndex = childrenIndices[1];
+                    importance = ci[0];
+                    continue;
+                }
+
+                Float weights[2] = {0};
+                weights[0] = std::min(OneMinusEpsilon, ci[0] / (ci[0] + ci[1]));
+                weights[1] = 1 - weights[0];
+
+                uint32_t threshold = static_cast<uint32_t>(weights[0] * floatUintMax);
+                int child = 0;
+                if (currentU < threshold) {
+                    currentU = static_cast<uint32_t>((static_cast<float>(currentU) / weights[0]));
+                } else {
+                    child = 1;
+
+                    currentU -= threshold;
+                    currentU = static_cast<uint32_t>((static_cast<float>(currentU) / weights[1]));
+                }
+
+                nodeIndex = childrenIndices[child];
+                importance = ci[child];
+                currentU ^= FastIntegerHash(nodeIndex);
+                pmf *= weights[child];
 
             } else {
-                // Confirm light has nonzero importance before returning light sample
+                //Confirm light has nonzero importance before returning light sample
+                //Float imp = node.lightBounds.Importance(p, n, m_allLightBounds);
                 if (nodeIndex > 0)
-                    DCHECK_GT(node.lightBounds.Importance(p, n, m_allLightBounds), 0);
-                if (nodeIndex > 0 ||
-                    node.lightBounds.Importance(p, n, m_allLightBounds) > 0)
+                    DCHECK_GT(importance, 0);
+                if (nodeIndex > 0 || importance > 0)
                     return SampledLight(m_lights[node.childOrLightIndex], pmf);
                 return {};
             }

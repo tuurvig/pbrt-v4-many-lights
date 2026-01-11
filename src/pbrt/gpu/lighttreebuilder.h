@@ -219,7 +219,7 @@ PBRT_GPU uint32_t FindNearestNeighbor(uint32_t nLights, uint32_t clusterIdx,
             neighborBounds = Union(neighborBounds, clusterBounds);
 
             float newCost = evaluator(neighborBounds);
-            uint32_t newCostInt = __float_as_uint(newCost);
+            uint32_t newCostInt = FloatToBits(newCost);
 
             uint32_t encode0 = EncodeRelativeOffset(laneWarpIdx, neighborIdx);
             uint32_t encode1 = (newCostInt << 1) & kEncodeMask;
