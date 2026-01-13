@@ -204,7 +204,10 @@ LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, All
         bool buildOnGPU = buildLightTreeGPU(pointLights, m_pointTree, true, m_lightToLocation, u);
         if (!buildOnGPU)
 #endif
-            buildLightTree(pointLights, m_pointTree, true, 0, pointLights.size(), 0, 0, u);
+        {
+            LightcutsNodeEmitter emitter(m_pointTree, m_lightToLocation, true);
+            BuildLightTree<16, LightcutsBuildContainer, LightcutsCostEvaluator, LightcutsNodeEmitter>(pointLights, 0, pointLights.size(), 0, 0, LightcutsCostEvaluator(m_pointTree.allLightBounds, true), emitter, u);
+        }
     }
 
     if (!spotLights.empty()) {
@@ -212,7 +215,10 @@ LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, All
         bool buildOnGPU = buildLightTreeGPU(spotLights, m_spotTree, false, m_lightToLocation, u);
         if (!buildOnGPU)
 #endif
-            buildLightTree(spotLights, m_spotTree, false, 0, spotLights.size(), 0, 0, u);
+        {
+            LightcutsNodeEmitter emitter(m_spotTree, m_lightToLocation, false);
+            BuildLightTree<16, LightcutsBuildContainer, LightcutsCostEvaluator, LightcutsNodeEmitter>(spotLights, 0, spotLights.size(), 0, 0, LightcutsCostEvaluator(m_spotTree.allLightBounds, false), emitter, u);
+        }
     }
 
     lightCutsLightTreeBytes += (m_pointTree.lights.size() + m_spotTree.lights.size() + m_otherLights.size() + m_infiniteLights.size()) * sizeof(Light) + 
@@ -220,119 +226,6 @@ LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, All
                                m_lightToLocation.capacity() * (sizeof(Light) + sizeof(LightLocation));
 }
 
-LightcutsBuildResult LightcutsLightSampler::buildLightTree(std::vector<LightcutsBuildContainer>& lightcutsLights,
-    LightcutsTree& tree, bool isPoint, int start, int end, uint32_t bitTrail, int depth, Float& u) {
-    DCHECK_LT(start, end);
-
-    if (end - start == 1) {
-        const LightcutsBuildContainer& leaf(lightcutsLights[start]);
-        CompactLightBounds cb(leaf.bounds, leaf.bounds.I, tree.allLightBounds);
-
-        int nodeIndex = tree.nodes.size();
-        int lightIndex = tree.lights.size();
-
-        tree.lights.emplace_back(leaf.light);
-        tree.nodes.emplace_back(LightcutsTreeNode::MakeLeaf(lightIndex, nodeIndex, cb));
-        m_lightToLocation.Insert(leaf.light, {isPoint, bitTrail});
-        return {leaf.bounds, nodeIndex, nodeIndex};
-    }
-
-    // Choose split dimension and position using Similarity Metric
-    // Compute bounds and centroid bounds for lights
-    Bounds3f bounds, centroidBounds;
-    for (int i = start; i < end; ++i) {
-        const LightBounds& lb(lightcutsLights[i].bounds);
-        bounds = Union(bounds, lb.bounds);
-        centroidBounds = Union(centroidBounds, lb.Centroid());
-    }
-
-    Float minCost = Infinity;
-    int minCostSplitBucket = -1;
-    int minCostSplitDim = -1;
-
-    constexpr int nBuckets = 16;
-    for (int dim = 0; dim < 3; ++dim) {
-        // Compute minimum cost bucket for splitting along dim
-        if (centroidBounds.pMax[dim] == centroidBounds.pMin[dim]){
-            continue;
-        }
-
-        LightBounds bucketLightBounds[nBuckets];
-        for (int i = start; i < end; ++i) {
-            Point3f pc = lightcutsLights[i].bounds.Centroid();
-            int b = nBuckets * centroidBounds.Offset(pc)[dim];
-            if (b == nBuckets){
-                b = nBuckets - 1;
-            }
-            DCHECK_GE(b, 0);
-            DCHECK_LT(b, nBuckets);
-            bucketLightBounds[b] = Union(bucketLightBounds[b], lightcutsLights[i].bounds);
-        }
-
-        LightBounds leftBoundsSum[nBuckets], rightBoundsSum[nBuckets];
-        leftBoundsSum[0] = bucketLightBounds[0];
-        rightBoundsSum[nBuckets - 1] = bucketLightBounds[nBuckets - 1];
-
-        for (int lower = 1, upper = nBuckets - 2; lower < nBuckets; ++lower, --upper) {
-            leftBoundsSum[lower] = Union(bucketLightBounds[lower], leftBoundsSum[lower - 1]);
-            rightBoundsSum[upper] = Union(bucketLightBounds[upper], rightBoundsSum[upper + 1]);
-        }
-
-        Float diagonalLenSqr = LengthSquared(tree.allLightBounds.Diagonal());
-        for (int i = 0, max = nBuckets - 1; i < max; ++i) {
-            const Float leftCost = SimilarityMetric(leftBoundsSum[i], diagonalLenSqr, isPoint);
-            const Float rightCost = SimilarityMetric(rightBoundsSum[i + 1], diagonalLenSqr, isPoint);
-
-            const Float cost = rightCost + leftCost;
-
-            if (cost > 0 && cost < minCost) {
-                minCost = cost;
-                minCostSplitBucket = i;
-                minCostSplitDim = dim;
-            }
-        }
-    }
-
-    // Partition lights according to chosen split
-    int mid;
-    if (minCostSplitDim == -1) {
-        mid = (start + end) / 2;
-    } else {
-        const auto* pmid = std::partition(&lightcutsLights[start], &lightcutsLights[end - 1] + 1,
-            [=](const LightcutsBuildContainer& container) {
-                int b = nBuckets * centroidBounds.Offset(container.bounds.Centroid())[minCostSplitDim];
-                if (b == nBuckets) {
-                    b = nBuckets - 1;
-                }
-                DCHECK_GE(b, 0);
-                DCHECK_LT(b, nBuckets);
-                return b <= minCostSplitBucket;
-            });
-        mid = pmid - &lightcutsLights[0];
-        if (mid == start || mid == end) {
-            mid = (start + end) / 2;
-        }
-        DCHECK(mid > start && mid < end);
-    }
-
-    // Allocate interior and recursively initialize children
-    size_t nodeIndex = tree.nodes.size();
-    tree.nodes.emplace_back();
-    CHECK_LT(depth, 64);
-    LightcutsBuildResult left = buildLightTree(lightcutsLights, tree, isPoint, start, mid, bitTrail, depth + 1, u);
-    DCHECK_EQ(nodeIndex + 1, left.nodeIdx);
-    LightcutsBuildResult right = buildLightTree(lightcutsLights, tree, isPoint, mid, end, bitTrail | (1u << depth), depth + 1, u);
-
-    Float intensities[2] = {left.bounds.phi, right.bounds.phi};
-    Float nodePMF;
-    int child = SampleDiscrete(intensities, u, &nodePMF, &u);
-    int successorIdx = (child == 0) ? left.representantIdx : right.representantIdx;
-
-    LightBounds lb = Union(left.bounds, right.bounds);
-    CompactLightBounds cb(lb, lb.I, tree.allLightBounds);
-    tree.nodes[nodeIndex] = LightcutsTreeNode::MakeInterior(right.nodeIdx, successorIdx, cb);
-    return {lb, successorIdx, static_cast<int>(nodeIndex)};
-}
 
 PBRT_CPU_GPU
 pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightSampleContext& ctx, const LightcutsTree& tree, bool isPoint, const BSDF* bsdf, Float pmf, Float u) const {
@@ -353,7 +246,7 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
     uint32_t currentU = static_cast<uint32_t>(u * floatUintMax);
 
     while (!node->isLeaf) {
-        int childrenIndices[2] = {nodeIndex + 1, node->childOrLightIndex};
+        uint32_t childrenIndices[2] = {nodeIndex + 1, node->childOrLightIndex};
 
         const LightcutsTreeNode *children[2] = {&tree.nodes[childrenIndices[0]],
                                                 &tree.nodes[childrenIndices[1]]};

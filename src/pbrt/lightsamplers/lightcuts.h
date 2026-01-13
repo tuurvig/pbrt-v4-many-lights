@@ -20,11 +20,6 @@
 
 namespace pbrt {
 
-struct LightLocation {
-    uint32_t treeIdx;
-    uint32_t identifier;
-};
-
 // LightcutsLightSampler Definition
 class LightcutsLightSampler {
     
@@ -211,7 +206,7 @@ public:
 
 private:
     // LightcutsLightSampler Private Methods
-    LightcutsBuildResult buildLightTree(std::vector<LightcutsBuildContainer>& lightcutsLights, LightcutsTree& tree, bool isPoint, int start, int end, uint32_t bitTrail, int depth, Float& u);
+
 
 #ifdef PBRT_BUILD_GPU_RENDERER
     bool buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights, LightcutsTree& tree, bool isPoint, HashMap<Light, LightLocation>& lightToLocation, Float& u);
