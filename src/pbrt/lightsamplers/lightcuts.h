@@ -25,22 +25,6 @@ struct LightLocation {
     uint32_t identifier;
 };
 
-struct LightcutsTree {
-    LightcutsTree(bool isPoint, Allocator alloc);
-    pstd::vector<Light> lights;
-    pstd::vector<LightcutsTreeNode> nodes;
-    Bounds3f allLightBounds;
-    bool isPoint;
-};
-
-struct LightBuildContainer{
-    LightBuildContainer(const LightBounds& bounds, const Light& light) 
-        : bounds(bounds), light(light) {}
-    LightBounds bounds;
-    Light light;
-    uint32_t index;
-};
-
 // LightcutsLightSampler Definition
 class LightcutsLightSampler {
     
@@ -68,9 +52,9 @@ public:
         pmf *= groupPMF;
 
         if (groupIdx == 0) {
-            return SampleLightTree(ctx, m_spotTree, bsdf, pmf, u);
+            return SampleLightTree(ctx, m_spotTree, false, bsdf, pmf, u);
         } else if (groupIdx == 1) {
-            return SampleLightTree(ctx, m_pointTree, bsdf, pmf, u);
+            return SampleLightTree(ctx, m_pointTree, true, bsdf, pmf, u);
         }
 
         int index = std::min<int>(u * m_otherLights.size(), m_otherLights.size() - 1);
@@ -227,13 +211,13 @@ public:
 
 private:
     // LightcutsLightSampler Private Methods
-    LightcutsTreeNodeBuildSuccess buildLightTree(std::vector<LightBuildContainer>& lightcutsLights, LightcutsTree& tree, int start, int end, uint32_t bitTrail, int depth, Float& u);
+    LightcutsBuildResult buildLightTree(std::vector<LightcutsBuildContainer>& lightcutsLights, LightcutsTree& tree, bool isPoint, int start, int end, uint32_t bitTrail, int depth, Float& u);
 
 #ifdef PBRT_BUILD_GPU_RENDERER
-    bool buildLightTreeGPU(std::vector<LightBuildContainer> &lights, LightcutsTree& tree, HashMap<Light, LightLocation>& lightToLocation, Float& u);
+    bool buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights, LightcutsTree& tree, bool isPoint, HashMap<Light, LightLocation>& lightToLocation, Float& u);
 #endif
     PBRT_CPU_GPU
-    pstd::optional<SampledLight> SampleLightTree(const LightSampleContext& ctx, const LightcutsTree& tree, const BSDF* bsdf, Float pmf, Float u) const;
+    pstd::optional<SampledLight> SampleLightTree(const LightSampleContext& ctx, const LightcutsTree& tree, bool isPoint, const BSDF* bsdf, Float pmf, Float u) const;
 
     // LightcutsLightSampler Private Members
     LightcutsTree m_pointTree;
