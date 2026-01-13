@@ -56,4 +56,36 @@ LightHierarchyNodeBuildResult LightHierarchyNodeEmitter::FinalizeInterior(int re
     return {lb, reservationIndex};
 }
 
+int LightcutsNodeEmitter::ReserveInterior() {
+    int index = static_cast<int>(tree->nodes.size());
+    tree->nodes.emplace_back();
+    return index;
+}
+
+LightcutsBuildResult LightcutsNodeEmitter::EmitLeaf(const LightcutsBuildContainer& item, uint32_t bitTrail) {
+    const LightcutsBuildContainer& leaf(item);
+    CompactLightBounds cb(leaf.bounds, leaf.bounds.I, tree->allLightBounds);
+
+    int nodeIndex = static_cast<int>(tree->nodes.size());
+    int lightIndex = static_cast<int>(tree->lights.size());
+
+    tree->lights.emplace_back(leaf.light);
+    tree->nodes.emplace_back(LightcutsTreeNode::MakeLeaf(lightIndex, nodeIndex, cb));
+    lightToLocation->Insert(leaf.light, {static_cast<uint32_t>(isPoint), bitTrail});
+    return {leaf.bounds, nodeIndex, nodeIndex};
+}
+
+LightcutsBuildResult LightcutsNodeEmitter::FinalizeInterior(int reservationIndex, const LightcutsBuildResult& left, const LightcutsBuildResult& right, Float& u) {    
+    Float intensities[2] = {left.bounds.I, right.bounds.I};
+    Float nodePMF;
+    int child = SampleDiscrete(intensities, u, &nodePMF, &u);
+    int successorIdx = (child == 0) ? left.representantIdx : right.representantIdx;
+
+    LightBounds lb = Union(left.bounds, right.bounds);
+    CompactLightBounds cb(lb, lb.I, tree->allLightBounds);
+    
+    tree->nodes[reservationIndex] = LightcutsTreeNode::MakeInterior(right.nodeIdx, successorIdx, cb);
+    return {lb, successorIdx, reservationIndex};
+}
+
 }

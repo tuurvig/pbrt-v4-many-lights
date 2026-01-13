@@ -22,6 +22,10 @@ struct NodeEmitterInterface {
 
     virtual ResultType EmitLeaf(const InputType& item, uint32_t bitTrail) = 0;
 
+    // assumes the reservationIndex is consistent with the current vector state.
+    // Since BuildLightTree is recursive and single-threaded the node at reservationIndex should be valid and waiting.
+    // We reserve before recursion and finalize after both recursions are finished.
+    // This ordering ensures the index of left child node is always at the increment index of current node.
     virtual ResultType FinalizeInterior(int reservationIndex, const ResultType& left, const ResultType& right, Float& u) = 0;
 };
 
@@ -117,10 +121,10 @@ typename NodeEmitter::ResultType BuildLightTree(std::vector<BuildContainer>& ite
             mid = (start + end) / 2;
     }
 
-    // 5. Recursion
     // Reserve space for interior node
     auto reservation = emitter.ReserveInterior();
 
+    // 5. Recursion
     auto leftRes  = BuildLightTree<NBuckets, BuildContainer, CostEvaluator, NodeEmitter>(items, start, mid, bitTrail, depth + 1, costEval, emitter, u);
     auto rightRes = BuildLightTree<NBuckets, BuildContainer, CostEvaluator, NodeEmitter>(items, mid, end, bitTrail | (1u << depth), depth + 1, costEval, emitter, u);
 

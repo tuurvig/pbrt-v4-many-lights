@@ -296,7 +296,6 @@ struct LightBVHBuildContainer : public BuildContainerInterface {
 struct LightcutsBuildContainer : public BuildContainerInterface {
     LightcutsBuildContainer(const LightBounds& bounds, const Light& light) 
         : BuildContainerInterface(bounds), light(light) {}
-    LightBounds bounds;
     Light light;
     uint32_t index;
 };
@@ -306,6 +305,11 @@ struct LightcutsTree {
     pstd::vector<Light> lights;
     pstd::vector<LightcutsTreeNode> nodes;
     Bounds3f allLightBounds;
+};
+
+struct LightLocation {
+    uint32_t treeIdx;
+    uint32_t identifier;
 };
 
 /// Light Hierarchy Node Emitters
@@ -323,6 +327,19 @@ struct LightHierarchyNodeEmitter : public NodeEmitterInterface<LightBVHBuildCont
     virtual int ReserveInterior() override;
     virtual LightHierarchyNodeBuildResult EmitLeaf(const LightBVHBuildContainer& item, uint32_t bitTrail) override;
     virtual LightHierarchyNodeBuildResult FinalizeInterior(int reservationIndex, const LightHierarchyNodeBuildResult& left, const LightHierarchyNodeBuildResult& right, Float& u) override;
+};
+
+struct LightcutsNodeEmitter : public NodeEmitterInterface<LightcutsBuildContainer, LightcutsBuildResult> {
+    LightcutsNodeEmitter(LightcutsTree& tree, HashMap<Light, LightLocation>& lightToLocation, bool isPoint)
+        : tree(&tree), lightToLocation(&lightToLocation), isPoint(isPoint) {}
+
+    LightcutsTree* tree;
+    HashMap<Light, LightLocation>* lightToLocation;
+    bool isPoint;
+
+    virtual int ReserveInterior() override;
+    virtual LightcutsBuildResult EmitLeaf(const LightcutsBuildContainer& item, uint32_t bitTrail) override;
+    virtual LightcutsBuildResult FinalizeInterior(int reservationIndex, const LightcutsBuildResult& left, const LightcutsBuildResult& right, Float& u) override;
 };
 
 //struct LightcutsNodeEmitter : public NodeEmitterInterface<LightcutsBuildContainer, LightcutsBuildResult> {
