@@ -140,16 +140,22 @@ static bool PrepareAreaLightDiscretization(const ParameterDictionary &parameters
     return true;
 }
 
+struct LightShapesArea{
+    pstd::vector<pbrt::Shape> shapeObjects;
+    uint32_t shapeIndex = std::numeric_limits<uint32_t>::max();
+    Float totalArea = static_cast<Float>(0);
+};
+
 static bool TryDiscretizeAreaLight(const std::string &name, const ParameterDictionary &parameters,
                                    const Transform & renderFromLight,
                                    const MediumInterface &mi, FloatTexture alphaTex,
-                                   const FileLoc *loc, const pstd::vector<Shape> &shapeObjects,
+                                   const FileLoc *loc, const LightShapesArea& lightShapesArea,
                                    int maxSamples, pstd::vector<Light> *shapeLights,
                                    std::vector<Light> *lights, Allocator alloc) {
     if (name != "diffuse")
         return false;
 
-    if (shapeObjects.empty())
+    if (lightShapesArea.shapeObjects.empty())
         return false;
 
     // alpha textures handling, see the constructor of DiffuseAreaLight
@@ -162,26 +168,21 @@ static bool TryDiscretizeAreaLight(const std::string &name, const ParameterDicti
     if (!PrepareAreaLightDiscretization(parameters, loc, alloc, &data))
         return false;
 
-    std::vector<Float> areas(shapeObjects.size(), 0.f);
-    Float totalArea = 0.f;
-    for (size_t i = 0; i < shapeObjects.size(); ++i) {
-        areas[i] = shapeObjects[i].Area();
-        if (areas[i] > 0)
-            totalArea += areas[i];
+    std::vector<Float> areas(lightShapesArea.shapeObjects.size(), 0.f);
+    for (size_t i = 0; i < lightShapesArea.shapeObjects.size(); ++i) {
+        areas[i] = lightShapesArea.shapeObjects[i].Area();
     }
-    if (totalArea <= 0)
-        return false;
 
-    std::vector<int> counts(shapeObjects.size(), 0);
+    std::vector<int> counts(lightShapesArea.shapeObjects.size(), 0);
     std::vector<std::pair<Float, int>> remainders;
-    remainders.reserve(shapeObjects.size());
+    remainders.reserve(lightShapesArea.shapeObjects.size());
     int assigned = 0;
-    for (size_t i = 0; i < shapeObjects.size(); ++i) {
+    for (size_t i = 0; i < lightShapesArea.shapeObjects.size(); ++i) {
         if (areas[i] <= 0) {
             remainders.emplace_back(0.f, int(i));
             continue;
         }
-        Float exact = (areas[i] / totalArea) * maxSamples;
+        Float exact = (areas[i] / lightShapesArea.totalArea) * maxSamples;
         int c = int(std::floor(exact));
         counts[i] = c;
         assigned += c;
@@ -203,7 +204,7 @@ static bool TryDiscretizeAreaLight(const std::string &name, const ParameterDicti
     std::vector<Light> newLights;
     newLights.reserve(maxSamples);
 
-    for (size_t i = 0; i < shapeObjects.size(); ++i) {
+    for (size_t i = 0; i < lightShapesArea.shapeObjects.size(); ++i) {
         int nSamples = counts[i];
         Float shapeArea = areas[i];
         if (shapeArea <= 0 || nSamples <= 0)
@@ -225,7 +226,7 @@ static bool TryDiscretizeAreaLight(const std::string &name, const ParameterDicti
             continue;
 
         for (Point2f u : Hammersley2D(nSamples)) {
-            pstd::optional<ShapeSample> ss = shapeObjects[i].Sample(u);
+            pstd::optional<ShapeSample> ss = lightShapesArea.shapeObjects[i].Sample(u);
             if (!ss || ss->pdf == 0)
                 continue;
 
@@ -1522,6 +1523,9 @@ std::vector<Light> BasicScene::CreateLights(
 
     int samplesPerLight = Options->discretizeAreaLights;
 
+    std::vector<LightShapesArea> lightShapeAreas;
+    std::vector<uint32_t> indices;
+
     // Area Lights
     for (size_t i = 0; i < shapes.size(); ++i) {
         auto &sh = shapes[i];
@@ -1542,15 +1546,39 @@ std::vector<Light> BasicScene::CreateLights(
             CHECK_LT(sh.materialIndex, materials.size());
             materialName = materials[sh.materialIndex].name;
         }
+
         if (materialName == "interface" || materialName == "none" || materialName == "") {
             Warning(&sh.loc, "Ignoring area light specification for shape "
                              "with \"interface\" material.");
             continue;
         }
 
-        pstd::vector<pbrt::Shape> shapeObjects = Shape::Create(
+        indices.emplace_back(lightShapeAreas.size());
+        auto& lastLight = lightShapeAreas.emplace_back();
+        lastLight.shapeIndex = i;
+        lastLight.shapeObjects = Shape::Create(
             sh.name, sh.renderFromObject, sh.objectFromRender, sh.reverseOrientation,
             sh.parameters, textures.floatTextures, &sh.loc, alloc);
+
+        if (samplesPerLight > 0) {
+            for (size_t j = 0; j < lastLight.shapeObjects.size(); ++j) {
+                lastLight.totalArea += lastLight.shapeObjects[j].Area();
+            }
+        }
+    }
+
+    if (samplesPerLight > 0) {
+        std::sort(indices.begin(), indices.end(), [&lightShapeAreas](uint32_t lhs, uint32_t rhs){
+            const auto& l1(lightShapeAreas[lhs]);
+            const auto& l2(lightShapeAreas[rhs]);
+            return l1.totalArea < l2.totalArea;
+        });
+    }
+
+    uint32_t maxSamples = samplesPerLight * indices.size();
+    for (int i = 0; i < indices.size(); ++i) {
+        auto& item = lightShapeAreas[indices[i]];
+        auto &sh = shapes[item.shapeIndex];
 
         FloatTexture alphaTex = getAlphaTexture(sh.parameters, &sh.loc);
 
@@ -1558,19 +1586,26 @@ std::vector<Light> BasicScene::CreateLights(
                                  findMedium(sh.outsideMedium, &sh.loc));
 
         pstd::vector<Light> *shapeLights = new pstd::vector<Light>(alloc);
-        const auto &areaLightEntity = areaLights[sh.lightIndex];
+        const auto &areaLightEntity(areaLights[sh.lightIndex]);
 
         bool discretized = false;
 
-        if (samplesPerLight > 0) {
+        if (samplesPerLight > 0 && item.totalArea > 0) {
+            int scaledLightSamples = maxSamples / (indices.size() - i);
+            if (item.totalArea < static_cast<Float>(1)) {
+                scaledLightSamples = std::max(static_cast<int>(item.shapeObjects.size()),
+                                              static_cast<int>(item.totalArea * static_cast<Float>(samplesPerLight)));
+            }
             discretized = TryDiscretizeAreaLight(areaLightEntity.name,
                                                  areaLightEntity.parameters, 
                                                  *sh.renderFromObject, mi, alphaTex,
-                                                 &areaLightEntity.loc, shapeObjects,
-                                                 samplesPerLight, shapeLights, &lights, alloc);
+                                                 &areaLightEntity.loc, item,
+                                                 scaledLightSamples, shapeLights, &lights, alloc);
+
+            maxSamples -= discretized ? scaledLightSamples : samplesPerLight;
         }
         
-        for (pbrt::Shape ps : shapeObjects) {
+        for (pbrt::Shape ps : item.shapeObjects) {
             Light area = Light::CreateArea(areaLightEntity.name,
                                            areaLightEntity.parameters,
                                            *sh.renderFromObject, mi, ps, alphaTex,
@@ -1583,7 +1618,7 @@ std::vector<Light> BasicScene::CreateLights(
             }
         }
 
-        (*shapeIndexToAreaLights)[i] = shapeLights;
+        (*shapeIndexToAreaLights)[item.shapeIndex] = shapeLights;
     }
 
     LOG_VERBOSE("Finished area lights");
