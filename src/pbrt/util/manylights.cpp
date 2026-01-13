@@ -34,4 +34,26 @@ std::string CompactLightBounds::ToString(const Bounds3f &allBounds) const {
         Vector3f(w), phiOrI, qCosTheta_o, CosTheta_o(), qCosTheta_e, CosTheta_e(), twoSided);
 }
 
+int LightHierarchyNodeEmitter::ReserveInterior() {
+    int index = static_cast<int>(nodes->size());
+    nodes->push_back(LightBVHNode());
+    return index;
+}
+
+LightHierarchyNodeBuildResult LightHierarchyNodeEmitter::EmitLeaf(const LightBVHBuildContainer& item, uint32_t bitTrail) {
+    int nodeIndex = static_cast<int>(nodes->size());
+    const LightBVHBuildContainer& container(item);
+    CompactLightBounds cb(container.bounds, container.bounds.phi, allLightBounds);
+    nodes->push_back(LightBVHNode::MakeLeaf(item.index, cb));
+    lightToBitTrail->Insert(lights[item.index], bitTrail);
+    return {item.bounds, nodeIndex};
+}
+
+LightHierarchyNodeBuildResult LightHierarchyNodeEmitter::FinalizeInterior(int reservationIndex, const LightHierarchyNodeBuildResult& left, const LightHierarchyNodeBuildResult& right, Float& u) {
+    LightBounds lb = Union(left.bounds, right.bounds);
+    CompactLightBounds cb(lb, lb.phi, allLightBounds);
+    (*nodes)[reservationIndex] = LightBVHNode::MakeInterior(right.nodeIdx, cb);
+    return {lb, reservationIndex};
+}
+
 }

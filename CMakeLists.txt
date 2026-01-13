@@ -689,7 +689,7 @@ SET (PBRT_UTIL_SOURCE_HEADERS
   src/pbrt/util/gui.h
   src/pbrt/util/hash.h
   src/pbrt/util/image.h
-  #src/pbrt/util/lighttree_generic.h
+  src/pbrt/util/lighttree_generic.h
   src/pbrt/util/log.h
   src/pbrt/util/loopsubdiv.h
   src/pbrt/util/lowdiscrepancy.h

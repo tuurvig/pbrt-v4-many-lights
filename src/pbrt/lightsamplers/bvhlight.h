@@ -18,13 +18,6 @@
 
 namespace pbrt {
 
-struct LightBVHBuildContainer{
-    LightBVHBuildContainer(const LightBounds& bounds, int index) 
-        : bounds(bounds), index(index) {}
-    LightBounds bounds;
-    int index;
-};
-
 // BVHLightSampler Definition
 class BVHLightSampler {
   public:

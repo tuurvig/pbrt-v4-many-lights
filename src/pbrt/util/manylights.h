@@ -14,9 +14,12 @@
 #include <pbrt/base/lightsampler.h>
 
 #include <pbrt/util/vecmath.h>
+#include <pbrt/util/lighttree_generic.h>
 
 namespace pbrt {
-// CompactLightBounds Definition
+
+/// CompactLightBounds Definition
+//////////////////////////////////////////////////////////
 class CompactLightBounds {
   public:
     // CompactLightBounds Public Methods
@@ -158,6 +161,9 @@ class CompactLightBounds {
     uint16_t qb[2][3];
 };
 
+/// Light Hierarchy Nodes Definitions
+//////////////////////////////////////////////////////////
+
 // LightBVHNode Definition
 struct alignas(32) LightBVHNode {
     // LightBVHNode Public Methods
@@ -209,6 +215,9 @@ struct alignas(32) LightcutsTreeNode {
     };
 };
 
+/// Cost functions and evaluators
+//////////////////////////////////////////////////////////
+
 // Lightcuts original paper (2005) Similarity Metric
 PBRT_CPU_GPU
 inline Float SimilarityMetric(const LightBounds& bounds, Float sceneDiagonalSqr, bool isPointLight) {
@@ -224,6 +233,20 @@ inline Float SimilarityMetric(const LightBounds& bounds, Float sceneDiagonalSqr,
 
     return bounds.I * similarity;
 }
+
+struct LightcutsCostEvaluator {
+    PBRT_CPU_GPU
+    LightcutsCostEvaluator(Bounds3f bounds, bool isPoint) :
+        sceneBoundsDiagonalSqr(LengthSquared(bounds.Diagonal())),
+        isPoint(isPoint) {}
+
+    PBRT_CPU_GPU Float operator()(const LightBounds &bounds) const {
+        return SimilarityMetric(bounds, sceneBoundsDiagonalSqr, isPoint);
+    }
+
+    Float sceneBoundsDiagonalSqr;
+    bool isPoint;
+};
 
 // SAOH heuristic cost from conty and kulla bvh lights paper 2018
 PBRT_CPU_GPU
@@ -241,11 +264,73 @@ inline Float CostSAOH(const LightBounds& b) {
     return b.phi * M_omega * b.bounds.SurfaceArea();
 }
 
-struct LightcutsTreeNodeBuildSuccess {
+struct SAOHCostEvaluator {
+    PBRT_CPU_GPU Float operator()(const LightBounds &bounds) const {
+        return CostSAOH(bounds);
+    }
+};
+
+/// Light Hierarchy Build results
+//////////////////////////////////////////////////////////
+
+struct LightcutsBuildResult {
     LightBounds bounds;
     int representantIdx;
     int nodeIdx;
 };
+
+struct LightHierarchyNodeBuildResult {
+    LightBounds bounds;
+    int nodeIdx;
+};
+
+/// Light Hierarchy Build containers
+//////////////////////////////////////////////////////////
+
+struct LightBVHBuildContainer : public BuildContainerInterface {
+    LightBVHBuildContainer(const LightBounds& bounds, int index) 
+        : BuildContainerInterface(bounds), index(index) {}
+    int index;
+};
+
+struct LightcutsBuildContainer : public BuildContainerInterface {
+    LightcutsBuildContainer(const LightBounds& bounds, const Light& light) 
+        : BuildContainerInterface(bounds), light(light) {}
+    LightBounds bounds;
+    Light light;
+    uint32_t index;
+};
+
+struct LightcutsTree {
+    LightcutsTree(Allocator alloc);
+    pstd::vector<Light> lights;
+    pstd::vector<LightcutsTreeNode> nodes;
+    Bounds3f allLightBounds;
+};
+
+/// Light Hierarchy Node Emitters
+//////////////////////////////////////////////////////////
+
+struct LightHierarchyNodeEmitter : public NodeEmitterInterface<LightBVHBuildContainer, LightHierarchyNodeBuildResult> {
+    LightHierarchyNodeEmitter(pstd::vector<LightBVHNode>& nodes, HashMap<Light, uint32_t>& lightToBitTrail, const pstd::span<const Light>& lights, const Bounds3f& allLightBounds) : 
+        nodes(&nodes), lightToBitTrail(&lightToBitTrail), lights(lights), allLightBounds(allLightBounds) {}
+
+    pstd::vector<LightBVHNode>* nodes;
+    HashMap<Light, uint32_t>* lightToBitTrail;
+    pstd::span<const Light> lights;
+    Bounds3f allLightBounds;
+
+    virtual int ReserveInterior() override;
+    virtual LightHierarchyNodeBuildResult EmitLeaf(const LightBVHBuildContainer& item, uint32_t bitTrail) override;
+    virtual LightHierarchyNodeBuildResult FinalizeInterior(int reservationIndex, const LightHierarchyNodeBuildResult& left, const LightHierarchyNodeBuildResult& right, Float& u) override;
+};
+
+//struct LightcutsNodeEmitter : public NodeEmitterInterface<LightcutsBuildContainer, LightcutsBuildResult> {
+//    LightcutsNodeEmitter(pstd::vector<>)
+//};
+
+/// Infinite Light Sample functions
+//////////////////////////////////////////////////////////
 
 PBRT_CPU_GPU
 inline pstd::optional<SampledLight> InfiniteLightSimpleSample(const pstd::vector<Light>& infiniteLights, size_t nOtherLights, Float &pmf, Float &u) {
@@ -274,6 +359,9 @@ inline Float InfiniteLightSimplePMF(const pstd::vector<Light>& infiniteLights, s
     return pmf;
 }
 
+/// Cluster Estimate function
+//////////////////////////////////////////////////////////
+
 PBRT_CPU_GPU
 inline Float ComputeClusterEstimate(const BSDF* bsdf, BxDFFlags flags, Point3f lightPos, Point3f point, Normal3f n, Vector3f wo, Float phi) {
     Float I = phi;
@@ -300,6 +388,9 @@ inline Float ComputeClusterEstimate(const BSDF* bsdf, BxDFFlags flags, Point3f l
 
     return I * G * M * std::abs(cosTheta);
 }
+
+/// Geometric bounds
+//////////////////////////////////////////////////////////
 
 PBRT_CPU_GPU
 inline Float GeomTermBoundInFrame(Point3f point, const Frame& frame, const Bounds3f& bounds) {
@@ -333,7 +424,6 @@ inline Float ComputeGeometricBound(const LightcutsTreeNode* node, const Bounds3f
 
     return G;
 }
-
 
 }
 
