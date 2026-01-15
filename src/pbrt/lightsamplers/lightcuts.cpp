@@ -47,8 +47,10 @@ class LightcutsTreeBuilderGPU final : public LightTreeBuilderGPU<uint32_t, Light
 
         tree.nodes.reserve(nNodes);
 
-        uint32_t rootRepresentant = 0;
-        FlattenNode(tree, lights, hostNodes, bitTrailContainer, rootIndex, 0, 0, rootRepresentant, u);
+        LightcutsNodeEmitter emitter(tree, bitTrailContainer, m_isPoint);
+        GPUToLightcutsLeaf adapter(hostNodes, lights);
+        
+        FlattenLightTree<GPUToLightcutsLeaf, LightcutsNodeEmitter>(adapter, rootIndex, 0, 0, emitter, u);
     }
 
     static uint32_t* GetSortedMortonCodes(LightTreeBuildState& buildState, uint32_t* dMortonCodes, const std::vector<LightcutsBuildContainer>& lights) {
@@ -60,7 +62,7 @@ class LightcutsTreeBuilderGPU final : public LightTreeBuilderGPU<uint32_t, Light
 
         GPUParallelFor("Assign Morton Codes", ProfilerKernelGroup::HPLOC, localState.nLights, [=] PBRT_GPU(int idx) {
             LightcutsBuildContainer cont = dLightsContainer[idx];
-            LightTreeConstructionNodeGPU leaf{cont.bounds, kInvalidIndex, idx};
+            LightTreeConstructionNodeGPU leaf(cont.bounds, kInvalidIndex, idx);
             Point3f centroid = cont.bounds.Centroid();
             Vector3f offset = buildState.allLightBounds.Offset(centroid);
 
@@ -83,7 +85,9 @@ class LightcutsTreeBuilderGPU final : public LightTreeBuilderGPU<uint32_t, Light
 
         void *dTempStorage = nullptr;
         size_t tempStorageBytes = 0;
-        uint32_t beginBit = 1, endBit = 32;
+        
+        constexpr uint32_t beginBit = 1;
+        constexpr uint32_t endBit = 32;
 
         const char *description = "Radix Sort Morton keys";
         {
@@ -109,41 +113,6 @@ class LightcutsTreeBuilderGPU final : public LightTreeBuilderGPU<uint32_t, Light
     }
 
   private:
-    uint32_t FlattenNode(LightcutsTree& tree, const std::vector<LightcutsBuildContainer> &lights, const std::vector<LightTreeConstructionNodeGPU>& gpuNodes,
-         HashMap<Light, LightLocation>& bitTrailContainer, uint32_t nodeIdx, uint32_t bitTrail, uint32_t depth, uint32_t& representantIdx, Float& u) const {
-
-         const LightTreeConstructionNodeGPU &gpuNode = gpuNodes[nodeIdx];
-         CompactLightBounds cb(gpuNode.bounds, gpuNode.bounds.I, m_allLightBounds);
-
-         const bool isLeaf = gpuNode.left == kInvalidIndex;
-         if (isLeaf) {
-             int flatLeafIndex = tree.nodes.size();
-             int lightIndex = tree.lights.size();
-             representantIdx = flatLeafIndex;
-             tree.lights.push_back(lights[gpuNode.right].light);
-             tree.nodes.push_back(LightcutsTreeNode::MakeLeaf(lightIndex, flatLeafIndex, cb));
-             bitTrailContainer.Insert(tree.lights[lightIndex], {m_isPoint, bitTrail});
-             return flatLeafIndex;
-         }
-
-         // Allocate interior and recursively initialize children
-         size_t flatNodeIndex = tree.nodes.size();
-         tree.nodes.emplace_back();
-         CHECK_LT(depth, 32);
-         uint32_t representantLeftIdx = 0, representantRightIdx = 0;
-         uint32_t child0 = FlattenNode(tree, lights, gpuNodes, bitTrailContainer, gpuNode.left, bitTrail, depth + 1, representantLeftIdx, u);
-         DCHECK_EQ(flatNodeIndex + 1, child0);
-         uint32_t child1 = FlattenNode(tree, lights, gpuNodes, bitTrailContainer, gpuNode.right, bitTrail | (1u << depth), depth + 1, representantRightIdx, u);
-         
-         Float intensities[2] = {tree.nodes[child0].compactLightBounds.PhiOrI(),
-                                 tree.nodes[child1].compactLightBounds.PhiOrI()};
-         Float nodePMF;
-         int child = SampleDiscrete(intensities, u, &nodePMF, &u);
-         representantIdx = (child == 0) ? representantLeftIdx : representantRightIdx;
-         
-         tree.nodes[flatNodeIndex] = LightcutsTreeNode::MakeInterior(child1, representantIdx, cb);
-         return flatNodeIndex;
-    }
 
 private:
     Bounds3f m_allLightBounds;
@@ -246,7 +215,7 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
     uint32_t currentU = static_cast<uint32_t>(u * floatUintMax);
 
     while (!node->isLeaf) {
-        uint32_t childrenIndices[2] = {nodeIndex + 1, node->childOrLightIndex};
+        uint32_t childrenIndices[2] = {static_cast<uint32_t>(nodeIndex + 1), node->childOrLightIndex};
 
         const LightcutsTreeNode *children[2] = {&tree.nodes[childrenIndices[0]],
                                                 &tree.nodes[childrenIndices[1]]};
