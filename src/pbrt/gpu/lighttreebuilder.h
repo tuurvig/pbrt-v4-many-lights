@@ -11,6 +11,7 @@
 #include <pbrt/util/log.h>
 #include <pbrt/util/math.h>
 #include <pbrt/util/vecmath.h>
+#include <pbrt/util/lighttree_generic.h>
 
 #include <cuda_runtime.h>
 
@@ -30,15 +31,6 @@ constexpr PBRT_GPU uint32_t kEncodeMask = ~(kDecodeMask);
 constexpr PBRT_GPU uint32_t kWarpSize = 32;
 constexpr PBRT_GPU uint32_t kHalfWarp = 16;
 constexpr PBRT_GPU uint32_t kInvalidIndex = std::numeric_limits<uint32_t>::max();
-
-// Intermediate BVH node that stores spatial bounds and child references.
-// Leaves store the light index in both child slots and use kInvalidIndex to
-// signal that no further subdivision is needed.
-struct LightTreeConstructionNodeGPU {
-    LightBounds bounds;
-    uint32_t left; // invalidIdx == leaf
-    uint32_t right; // leaf => lightIdx
-};
 
 // Aggregated pointers to device memory that the builder mutates during HPLOC.
 struct LightTreeBuildState {
@@ -86,7 +78,7 @@ LightTreeBuilderGPU<MortonInt, CostEvaluator>::~LightTreeBuilderGPU() {
 }
 
 template <typename MortonInt, typename CostEvaluator>
-static std::array<uint8_t, 3> LightTreeBuilderGPU<MortonInt, CostEvaluator>::DetermineAxisOrder(const Bounds3f &bounds) {
+std::array<uint8_t, 3> LightTreeBuilderGPU<MortonInt, CostEvaluator>::DetermineAxisOrder(const Bounds3f &bounds) {
     std::array<uint8_t, 3> axis{uint8_t(0), uint8_t(1), uint8_t(2)};
     Vector3f diagonal = bounds.Diagonal();
 
@@ -278,10 +270,7 @@ PBRT_GPU_INLINE uint32_t MergeClusters(uint32_t nLights, uint32_t &clusterIdx, u
         LightBounds neighborBounds = dNodes[neighborClusterIdx].bounds;
         clusterBounds = Union(clusterBounds, neighborBounds);
 
-        LightTreeConstructionNodeGPU node;
-        node.bounds = clusterBounds;
-        node.left = clusterIdx;
-        node.right = neighborClusterIdx;
+        LightTreeConstructionNodeGPU node(clusterBounds, clusterIdx, neighborClusterIdx);
         clusterIdx = baseIdx + relativeIdx;
         dNodes[clusterIdx] = node;
     }

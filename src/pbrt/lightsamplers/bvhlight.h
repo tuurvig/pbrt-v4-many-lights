@@ -51,7 +51,7 @@ class BVHLightSampler {
             // Process light BVH node for light sampling
             LightBVHNode node = m_nodes[nodeIndex];
             if (!node.isLeaf) {
-                uint32_t childrenIndices[2] = {nodeIndex + 1, node.childOrLightIndex};
+                uint32_t childrenIndices[2] = {static_cast<uint32_t>(nodeIndex + 1), node.childOrLightIndex};
 
                 // Compute light BVH child node importances
                 const LightBVHNode *children[2] = {&m_nodes[childrenIndices[0]],

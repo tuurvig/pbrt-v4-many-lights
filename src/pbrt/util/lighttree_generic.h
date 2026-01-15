@@ -13,14 +13,23 @@
 
 namespace pbrt {
 
-template <typename InputTypeT, typename ResultTypeT>
+struct BuildContainerInterface {
+    BuildContainerInterface() = default;
+
+    PBRT_CPU_GPU
+    BuildContainerInterface(const LightBounds& bounds) : bounds(bounds) {}
+    
+    LightBounds bounds;
+};
+
+template <typename BuildContainerTypeT, typename ResultTypeT>
 struct NodeEmitterInterface {
     using ResultType = ResultTypeT;
-    using InputType = InputTypeT;
+    using BuildContainerType = BuildContainerTypeT;
     
     virtual int ReserveInterior() = 0;
 
-    virtual ResultType EmitLeaf(const InputType& item, uint32_t bitTrail) = 0;
+    virtual ResultType EmitLeaf(const BuildContainerType& item, uint32_t bitTrail) = 0;
 
     // assumes the reservationIndex is consistent with the current vector state.
     // Since BuildLightTree is recursive and single-threaded the node at reservationIndex should be valid and waiting.
@@ -29,9 +38,22 @@ struct NodeEmitterInterface {
     virtual ResultType FinalizeInterior(int reservationIndex, const ResultType& left, const ResultType& right, Float& u) = 0;
 };
 
-struct BuildContainerInterface {
-    BuildContainerInterface(const LightBounds& bounds) : bounds(bounds) {}
-    LightBounds bounds;
+template <typename InputTypeT, typename OutputTypeT>
+struct TreeLeafAdapterInterface {
+using InputType = InputTypeT;
+using OutputType = OutputTypeT;
+
+    virtual const InputType& At(uint32_t idx) const = 0;
+
+    uint32_t Left(uint32_t idx) const {return Left(At(idx));}
+    uint32_t Right(uint32_t idx) const {return Right(At(idx));}
+    bool IsLeaf(uint32_t idx) const {return IsLeaf(At(idx));}
+
+    virtual uint32_t Left(const InputType& node) const = 0;
+    virtual uint32_t Right(const InputType& node) const = 0;
+    virtual bool IsLeaf(const InputType& node) const = 0;
+
+    virtual OutputTypeT Convert(const InputType& node) const = 0;
 };
 
 // Generic Light Tree Builder
@@ -129,6 +151,28 @@ typename NodeEmitter::ResultType BuildLightTree(std::vector<BuildContainer>& ite
     auto rightRes = BuildLightTree<NBuckets, BuildContainer, CostEvaluator, NodeEmitter>(items, mid, end, bitTrail | (1u << depth), depth + 1, costEval, emitter, u);
 
     // 6. Finalize Interior
+    return emitter.FinalizeInterior(reservation, leftRes, rightRes, u);
+}
+
+template <typename TreeNodesAdapter, typename NodeEmitter>
+typename NodeEmitter::ResultType FlattenLightTree(const TreeNodesAdapter& nodes,
+                                                  uint32_t nodeIdx,
+                                                  uint32_t bitTrail,
+                                                  int depth,
+                                                  NodeEmitter& emitter,
+                                                  Float& u) {
+    const auto& node(nodes.At(nodeIdx));
+
+    if (nodes.IsLeaf(node)) {
+        return emitter.EmitLeaf(nodes.Convert(node), bitTrail);
+    }
+
+    auto reservation = emitter.ReserveInterior();
+
+    // Recursively process children
+    auto leftRes = FlattenLightTree(nodes, nodes.Left(node), bitTrail, depth + 1, emitter, u);
+    auto rightRes = FlattenLightTree(nodes, nodes.Right(node), bitTrail | (1u << depth), depth + 1, emitter, u);
+
     return emitter.FinalizeInterior(reservation, leftRes, rightRes, u);
 }
 }
