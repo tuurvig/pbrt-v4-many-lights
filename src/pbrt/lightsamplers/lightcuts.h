@@ -60,23 +60,19 @@ public:
     PBRT_CPU_GPU LightPMF PMF(const LightSampleContext& ctx, const BSDF* bsdf, Light light) const {
         const size_t totalSize = m_pointTree.lights.size() + m_spotTree.lights.size() + m_otherLights.size();
 
-        // Handle infinite _light_ PMF computation
-        if (!m_lightToLocation.HasKey(light))
-            return 1.f / (m_infiniteLights.size() + (totalSize == 0 ? 0 : 1));
-
+        // Compute infinite light sampling probability _pInfinite_
+        Float pInfinite = InfiniteLightSimplePMF(m_infiniteLights, totalSize);
         LightLocation loc = m_lightToLocation[light];
 
-        // Compute infinite light sampling probability _pInfinite_
-        Float pInfinite = Float(m_infiniteLights.size()) /
-                          Float(m_infiniteLights.size() + (totalSize == 0 ? 0 : 1));
-
+        // Handle infinite _light_ PMF computation
         if (loc.treeIdx == 2) {
-            return pInfinite / m_infiniteLights.size();
+            return pInfinite;
         }
+
+        Float pmf = (1 - pInfinite);
 
         Float weights[3] = {m_spotTree.nodes[0].compactLightBounds.PhiOrI(), m_pointTree.nodes[0].compactLightBounds.PhiOrI(), m_otherLightIntensities}; 
         Float sumWeights = weights[0] + weights[1] + weights[2];
-        Float pmf = (1 - pInfinite);
         
         if (loc.treeIdx == 3) {
             pmf *= weights[2] / sumWeights;
@@ -84,65 +80,6 @@ public:
         }
 
         return 0;
-
-        //const LightcutsTree& t(loc.treeIdx == 1 ? m_pointTree : m_spotTree);
-        //pmf *= weights[loc.treeIdx] / sumWeights;
-        //
-        //int nodeIndex = 0;
-        //Point3f p = ctx.p();
-        //Vector3f wo = ctx.wo;
-        //
-        //BxDFFlags bsdfFlags = BxDFFlags::All;
-        //if (bsdf) {
-        //    bsdfFlags = bsdf->Flags();
-        //}
-        //
-        //Float estL = 0;
-        //Float estParentL = 0;
-        //
-        //const LightcutsTreeNode* node = &t.nodes[nodeIndex];
-        //uint32_t bitTrail = loc.identifier;
-        //while (!node->isLeaf) {
-        //    // Compute child error bounds and update PMF for current node
-        //    const LightcutsTreeNode* children[2] = {&t.nodes[nodeIndex + 1], &t.nodes[node->childOrLightIndex]};
-        //
-        //    const LightcutsTreeNode *representants[2] = {&t.nodes[children[0]->representantIdx],
-        //                                                   &t.nodes[children[1]->representantIdx]};
-        //
-        //    const Float nodeIntensities[2] = {children[0]->compactLightBounds.Phi(),
-        //                                      children[1]->compactLightBounds.Phi()};
-        //    const Float clusterEst[2] = {
-        //        ComputeClusterEstimate(bsdf, bsdfFlags, representants[0]->compactLightBounds.Bound(t.allLightBounds, false), p, wo, nodeIntensities[0]),
-        //        ComputeClusterEstimate(bsdf, bsdfFlags, representants[1]->compactLightBounds.Bound(t.allLightBounds, false), p, wo, nodeIntensities[1])
-        //    };
-        //
-        //    //Float errorBounds[2] = {ComputeErrorBounds(children[0], !t.isPoint, t.allLightBounds, bsdf, bsdfFlags, p, wo),
-        //    //                        ComputeErrorBounds(children[1], !t.isPoint, t.allLightBounds, bsdf, bsdfFlags, p, wo)};
-        //
-        //    int child = bitTrail & 1;
-        //    DCHECK_GT(errorBounds[child], 0);
-        //    pmf *= errorBounds[child] / (errorBounds[0] + errorBounds[1]);
-        //
-        //    estL = estL - estParentL + clusterEst[0] + clusterEst[1];
-        //    estParentL = clusterEst[child];
-        //
-        //    nodeIndex = child ? node->childOrLightIndex : (nodeIndex + 1);
-        //    node = &t.nodes[nodeIndex];
-        //    
-        //    if (errorBounds[child] < m_threshold * estL) {
-        //        if(light != t.lights[representants[child]->childOrLightIndex]) {
-        //            return 0;
-        //        }
-        //        Float repIntensity = representants[child]->compactLightBounds.Phi();
-        //        return LightPMF(pmf, nodeIntensities[child] / repIntensity);
-        //    }
-        //
-        //    bitTrail >>=1;
-        //}
-        //
-        //DCHECK_EQ(light, t.lights[node->childOrLightIndex]);
-        //
-        //return pmf;
     }
 
     PBRT_CPU_GPU pstd::optional<SampledLight> Sample(Float u) const {
@@ -181,11 +118,10 @@ public:
         LightLocation loc = m_lightToLocation[light];
 
         // Compute infinite light sampling probability _pInfinite_
-        Float pInfinite = Float(m_infiniteLights.size()) /
-                          Float(m_infiniteLights.size() + (totalSize == 0 ? 0 : 1));
+        Float pInfinite = InfiniteLightSimplePMF(m_infiniteLights, totalSize);
 
         if (loc.treeIdx == 2) {
-            return pInfinite / m_infiniteLights.size();
+            return pInfinite;
         }
 
         Float weights[3] = {m_spotTree.nodes[0].compactLightBounds.PhiOrI(), m_pointTree.nodes[0].compactLightBounds.PhiOrI(), m_otherLightIntensities}; 
@@ -206,11 +142,10 @@ public:
 
 private:
     // LightcutsLightSampler Private Methods
-
-
 #ifdef PBRT_BUILD_GPU_RENDERER
-    bool buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights, LightcutsTree& tree, bool isPoint, HashMap<Light, LightLocation>& lightToLocation, Float& u);
+    bool buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights, LightcutsTree& tree, bool isPoint, Float& u);
 #endif
+
     PBRT_CPU_GPU
     pstd::optional<SampledLight> SampleLightTree(const LightSampleContext& ctx, const LightcutsTree& tree, bool isPoint, const BSDF* bsdf, Float pmf, Float u) const;
 

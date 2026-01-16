@@ -15,7 +15,7 @@ std::string LightBVHNode::ToString() const {
 
 std::string LightcutsTreeNode::ToString() const {
     return StringPrintf(
-        "[ LightcutsLightSampler lightBounds: %s representantIndex: %d childOrLightIndex: %d isLeaf: %d ]", compactLightBounds, representantIdx, childOrLightIndex, isLeaf);
+        "[ LightcutsTreeNode lightBounds: %s representantIndex: %d childOrLightIndex: %d isLeaf: %d ]", compactLightBounds, representantIdx, childOrLightIndex, isLeaf);
 }
 
 std::string CompactLightBounds::ToString() const {
@@ -76,6 +76,38 @@ LightcutsBuildResult LightcutsNodeEmitter::EmitLeaf(const LightcutsBuildContaine
 }
 
 LightcutsBuildResult LightcutsNodeEmitter::FinalizeInterior(int reservationIndex, const LightcutsBuildResult& left, const LightcutsBuildResult& right, Float& u) {    
+    Float intensities[2] = {left.bounds.I, right.bounds.I};
+    Float nodePMF;
+    int child = SampleDiscrete(intensities, u, &nodePMF, &u);
+    int successorIdx = (child == 0) ? left.representantIdx : right.representantIdx;
+
+    LightBounds lb = Union(left.bounds, right.bounds);
+    CompactLightBounds cb(lb, lb.I, tree->allLightBounds);
+    
+    tree->nodes[reservationIndex] = LightcutsTreeNode::MakeInterior(right.nodeIdx, successorIdx, cb);
+    return {lb, successorIdx, reservationIndex};
+}
+
+int SLCNodeEmitter::ReserveInterior() {
+    int index = static_cast<int>(tree->nodes.size());
+    tree->nodes.emplace_back();
+    return index;
+}
+
+LightcutsBuildResult SLCNodeEmitter::EmitLeaf(const LightcutsBuildContainer& item, uint32_t bitTrail) {
+    const LightcutsBuildContainer& leaf(item);
+    CompactLightBounds cb(leaf.bounds, leaf.bounds.I, tree->allLightBounds);
+
+    int nodeIndex = static_cast<int>(tree->nodes.size());
+    int lightIndex = static_cast<int>(tree->lights.size());
+
+    tree->lights.emplace_back(leaf.light);
+    tree->nodes.emplace_back(LightcutsTreeNode::MakeLeaf(lightIndex, nodeIndex, cb));
+    lightToBitTrail->Insert(leaf.light, bitTrail);
+    return {leaf.bounds, nodeIndex, nodeIndex};
+}
+
+LightcutsBuildResult SLCNodeEmitter::FinalizeInterior(int reservationIndex, const LightcutsBuildResult& left, const LightcutsBuildResult& right, Float& u) {    
     Float intensities[2] = {left.bounds.I, right.bounds.I};
     Float nodePMF;
     int child = SampleDiscrete(intensities, u, &nodePMF, &u);

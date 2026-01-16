@@ -85,7 +85,8 @@ class BVHLightTreeBuilder final : public LightTreeBuilderGPU<uint64_t, SAOHCostE
 
         void *dTempStorage = nullptr;
         size_t tempStorageBytes = 0;
-        uint32_t beginBit = 1, endBit = 64;
+        constexpr uint32_t beginBit = 1;
+        constexpr uint32_t endBit = 64;
 
         const char *description = "Radix Sort Morton keys";
         {
@@ -166,7 +167,7 @@ BVHLightSampler::BVHLightSampler(pstd::span<const Light> lights, Allocator alloc
 #ifdef PBRT_BUILD_GPU_RENDERER
 bool BVHLightSampler::buildBVHGPU(
     std::vector<LightBVHBuildContainer> &bvhLights) {
-    if (true || bvhLights.size() < 100 || !Options->useGPU)
+    if (bvhLights.size() < 100 || !Options->useGPU)
         return false;
 
     BVHLightTreeBuilder builder(m_allLightBounds);

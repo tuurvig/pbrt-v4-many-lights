@@ -107,18 +107,18 @@ class BVHLightSampler {
 
     PBRT_CPU_GPU
     LightPMF PMF(const LightSampleContext &ctx, const BSDF* /*bsdf*/, Light light) const {
-        // Handle infinite _light_ PMF computation
+        // Compute infinite light sampling probability _pInfinite_
+        Float pInfinite = InfiniteLightSimplePMF(m_infiniteLights, m_nodes.size());
+
+        // Handle infinite _light_ PMF
         if (!m_lightToBitTrail.HasKey(light))
-            return InfiniteLightSimplePMF(m_infiniteLights, m_nodes.size());
+            return pInfinite;
 
         // Initialize local variables for BVH traversal for PMF computation
         uint32_t bitTrail = m_lightToBitTrail[light];
         Point3f p = ctx.p();
         Normal3f n = ctx.ns;
-        // Compute infinite light sampling probability _pInfinite_
-        Float pInfinite = Float(m_infiniteLights.size()) /
-                          Float(m_infiniteLights.size() + (m_nodes.empty() ? 0 : 1));
-
+        
         Float pmf = 1 - pInfinite;
         int nodeIndex = 0;
 
@@ -145,37 +145,38 @@ class BVHLightSampler {
 
     PBRT_CPU_GPU
     pstd::optional<SampledLight> Sample(Float u) const {
-        if (m_lights.empty())
+        if (m_nodes.empty() || m_lights.empty())
             return {};
+
         int lightIndex = std::min<int>(u * m_lights.size(), m_lights.size() - 1);
-        return SampledLight{m_lights[lightIndex], 1.f / m_lights.size()};
+        Light light = m_lights[lightIndex];
+        LightPMF lpmf = PMF(light);
+        return SampledLight{light, lpmf.pmf, lpmf.scale};
     }
 
     PBRT_CPU_GPU
     LightPMF PMF(Light light) const {
+        Float pInfinite = InfiniteLightSimplePMF(m_infiniteLights, m_nodes.size());
+
+        // Handle infinite _light_ PMF
+        if (!m_lightToBitTrail.HasKey(light))
+            return pInfinite;
+
+        Float pmf = 1 - pInfinite;
+
         if (m_lights.empty())
             return 0;
-        return 1.f / m_lights.size();
+
+        return pmf / (m_lights.size() - m_infiniteLights.size());
     }
 
     std::string ToString() const;
 
   private:
     // BVHLightSampler Private Methods
-    LightBVHBuildContainer buildBVH(
-        std::vector<LightBVHBuildContainer> &bvhLights, int start, int end,
-        uint32_t bitTrail, int depth);
-
 #ifdef PBRT_BUILD_GPU_RENDERER
     bool buildBVHGPU(std::vector<LightBVHBuildContainer> &bvhLights);
 #endif
-
-    PBRT_CPU_GPU
-    Float EvaluateCost(const LightBounds &b, const Bounds3f &bounds, int dim) const {
-        // Return complete cost estimate for _LightBounds_
-        Float Kr = MaxComponentValue(bounds.Diagonal()) / bounds.Diagonal()[dim];
-        return CostSAOH(b) * Kr;
-    }
 
     // BVHLightSampler Private Members
     pstd::vector<Light> m_lights;
