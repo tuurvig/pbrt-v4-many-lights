@@ -43,6 +43,9 @@ LightSampler LightSampler::Create(const std::string &name, pstd::span<const Ligh
         }
         Error(R"(Cannot use lightcuts lightsampler without discretizing area lights. Using "bvh".)");
     }
+    else if (name == "slc") {
+        return alloc.new_object<SLCLightSampler>(lights, alloc);
+    }
     else if (name == "exhaustive")
         return alloc.new_object<ExhaustiveLightSampler>(lights, alloc);
     else {

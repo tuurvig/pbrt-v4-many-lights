@@ -359,6 +359,18 @@ struct LightcutsNodeEmitter : public NodeEmitterInterface<LightcutsBuildContaine
     virtual LightcutsBuildResult FinalizeInterior(int reservationIndex, const LightcutsBuildResult& left, const LightcutsBuildResult& right, Float& u) override;
 };
 
+struct SLCNodeEmitter : public NodeEmitterInterface<LightcutsBuildContainer, LightcutsBuildResult> {
+    SLCNodeEmitter(LightcutsTree& tree, HashMap<Light, uint32_t>& lightToBitTrail)
+        : tree(&tree), lightToBitTrail(&lightToBitTrail) {}
+
+    LightcutsTree* tree;
+    HashMap<Light, uint32_t>* lightToBitTrail;
+
+    virtual int ReserveInterior() override;
+    virtual LightcutsBuildResult EmitLeaf(const LightcutsBuildContainer& item, uint32_t bitTrail) override;
+    virtual LightcutsBuildResult FinalizeInterior(int reservationIndex, const LightcutsBuildResult& left, const LightcutsBuildResult& right, Float& u) override;
+};
+
 /// Light Hierarchy Node Converters
 //////////////////////////////////////////////////////////
 
@@ -418,7 +430,7 @@ inline pstd::optional<SampledLight> InfiniteLightSimpleSample(const pstd::vector
 
 PBRT_CPU_GPU
 inline Float InfiniteLightSimplePMF(const pstd::vector<Light>& infiniteLights, size_t nOtherLights) {
-    Float pmf = 1 / Float(infiniteLights.size() + (nOtherLights == 0 ? 0 : 1));
+    Float pmf = 1 / Float(infiniteLights.size() + static_cast<size_t>(nOtherLights != 0));
     return pmf;
 }
 

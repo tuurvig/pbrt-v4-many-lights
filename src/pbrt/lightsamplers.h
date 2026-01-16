@@ -22,6 +22,7 @@
 #include <pbrt/lightsamplers/exhaustive.h>
 
 #include <pbrt/lightsamplers/lightcuts.h>
+#include <pbrt/lightsamplers/slc.h>
 
 #include <algorithm>
 #include <cstdint>

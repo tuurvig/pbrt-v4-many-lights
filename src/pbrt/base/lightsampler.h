@@ -34,16 +34,19 @@ struct LightPMF {
 
 class UniformLightSampler;
 class PowerLightSampler;
+class ExhaustiveLightSampler;
+
 class BVHLightSampler;
 class LightcutsLightSampler;
-class ExhaustiveLightSampler;
+class SLCLightSampler;
 
 // LightSampler Definition
 class LightSampler : public TaggedPointer<UniformLightSampler,
                                           PowerLightSampler,
                                           ExhaustiveLightSampler,
                                           BVHLightSampler,
-                                          LightcutsLightSampler> {
+                                          LightcutsLightSampler,
+                                          SLCLightSampler> {
   public:
     // LightSampler Interface
     using TaggedPointer::TaggedPointer;

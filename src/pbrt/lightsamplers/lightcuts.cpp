@@ -170,7 +170,7 @@ LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, All
     Float u = rng.Uniform<Float>();
     if (!pointLights.empty()) {
 #ifdef PBRT_BUILD_GPU_RENDERER
-        bool buildOnGPU = buildLightTreeGPU(pointLights, m_pointTree, true, m_lightToLocation, u);
+        bool buildOnGPU = buildLightTreeGPU(pointLights, m_pointTree, true, u);
         if (!buildOnGPU)
 #endif
         {
@@ -181,7 +181,7 @@ LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, All
 
     if (!spotLights.empty()) {
 #ifdef PBRT_BUILD_GPU_RENDERER
-        bool buildOnGPU = buildLightTreeGPU(spotLights, m_spotTree, false, m_lightToLocation, u);
+        bool buildOnGPU = buildLightTreeGPU(spotLights, m_spotTree, false, u);
         if (!buildOnGPU)
 #endif
         {
@@ -198,11 +198,9 @@ LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, All
 
 PBRT_CPU_GPU
 pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightSampleContext& ctx, const LightcutsTree& tree, bool isPoint, const BSDF* bsdf, Float pmf, Float u) const {
-    int nodeIndex = 0;
     Point3f p = ctx.p();
     Vector3f wo = ctx.wo;
     Normal3f n = ctx.n;
-    const LightcutsTreeNode* node = &tree.nodes[nodeIndex];
 
     BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
     Frame shadingFrame(bsdf ? bsdf->shadingFrame : Frame::FromZ(ctx.n));
@@ -213,6 +211,9 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
 
     constexpr Float floatUintMax = 0x1p32f;
     uint32_t currentU = static_cast<uint32_t>(u * floatUintMax);
+
+    int nodeIndex = 0;
+    const LightcutsTreeNode* node = &tree.nodes[nodeIndex];
 
     while (!node->isLeaf) {
         uint32_t childrenIndices[2] = {static_cast<uint32_t>(nodeIndex + 1), node->childOrLightIndex};
@@ -347,8 +348,8 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
 }
 
 #ifdef PBRT_BUILD_GPU_RENDERER
-bool LightcutsLightSampler::buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights, LightcutsTree& tree, bool isPoint, HashMap<Light, LightLocation>& lightToLocation, Float& u) {
-    if (true || lights.size() < 100 || !Options->useGPU)
+bool LightcutsLightSampler::buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights, LightcutsTree& tree, bool isPoint, Float& u) {
+    if (lights.size() < 100 || !Options->useGPU)
         return false;
 
     LightcutsTreeBuilderGPU builder(tree.allLightBounds, isPoint);
