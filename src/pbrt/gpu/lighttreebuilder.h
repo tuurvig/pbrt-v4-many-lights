@@ -14,6 +14,7 @@
 #include <pbrt/util/lighttree_generic.h>
 
 #include <cuda_runtime.h>
+#include <cub/device/device_radix_sort.cuh>
 
 #include <algorithm>
 #include <cstdint>
@@ -75,6 +76,41 @@ class LightTreeBuilderGPU {
 template <typename MortonInt, typename CostEvaluator>
 LightTreeBuilderGPU<MortonInt, CostEvaluator>::~LightTreeBuilderGPU() {
     Release();
+}
+
+template <typename MortonInt, typename F>
+MortonInt* SortNodesMorton(LightTreeBuildState& buildState, MortonInt* dMortonCodes, F func) {
+    GPUParallelFor("Assign Morton Codes", ProfilerKernelGroup::HPLOC, buildState.nLights, func);
+
+    MortonInt *dMortonCodesSorted = GPUAllocAsync<MortonInt>(buildState.nLights);
+    uint32_t *dClusterIndicesSorted = GPUAllocAsync<uint32_t>(buildState.nLights);
+
+    void *dTempStorage = nullptr;
+    size_t tempStorageBytes = 0;
+
+    constexpr uint32_t beginBit = 0;
+    constexpr uint32_t endBit = sizeof(MortonInt) * 8;
+
+    const char *description = "Radix Sort Morton keys";
+    {
+        KernelTimerWrapper timer(GetProfilerEvents(description, ProfilerKernelGroup::HPLOC));
+        cub::DeviceRadixSort::SortPairs(dTempStorage, tempStorageBytes, dMortonCodes,
+            dMortonCodesSorted, buildState.dClusterIndices, dClusterIndicesSorted,
+            buildState.nLights, beginBit, endBit);
+
+        dTempStorage = GPUAllocAsync<uint8_t>(tempStorageBytes);
+
+        cub::DeviceRadixSort::SortPairs(dTempStorage, tempStorageBytes, dMortonCodes,
+            dMortonCodesSorted, buildState.dClusterIndices, dClusterIndicesSorted,
+            buildState.nLights, beginBit, endBit);
+    }
+
+    GPUFreeAsync(dTempStorage);
+    GPUFreeAsync(dMortonCodes);
+    GPUFreeAsync(buildState.dClusterIndices);
+    buildState.dClusterIndices = dClusterIndicesSorted;
+
+    return dMortonCodesSorted;
 }
 
 template <typename MortonInt, typename CostEvaluator>
