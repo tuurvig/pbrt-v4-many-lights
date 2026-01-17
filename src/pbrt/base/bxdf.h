@@ -182,11 +182,11 @@ class BxDF
         Vector3f wo, Float uc, Point2f u, TransportMode mode = TransportMode::Radiance,
         BxDFReflTransFlags sampleFlags = BxDFReflTransFlags::All) const;
 
-    PBRT_CPU_GPU inline SampledSpectrum Max_f(
+    PBRT_CPU_GPU inline Float Max_f(
         Vector3f wo, DirectionCone wiCone, TransportMode mode,
         BxDFReflTransFlags flags = BxDFReflTransFlags::All) const;
 
-    PBRT_CPU_GPU inline SampledSpectrum Max_f(
+    PBRT_CPU_GPU inline Float Max_f(
         Vector3f woGlobal, Bounds3f wiBoundsGlobal, Point3f p, const Frame& localFrame,
         TransportMode mode, BxDFReflTransFlags flags = BxDFReflTransFlags::All) const;
 

@@ -208,122 +208,124 @@ PBRT_CPU_GPU SampledSpectrum DielectricBxDF::f(Vector3f wo, Vector3f wi, Transpo
     }
 }
 
-PBRT_CPU_GPU SampledSpectrum DielectricBxDF::Max_f(Vector3f woGlobal, Bounds3f wiBoundsGlobal, Point3f p,
+PBRT_CPU_GPU Float DielectricBxDF::Max_f(Vector3f woGlobal, Bounds3f wiBoundsGlobal, Point3f p,
                     const Frame& localFrame, TransportMode mode, BxDFReflTransFlags flags) const {
-    DirectionCone wiConeGlobal = BoundSubtendedDirections(wiBoundsGlobal, p);
-    DirectionCone wiCone = wiConeGlobal;
-    wiCone.w = localFrame.ToLocal(wiCone.w);
-    Vector3f wo = localFrame.ToLocal(woGlobal);
-
-    HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
-    if (eta == 1 || mfDistrib.EffectivelySmooth()) {
-        // Perfect specular dielectric BSDF
-        Float R = FrDielectric(CosTheta(wo), eta);
-        Float T = 1 - R;
-        Float fr = 0, ft = 0;
-        if ((flags & BxDFReflTransFlags::Reflection) && (h & HemisphereIntersection::SAME)) {
-            // perfect specular reflection for dielectric BRDF
-            Vector3f wiGlobal = Reflect(woGlobal, localFrame.z);
-            if (wiBoundsGlobal.IntersectP(p, wiGlobal)) {
-                Vector3f wi = localFrame.ToLocal(wiGlobal);
-                fr = R / AbsCosTheta(wi);
-            }
-        }
-        if ((flags & BxDFReflTransFlags::Transmission) && (h & HemisphereIntersection::DIFF)) {
-            // Perfect specular transmission for dielectric BTDF
-            // Compute ray direction for specular transmission
-            Vector3f wiGlobal;
-            Float etap;
-            bool valid = Refract(woGlobal, Normal3f(localFrame.z), eta, &etap, &wiGlobal);
-            CHECK_RARE(1e-5f, !valid);
-            if (valid && wiBoundsGlobal.IntersectP(p, wiGlobal)) {
-                Vector3f wi = localFrame.ToLocal(wiGlobal);
-                ft = T / AbsCosTheta(wi);
-                // Account for non-symmetry with transmission to different medium
-                if (mode == TransportMode::Radiance) {
-                    ft /= Sqr(etap);
-                }
-            }
-        }
-        return SampledSpectrum(std::max(fr, ft));
-    }
-
-    SampledSpectrum fMax(0);
-    if ((flags & BxDFReflTransFlags::Reflection) && (h & HemisphereIntersection::SAME)) {
-        Vector3f wiGlobal = Reflect(woGlobal, localFrame.z);
-        wiGlobal = IntersectOrAdjust(wiBoundsGlobal, p, wiGlobal);
-        DCHECK(InsideNormalized(wiConeGlobal, wiGlobal));
-        fMax = f(wo, localFrame.ToLocal(wiGlobal), mode);
-    }
-
-    if ((flags & BxDFReflTransFlags::Transmission) && (h & HemisphereIntersection::DIFF)) {
-        Vector3f wiGlobal;
-        Float etap;
-        bool valid = Refract(woGlobal, Normal3f(localFrame.z), eta, &etap, &wiGlobal);
-        CHECK_RARE(1e-5f, !valid);
-        if (valid) {
-            wiGlobal = IntersectOrAdjust(wiBoundsGlobal, p, wiGlobal);
-            DCHECK(InsideNormalized(wiConeGlobal, wiGlobal));
-            fMax.MixMax(f(wo, localFrame.ToLocal(wiGlobal), mode));
-        }
-    }
-
-    return fMax;
+    return Float(1);
+    //DirectionCone wiConeGlobal = BoundSubtendedDirections(wiBoundsGlobal, p);
+    //DirectionCone wiCone = wiConeGlobal;
+    //wiCone.w = localFrame.ToLocal(wiCone.w);
+    //Vector3f wo = localFrame.ToLocal(woGlobal);
+    //
+    //HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
+    //if (eta == 1 || mfDistrib.EffectivelySmooth()) {
+    //    // Perfect specular dielectric BSDF
+    //    Float R = FrDielectric(CosTheta(wo), eta);
+    //    Float T = 1 - R;
+    //    Float fr = 0, ft = 0;
+    //    if ((flags & BxDFReflTransFlags::Reflection) && (h & HemisphereIntersection::SAME)) {
+    //        // perfect specular reflection for dielectric BRDF
+    //        Vector3f wiGlobal = Reflect(woGlobal, localFrame.z);
+    //        if (wiBoundsGlobal.IntersectP(p, wiGlobal)) {
+    //            Vector3f wi = localFrame.ToLocal(wiGlobal);
+    //            fr = R / AbsCosTheta(wi);
+    //        }
+    //    }
+    //    if ((flags & BxDFReflTransFlags::Transmission) && (h & HemisphereIntersection::DIFF)) {
+    //        // Perfect specular transmission for dielectric BTDF
+    //        // Compute ray direction for specular transmission
+    //        Vector3f wiGlobal;
+    //        Float etap;
+    //        bool valid = Refract(woGlobal, Normal3f(localFrame.z), eta, &etap, &wiGlobal);
+    //        CHECK_RARE(1e-5f, !valid);
+    //        if (valid && wiBoundsGlobal.IntersectP(p, wiGlobal)) {
+    //            Vector3f wi = localFrame.ToLocal(wiGlobal);
+    //            ft = T / AbsCosTheta(wi);
+    //            // Account for non-symmetry with transmission to different medium
+    //            if (mode == TransportMode::Radiance) {
+    //                ft /= Sqr(etap);
+    //            }
+    //        }
+    //    }
+    //    return SampledSpectrum(std::max(fr, ft));
+    //}
+    //
+    //SampledSpectrum fMax(0);
+    //if ((flags & BxDFReflTransFlags::Reflection) && (h & HemisphereIntersection::SAME)) {
+    //    Vector3f wiGlobal = Reflect(woGlobal, localFrame.z);
+    //    wiGlobal = IntersectOrAdjust(wiBoundsGlobal, p, wiGlobal);
+    //    DCHECK(InsideNormalized(wiConeGlobal, wiGlobal));
+    //    fMax = f(wo, localFrame.ToLocal(wiGlobal), mode);
+    //}
+    //
+    //if ((flags & BxDFReflTransFlags::Transmission) && (h & HemisphereIntersection::DIFF)) {
+    //    Vector3f wiGlobal;
+    //    Float etap;
+    //    bool valid = Refract(woGlobal, Normal3f(localFrame.z), eta, &etap, &wiGlobal);
+    //    CHECK_RARE(1e-5f, !valid);
+    //    if (valid) {
+    //        wiGlobal = IntersectOrAdjust(wiBoundsGlobal, p, wiGlobal);
+    //        DCHECK(InsideNormalized(wiConeGlobal, wiGlobal));
+    //        fMax.MixMax(f(wo, localFrame.ToLocal(wiGlobal), mode));
+    //    }
+    //}
+    //
+    //return fMax;
 }
 
-PBRT_CPU_GPU SampledSpectrum DielectricBxDF::Max_f(Vector3f wo, DirectionCone wiCone,
-             TransportMode mode, BxDFReflTransFlags flags) const {
-    HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
-    if (eta == 1 || mfDistrib.EffectivelySmooth()) {
-        // Perfect specular dielectric BSDF
-        Float R = FrDielectric(CosTheta(wo), eta);
-        Float T = 1 - R;
-        Float fr = 0, ft = 0;
-        if ((flags & BxDFReflTransFlags::Reflection) && (h & HemisphereIntersection::SAME)) {
-            // perfect specular reflection for dielectric BRDF
-            Vector3f wi(-wo.x, -wo.y, wo.z);
-            if (InsideNormalized(wiCone, wi)) {
-                fr = R / AbsCosTheta(wi);
-            }
-        }
-        if ((flags & BxDFReflTransFlags::Transmission) && (h & HemisphereIntersection::DIFF)) {
-            // Perfect specular transmission for dielectric BTDF
-            // Compute ray direction for specular transmission
-            Vector3f wi;
-            Float etap;
-            bool valid = Refract(wo, Normal3f(0, 0, 1), eta, &etap, &wi);
-            CHECK_RARE(1e-5f, !valid);
-            if (valid && InsideNormalized(wiCone, wi)) {
-                ft = T / AbsCosTheta(wi);
-                // Account for non-symmetry with transmission to different medium
-                if (mode == TransportMode::Radiance) {
-                    ft /= Sqr(etap);
-                }
-            }
-        }
-        return SampledSpectrum(std::max(fr, ft));
-    }
-
-    SampledSpectrum fMax(0);
-    if ((flags & BxDFReflTransFlags::Reflection) && (h & HemisphereIntersection::SAME)) {
-        Vector3f wi(-wo.x, -wo.y, wo.z);
-        wi = wiCone.ClosestVectorInCone(wi);
-        DCHECK(InsideNormalized(wiCone, wi));
-        fMax = f(wo, wi, mode);
-    }
-
-    if ((flags & BxDFReflTransFlags::Transmission) && (h & HemisphereIntersection::DIFF)) {
-        Vector3f wi;
-        Float etap;
-        bool valid = Refract(wo, Normal3f(0, 0, 1), eta, &etap, &wi);
-        CHECK_RARE(1e-5f, !valid);
-
-        wi = wiCone.ClosestVectorInCone(wi);
-        DCHECK(InsideNormalized(wiCone, wi));
-        fMax.MixMax(f(wo, wi, mode));
-    }
-
-    return fMax;
+PBRT_CPU_GPU Float DielectricBxDF::Max_f(Vector3f wo, DirectionCone wiCone,
+                                         TransportMode mode, BxDFReflTransFlags flags) const {
+    return Float(1);
+    //HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
+    //if (eta == 1 || mfDistrib.EffectivelySmooth()) {
+    //    // Perfect specular dielectric BSDF
+    //    Float R = FrDielectric(CosTheta(wo), eta);
+    //    Float T = 1 - R;
+    //    Float fr = 0, ft = 0;
+    //    if ((flags & BxDFReflTransFlags::Reflection) && (h & HemisphereIntersection::SAME)) {
+    //        // perfect specular reflection for dielectric BRDF
+    //        Vector3f wi(-wo.x, -wo.y, wo.z);
+    //        if (InsideNormalized(wiCone, wi)) {
+    //            fr = R / AbsCosTheta(wi);
+    //        }
+    //    }
+    //    if ((flags & BxDFReflTransFlags::Transmission) && (h & HemisphereIntersection::DIFF)) {
+    //        // Perfect specular transmission for dielectric BTDF
+    //        // Compute ray direction for specular transmission
+    //        Vector3f wi;
+    //        Float etap;
+    //        bool valid = Refract(wo, Normal3f(0, 0, 1), eta, &etap, &wi);
+    //        CHECK_RARE(1e-5f, !valid);
+    //        if (valid && InsideNormalized(wiCone, wi)) {
+    //            ft = T / AbsCosTheta(wi);
+    //            // Account for non-symmetry with transmission to different medium
+    //            if (mode == TransportMode::Radiance) {
+    //                ft /= Sqr(etap);
+    //            }
+    //        }
+    //    }
+    //    return SampledSpectrum(std::max(fr, ft));
+    //}
+    //
+    //SampledSpectrum fMax(0);
+    //if ((flags & BxDFReflTransFlags::Reflection) && (h & HemisphereIntersection::SAME)) {
+    //    Vector3f wi(-wo.x, -wo.y, wo.z);
+    //    wi = wiCone.ClosestVectorInCone(wi);
+    //    DCHECK(InsideNormalized(wiCone, wi));
+    //    fMax = f(wo, wi, mode);
+    //}
+    //
+    //if ((flags & BxDFReflTransFlags::Transmission) && (h & HemisphereIntersection::DIFF)) {
+    //    Vector3f wi;
+    //    Float etap;
+    //    bool valid = Refract(wo, Normal3f(0, 0, 1), eta, &etap, &wi);
+    //    CHECK_RARE(1e-5f, !valid);
+    //
+    //    wi = wiCone.ClosestVectorInCone(wi);
+    //    DCHECK(InsideNormalized(wiCone, wi));
+    //    fMax.MixMax(f(wo, wi, mode));
+    //}
+    //
+    //return fMax;
 }
 
 PBRT_CPU_GPU Float DielectricBxDF::PDF(Vector3f wo, Vector3f wi, TransportMode mode,
@@ -607,14 +609,14 @@ PBRT_CPU_GPU pstd::optional<BSDFSample> HairBxDF::Sample_f(Vector3f wo, Float uc
     return BSDFSample(f(wo, wi, mode), wi, pdf, Flags());
 }
 
-PBRT_CPU_GPU SampledSpectrum HairBxDF::Max_f(Vector3f wo, DirectionCone wiCone,
+PBRT_CPU_GPU Float HairBxDF::Max_f(Vector3f wo, DirectionCone wiCone,
              TransportMode mode, BxDFReflTransFlags flags) const {
-    return SampledSpectrum(1.f);
+    return Float(1);
 }
 
-PBRT_CPU_GPU SampledSpectrum HairBxDF::Max_f(Vector3f woGlobal, Bounds3f wiBoundsGlobal, Point3f p,
+PBRT_CPU_GPU Float HairBxDF::Max_f(Vector3f woGlobal, Bounds3f wiBoundsGlobal, Point3f p,
                           const Frame& localFrame, TransportMode mode, BxDFReflTransFlags flags) const {
-    return SampledSpectrum(1.f);
+    return Float(1);
 
 }
 
@@ -1163,11 +1165,11 @@ PBRT_CPU_GPU SampledSpectrum MeasuredBxDF::f(Vector3f wo, Vector3f wi,
            (4 * brdf->sigma.Evaluate(u_wo) * CosTheta(wi));
 }
 
-PBRT_CPU_GPU SampledSpectrum MeasuredBxDF::Max_f(Vector3f wo, DirectionCone wiCone,
-             TransportMode mode, BxDFReflTransFlags flags) const {
+PBRT_CPU_GPU Float MeasuredBxDF::Max_f(Vector3f wo, DirectionCone wiCone,
+                                       TransportMode mode, BxDFReflTransFlags flags) const {
     HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
     if (!(flags & BxDFReflTransFlags::Reflection) || !(h & HemisphereIntersection::SAME)) {
-        return SampledSpectrum(0.f);
+        return Float(0);
     }
 
     bool flipWi = false;
@@ -1190,7 +1192,7 @@ PBRT_CPU_GPU SampledSpectrum MeasuredBxDF::Max_f(Vector3f wo, DirectionCone wiCo
     Vector3f wm = SphericalDirection(sinTheta_m, cosTheta_m, phi_m);
     Vector3f wi = Reflect(woEval, wm);
     if (wi.z <= 0)
-        return SampledSpectrum(0.f);
+        return Float(0);
 
     wi = wiCone.ClosestVectorInCone(wi);
 
@@ -1198,18 +1200,18 @@ PBRT_CPU_GPU SampledSpectrum MeasuredBxDF::Max_f(Vector3f wo, DirectionCone wiCo
         wi = -wi;
     }
         
-    return f(wo, wi, mode);
+    return f(wo, wi, mode).MaxComponentValue();
 }
 
-PBRT_CPU_GPU SampledSpectrum MeasuredBxDF::Max_f(Vector3f woGlobal, Bounds3f wiBoundsGlobal, Point3f p,
-                    const Frame& localFrame, TransportMode mode, BxDFReflTransFlags flags) const {
+PBRT_CPU_GPU Float MeasuredBxDF::Max_f(Vector3f woGlobal, Bounds3f wiBoundsGlobal, Point3f p,
+                                       const Frame& localFrame, TransportMode mode, BxDFReflTransFlags flags) const {
     DirectionCone wiConeGlobal = BoundSubtendedDirections(wiBoundsGlobal, p);
     DirectionCone wiCone = wiConeGlobal;
     wiCone.w = localFrame.ToLocal(wiCone.w);
     Vector3f wo = localFrame.ToLocal(woGlobal);
     HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
     if (!(flags & BxDFReflTransFlags::Reflection) || !(h & HemisphereIntersection::SAME)) {
-        return SampledSpectrum(0.f);
+        return Float(0);
     }
 
     bool flipWi = false;
@@ -1232,7 +1234,7 @@ PBRT_CPU_GPU SampledSpectrum MeasuredBxDF::Max_f(Vector3f woGlobal, Bounds3f wiB
     Vector3f wi = Reflect(woEval, wm);
 
     if (wi.z <= 0)
-        return SampledSpectrum(0.f);
+        return Float(0);
 
     if (flipWi) {
         wi = -wi;
@@ -1243,7 +1245,7 @@ PBRT_CPU_GPU SampledSpectrum MeasuredBxDF::Max_f(Vector3f woGlobal, Bounds3f wiB
 
     Vector3f wiAdjusted = localFrame.ToLocal(wiGlobal);
 
-    return f(wo, wiAdjusted, mode);
+    return f(wo, wiAdjusted, mode).MaxComponentValue();
 }
 
 PBRT_CPU_GPU pstd::optional<BSDFSample> MeasuredBxDF::Sample_f(Vector3f wo, Float uc, Point2f u,

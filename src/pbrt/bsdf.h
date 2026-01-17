@@ -107,7 +107,7 @@ class BSDF {
     }
 
     template <typename BxDF>
-    PBRT_CPU_GPU SampledSpectrum Max_f(Vector3f woRender, DirectionCone wiConeRender,
+    PBRT_CPU_GPU Float Max_f(Vector3f woRender, DirectionCone wiConeRender,
         TransportMode mode = TransportMode::Radiance) const {
         Vector3f wo = RenderToLocal(woRender);
         if (wo.z == 0) {
@@ -120,7 +120,7 @@ class BSDF {
         return specificBxDF->Max_f(wo, wiCone, mode);
     }
 
-    PBRT_CPU_GPU SampledSpectrum Max_f(Vector3f woRender, DirectionCone wiConeRender,
+    PBRT_CPU_GPU Float Max_f(Vector3f woRender, DirectionCone wiConeRender,
         TransportMode mode = TransportMode::Radiance) const {
         Vector3f wo = RenderToLocal(woRender);
         if (wo.z == 0) {
@@ -133,7 +133,7 @@ class BSDF {
     }
 
     template <typename BxDF>
-    PBRT_CPU_GPU SampledSpectrum Max_f(Vector3f woRender, Bounds3f wiBoundsRender,
+    PBRT_CPU_GPU Float Max_f(Vector3f woRender, Bounds3f wiBoundsRender,
         Point3f p, TransportMode mode = TransportMode::Radiance) const {
         if (Dot(woRender, shadingFrame.z) == 0) {
             return {};
@@ -143,7 +143,7 @@ class BSDF {
         return specificBxDF->Max_f(woRender, wiBoundsRender, p, shadingFrame, mode);
     }
 
-    PBRT_CPU_GPU SampledSpectrum Max_f(Vector3f woRender, Bounds3f wiBoundsRender,
+    PBRT_CPU_GPU Float Max_f(Vector3f woRender, Bounds3f wiBoundsRender,
         Point3f p, TransportMode mode = TransportMode::Radiance) const {
         if (Dot(woRender, shadingFrame.z) == 0) {
             return {};

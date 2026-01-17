@@ -225,10 +225,8 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
             Float ub1 = geomBound1 * nodeIntensities[1];
 
             if (bsdf) {
-                SampledSpectrum matBound0 = bsdf->Max_f(wo, nodeBound0, p);
-                SampledSpectrum matBound1 = bsdf->Max_f(wo, nodeBound1, p);
-                ub0 *= matBound0.MaxComponentValue();
-                ub1 *= matBound1.MaxComponentValue();
+                ub0 *= bsdf->Max_f(wo, nodeBound0, p);
+                ub1 *= bsdf->Max_f(wo, nodeBound1, p);
             }
 
             if (dist2Min0 > diagonalLengthSqr0 && dist2Min1 >= diagonalLengthSqr1) {
