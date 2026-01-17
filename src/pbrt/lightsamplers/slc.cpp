@@ -13,7 +13,6 @@
 #include <algorithm>
 #include <array>
 
-#include <cub/device/device_radix_sort.cuh>
 #endif //PBRT_BUILD_GPU_RENDERER
 
 namespace pbrt {
@@ -66,8 +65,33 @@ class SLCTreeBuilderGPU final : public LightTreeBuilderGPU<uint64_t, SAOHCostEva
             return false;
 
         Allocate(static_cast<uint32_t>(lights.size()), m_allLightBounds);
-        MortonCodes() = GetSortedMortonCodes(State(), MortonCodes(), lights);
+
+        LightTreeBuildState buildState(State());
+        std::array<uint8_t, 3> ax = DetermineAxisOrder(buildState.allLightBounds);
+
+        LightcutsBuildContainer* dLightsContainer = GPUAllocAsync<LightcutsBuildContainer>(buildState.nLights);
+        GPUCopyToDevice(dLightsContainer, lights.data(), lights.size());
+
+        uint64_t* dMortonCodes = MortonCodes();
+        MortonCodes() = SortNodesMorton(State(), MortonCodes(), [buildState, ax, dLightsContainer, dMortonCodes] PBRT_GPU(int idx) {
+            LightcutsBuildContainer cont = dLightsContainer[idx];
+            LightTreeConstructionNodeGPU leaf(cont.bounds, kInvalidIndex, idx);
+            Point3f centroid = cont.bounds.Centroid();
+            Vector3f offset = buildState.allLightBounds.Offset(centroid);
+
+            Point3f position = {offset[ax[0]], offset[ax[1]], offset[ax[2]]};
+            Vector3f direction = Normalize(cont.bounds.w);
+
+            dMortonCodes[idx] = EncodeExtendedMorton5(position, direction);
+            buildState.dClusterIndices[idx] = idx;
+            buildState.dNodes[idx] = leaf;
+        });
+        
+        GPUFreeAsync(dLightsContainer);
+        dLightsContainer = nullptr;
+
         BuildNodes(SAOHCostEvaluator());
+        
         return true;
     }
 
@@ -90,64 +114,6 @@ class SLCTreeBuilderGPU final : public LightTreeBuilderGPU<uint64_t, SAOHCostEva
         
         FlattenLightTree<GPUToLightcutsLeaf, SLCNodeEmitter>(adapter, rootIndex, 0, 0, emitter, u);
     }
-
-    static uint64_t* GetSortedMortonCodes(LightTreeBuildState& buildState, uint64_t* dMortonCodes, const std::vector<LightcutsBuildContainer>& lights) {
-        LightTreeBuildState localState = buildState;
-        std::array<uint8_t, 3> ax = DetermineAxisOrder(localState.allLightBounds);
-
-        LightcutsBuildContainer* dLightsContainer = GPUAllocAsync<LightcutsBuildContainer>(buildState.nLights);
-        GPUCopyToDevice(dLightsContainer, lights.data(), lights.size());
-
-        GPUParallelFor("Assign Morton Codes", ProfilerKernelGroup::HPLOC, localState.nLights, [=] PBRT_GPU(int idx) {
-            LightcutsBuildContainer cont = dLightsContainer[idx];
-            LightTreeConstructionNodeGPU leaf(cont.bounds, kInvalidIndex, idx);
-            Point3f centroid = cont.bounds.Centroid();
-            Vector3f offset = buildState.allLightBounds.Offset(centroid);
-
-            Point3f position = {offset[ax[0]], offset[ax[1]], offset[ax[2]]};
-            Vector3f direction = Normalize(cont.bounds.w);
-
-            dMortonCodes[idx] = EncodeExtendedMorton5(position, direction);
-            localState.dClusterIndices[idx] = idx;
-            localState.dNodes[idx] = leaf;
-        });
-
-        GPUFreeAsync(dLightsContainer);
-        dLightsContainer = nullptr;
-
-        uint64_t *dMortonCodesSorted = GPUAllocAsync<uint64_t>(localState.nLights);
-        uint32_t *dClusterIndicesSorted = GPUAllocAsync<uint32_t>(localState.nLights);
-
-        void *dTempStorage = nullptr;
-        size_t tempStorageBytes = 0;
-        
-        constexpr uint32_t beginBit = 1;
-        constexpr uint32_t endBit = 64;
-
-        const char *description = "Radix Sort Morton keys";
-        {
-            KernelTimerWrapper timer(GetProfilerEvents(description, ProfilerKernelGroup::HPLOC));
-            cub::DeviceRadixSort::SortPairs(dTempStorage, tempStorageBytes, dMortonCodes,
-                dMortonCodesSorted, localState.dClusterIndices, dClusterIndicesSorted,
-                localState.nLights, beginBit, endBit);
-
-            dTempStorage = GPUAllocAsync<uint8_t>(tempStorageBytes);
-
-            cub::DeviceRadixSort::SortPairs(dTempStorage, tempStorageBytes, dMortonCodes,
-                dMortonCodesSorted, localState.dClusterIndices, dClusterIndicesSorted,
-                localState.nLights, beginBit, endBit);
-        }
-
-        GPUFreeAsync(dTempStorage);
-        GPUFreeAsync(dMortonCodes);
-        GPUFreeAsync(buildState.dClusterIndices);
-
-        buildState.dClusterIndices = dClusterIndicesSorted;
-
-        return dMortonCodesSorted;
-    }
-
-  private:
 
 private:
     Bounds3f m_allLightBounds;

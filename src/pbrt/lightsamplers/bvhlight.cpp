@@ -29,7 +29,29 @@ class BVHLightTreeBuilder final : public LightTreeBuilderGPU<uint64_t, SAOHCostE
             return false;
 
         Allocate(static_cast<uint32_t>(lights.size()), m_allLightBounds);
-        MortonCodes() = UploadSortedLeaves(State(), MortonCodes(), lights);
+
+        LightTreeBuildState buildState(State());
+        std::array<uint8_t, 3> ax = DetermineAxisOrder(buildState.allLightBounds);
+
+        LightBVHBuildContainer* dLightsContainer = GPUAllocAsync<LightBVHBuildContainer>(buildState.nLights);
+        GPUCopyToDevice(dLightsContainer, lights.data(), lights.size());
+
+        uint64_t* dMortonCodes = MortonCodes();
+        MortonCodes() = SortNodesMorton(State(), MortonCodes(), [buildState, ax, dLightsContainer, dMortonCodes] PBRT_GPU(int idx) {
+            LightBVHBuildContainer cont = dLightsContainer[idx];
+            LightTreeConstructionNodeGPU leaf{cont.bounds, kInvalidIndex, static_cast<uint32_t>(cont.index)};
+            Point3f centroid = cont.bounds.Centroid();
+            Vector3f offset = buildState.allLightBounds.Offset(centroid);
+
+            Point3f position = {offset[ax[0]], offset[ax[1]], offset[ax[2]]};
+            Vector3f direction = Normalize(cont.bounds.w);
+
+            dMortonCodes[idx] = EncodeExtendedMorton5(position, direction);
+
+            buildState.dClusterIndices[idx] = idx;
+            buildState.dNodes[idx] = leaf;
+        });
+
         BuildNodes(SAOHCostEvaluator());
         return true;
     }
