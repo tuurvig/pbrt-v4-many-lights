@@ -97,17 +97,18 @@ class SLCLightSampler {
                 Float geomBound0 = ComputeGeometricBound(children[0], nodeBound0, shadingFrame, true, p, wo);
                 Float geomBound1 = ComputeGeometricBound(children[1], nodeBound1, shadingFrame, true, p, wo);
 
+                //Float ub0 = nodeIntensities[0];
+                //Float ub1 = nodeIntensities[1];
                 Float ub0 = geomBound0 * nodeIntensities[0];
                 Float ub1 = geomBound1 * nodeIntensities[1];
 
-                // if (bsdf) {
-                //     SampledSpectrum matBound0 = bsdf->Max_f(wo, nodeBound0, p);
-                //     SampledSpectrum matBound1 = bsdf->Max_f(wo, nodeBound1, p);
-                //     ub0 *= matBound0.MaxComponentValue();
-                //     ub1 *= matBound1.MaxComponentValue();
-                // }
+                if (bsdf) {
+                    ub0 *= bsdf->Max_f(wo, nodeBound0, p);
+                    ub1 *= bsdf->Max_f(wo, nodeBound1, p);
+                }
 
-                if (dist2Min0 > diagonalLengthSqr0 && dist2Min1 >= diagonalLengthSqr1) {
+                //if (dist2Min0 > diagonalLengthSqr0 && dist2Min1 >= diagonalLengthSqr1) {
+                if (false) {
                 //if (dist2Min0 > 0 && dist2Min1 > 0) {
                     
                     Float dBoundMin0 = 1 / dist2Min0;
