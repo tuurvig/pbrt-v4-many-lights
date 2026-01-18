@@ -107,9 +107,6 @@ class SLCLightSampler {
                         Float dist2Min0 = DistanceSquared(p, ClosestPoint(p, nodeBound0));
                         Float dist2Min1 = DistanceSquared(p, ClosestPoint(p, nodeBound1));
 
-                        //Float dist2Max0 = DistanceSquared(p, FurthestPoint(p, nodeBound0));
-                        //Float dist2Max1 = DistanceSquared(p, FurthestPoint(p, nodeBound1));
-
                         if (dist2Min0 > diagonalLengthSqr0 && dist2Min1 > diagonalLengthSqr1) {
                             Float dBoundMin0 = 1 / dist2Min0;
                             Float dBoundMin1 = 1 / dist2Min1;
@@ -138,35 +135,6 @@ class SLCLightSampler {
                     errBounds[0] = static_cast<Float>(geomBound1 < MachineEpsilon);
                     errBounds[1] = 1 - errBounds[0];
                 }
-                
-                //if (dist2Min0 > diagonalLengthSqr0 && dist2Min1 >= diagonalLengthSqr1) {
-                ////if (false) {
-                ////if (dist2Min0 > 0 && dist2Min1 > 0) {
-                //    
-                //    Float dBoundMin0 = 1 / dist2Min0;
-                //    Float dBoundMin1 = 1 / dist2Min1;
-                //    //Float dBoundMax0 = 1 / dist2Max0;
-                //    //Float dBoundMax1 = 1 / dist2Max1;
-                //
-                //    errBounds[0] = dBoundMin0 * ub0;
-                //    errBounds[1] = dBoundMin1 * ub1;
-                //
-                //    //Float ebMin0 = std::max(dBoundMin0 * ub0, MachineEpsilon);
-                //    //Float ebMin1 = std::max(dBoundMin1 * ub1, MachineEpsilon);
-                //    //Float ebMax0 = std::max(dBoundMin0 * ub0, MachineEpsilon);
-                //    //Float ebMax1 = std::max(dBoundMin1 * ub1, MachineEpsilon);
-                //
-                //    //Float nwMin = std::min(1.f, ebMin0 / (ebMin0 + ebMin1));
-                //    //Float nwMax = std::min(1.f, ebMax0 / (ebMax0 + ebMax1));
-                //
-                //    //errBounds[0] = (nwMin + nwMax) * 0.5f;
-                //    //errBounds[1] = 1 - errBounds[0];
-                //
-                //} else {
-                //    errBounds[0] = ub0;
-                //    errBounds[1] = ub1;
-                //    //canEnd = false;
-                //}
             } else {
                 if (nodeIntensities[0] == 0 && nodeIntensities[1] == 0) {
                     return {};
@@ -174,18 +142,7 @@ class SLCLightSampler {
                 // weight of the first child will be 1 or 0 based on whether the other child is 0.
                 errBounds[0] = static_cast<Float>(nodeIntensities[1] == 0);
                 errBounds[1] = 1 - errBounds[0];
-                //canEnd = false;
             }
-
-            //if (errBounds[0] < MachineEpsilon) {
-            //    
-            //    if (errBounds[1] < MachineEpsilon) {
-            //        return {};
-            //    }
-            //    errBounds[0] = MachineEpsilon;
-            //} else if (errBounds[1] < MachineEpsilon){
-            //    errBounds[1] = MachineEpsilon;
-            //}
 
             Float weights[2] = {0};
             weights[0] = std::min(OneMinusEpsilon, errBounds[0] / (errBounds[0] + errBounds[1]));
