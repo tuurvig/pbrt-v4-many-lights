@@ -44,23 +44,22 @@ class DiffuseBxDF {
     PBRT_CPU_GPU
     Float Max_f(Vector3f wo, DirectionCone wiCone,
                 TransportMode mode, BxDFReflTransFlags flags = BxDFReflTransFlags::All) const {
-        //HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
-        //if (h & HemisphereIntersection::SAME) {
-        //    return R * InvPi;
-        //}
-        return Float(1);
+        HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
+        if (h & HemisphereIntersection::SAME) {
+            return R.MaxComponentValue() * InvPi;
+        }
+        return Float(0);
     }
 
     PBRT_CPU_GPU
     Float Max_f(Vector3f woGlobal, Bounds3f wiBoundsGlobal, Point3f p,
                 const Frame& localFrame, TransportMode mode,
                 BxDFReflTransFlags flags) const {
-        //DirectionCone wiConeGlobal = BoundSubtendedDirections(wiBoundsGlobal, p);
-        //DirectionCone wiCone = wiConeGlobal;
-        //wiCone.w = localFrame.ToLocal(wiCone.w);
-        //Vector3f wo = localFrame.ToLocal(woGlobal);
-        //return Max_f(wo, wiCone, mode, flags);
-        return Float(1);
+        DirectionCone wiConeGlobal = BoundSubtendedDirections(wiBoundsGlobal, p);
+        DirectionCone wiCone = wiConeGlobal;
+        wiCone.w = localFrame.ToLocal(wiCone.w);
+        Vector3f wo = localFrame.ToLocal(woGlobal);
+        return Max_f(wo, wiCone, mode, flags);
     }
 
     PBRT_CPU_GPU
@@ -119,23 +118,13 @@ class DiffuseTransmissionBxDF {
     PBRT_CPU_GPU
     Float Max_f(Vector3f wo, DirectionCone wiCone,
                 TransportMode mode, BxDFReflTransFlags flags = BxDFReflTransFlags::All) const {
-        
-        return Float(1);
-        //HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
-        //if ((flags & BxDFReflTransFlags::All) && (h & HemisphereIntersection::BOTH)) {
-        //    SampledSpectrum outR = R;
-        //    return outR.MixMax(T) * InvPi; 
-        //}
-        //
-        //if ((flags & BxDFReflTransFlags::Reflection) && (h & HemisphereIntersection::SAME)) {
-        //    return R * InvPi;
-        //}
-        //
-        //if ((flags & BxDFReflTransFlags::Transmission) && (h & HemisphereIntersection::DIFF)) {
-        //    return T * InvPi;
-        //}
-        //
-        //return SampledSpectrum(0.f);
+        HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
+        Float maxR = 0, maxT = 0;
+        if ((flags & BxDFReflTransFlags::Reflection) && (h & HemisphereIntersection::SAME))
+            maxR = R.MaxComponentValue();
+        if ((flags & BxDFReflTransFlags::Transmission) && (h & HemisphereIntersection::DIFF))
+            maxT = T.MaxComponentValue();
+        return std::max(maxR, maxT) * InvPi;
     }
 
     PBRT_CPU_GPU
@@ -291,71 +280,14 @@ class ThinDielectricBxDF {
     PBRT_CPU_GPU
     Float Max_f(Vector3f wo, DirectionCone wiCone,
                 TransportMode mode, BxDFReflTransFlags flags = BxDFReflTransFlags::All) const {
-        return Float(1);
-        //HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
-        //Float R = FrDielectric(AbsCosTheta(wo), eta);
-        //Float T = 1 - R;
-        //
-        //if (R < 1) {
-        //    R += Sqr(T) * R / (1 - Sqr(R));
-        //    T = 1 - R;
-        //}
-        //
-        //Float fr = 0, ft = 0;
-        //if ((flags & BxDFReflTransFlags::Reflection) && (h & HemisphereIntersection::SAME)) {
-        //    // perfect specular reflection for dielectric BRDF
-        //    Vector3f wi(-wo.x, -wo.y, wo.z);
-        //    if (InsideNormalized(wiCone, wi)) {
-        //        fr = R / AbsCosTheta(wi);
-        //    }
-        //}
-        //if ((flags & BxDFReflTransFlags::Transmission) && (h & HemisphereIntersection::DIFF)) {
-        //    // Perfect specular transmission at thin dielectric interface
-        //    Vector3f wi = -wo;
-        //    if (InsideNormalized(wiCone, wi)) {
-        //        ft = T / AbsCosTheta(wi);
-        //    }
-        //}
-        //return SampledSpectrum(std::max(fr, ft));
+        return Float(0);
     }
 
     PBRT_CPU_GPU
     Float Max_f(Vector3f woGlobal, Bounds3f wiBoundsGlobal, Point3f p,
                           const Frame& localFrame, TransportMode mode,
                           BxDFReflTransFlags flags) const {
-        return Float(1);
-        //DirectionCone wiConeGlobal = BoundSubtendedDirections(wiBoundsGlobal, p);
-        //DirectionCone wiCone = wiConeGlobal;
-        //wiCone.w = localFrame.ToLocal(wiCone.w);
-        //Vector3f wo = localFrame.ToLocal(woGlobal);
-        //
-        //HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
-        //Float R = FrDielectric(AbsCosTheta(wo), eta);
-        //Float T = 1 - R;
-        //
-        //if (R < 1) {
-        //    R += Sqr(T) * R / (1 - Sqr(R));
-        //    T = 1 - R;
-        //}
-        //
-        //Float fr = 0, ft = 0;
-        //if ((flags & BxDFReflTransFlags::Reflection) && (h & HemisphereIntersection::SAME)) {
-        //    // perfect specular reflection for dielectric BRDF
-        //    Vector3f wiGlobal = Reflect(woGlobal, localFrame.z);
-        //    if (wiBoundsGlobal.IntersectP(p, wiGlobal)) {
-        //        Vector3f wi = localFrame.ToLocal(wiGlobal);
-        //        fr = R / AbsCosTheta(wi);
-        //    }
-        //}
-        //if ((flags & BxDFReflTransFlags::Transmission) && (h & HemisphereIntersection::DIFF)) {
-        //    // Perfect specular transmission at thin dielectric interface
-        //    Vector3f wiGlobal = -woGlobal;
-        //    if (wiBoundsGlobal.IntersectP(p, wiGlobal)) {
-        //        Vector3f wi = localFrame.ToLocal(wiGlobal);
-        //        ft = T / AbsCosTheta(wi);
-        //    }
-        //}
-        //return SampledSpectrum(std::max(fr, ft));
+        return Float(0);
     }
 
     PBRT_CPU_GPU
@@ -492,60 +424,38 @@ class ConductorBxDF {
     PBRT_CPU_GPU
     Float Max_f(Vector3f wo, DirectionCone wiCone,
                 TransportMode mode, BxDFReflTransFlags flags = BxDFReflTransFlags::All) const {
-        return Float(1);
-        //HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
-        //if (wo.z == 0 || !(flags & BxDFReflTransFlags::Reflection) || !(h & HemisphereIntersection::SAME))
-        //    return SampledSpectrum(0.f);
-        //
-        //Vector3f wi(-wo.x, -wo.y, wo.z);
-        //if (mfDistrib.EffectivelySmooth()) {
-        //    // Perfect specular conductor BRDF
-        //    SampledSpectrum f(0.f);
-        //    if (InsideNormalized(wiCone, wi)) {
-        //        f += FrComplex(AbsCosTheta(wi), eta, k) / AbsCosTheta(wi);
-        //    } 
-        //    return f;
-        //}
-        //
-        //// Get best possible estimate for wi,
-        //// that is inside the cone
-        //wi = wiCone.ClosestVectorInCone(wi);
-        //DCHECK(InsideNormalized(wiCone, wi));
-        //return f(wo, wi, mode);
+        HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
+        if (mfDistrib.EffectivelySmooth() || wo.z == 0 || !(flags & BxDFReflTransFlags::Reflection) || !(h & HemisphereIntersection::SAME)) {
+            return Float(0);
+        }
+        
+        Vector3f wr(-wo.x, -wo.y, wo.z);        
+        Vector3f wi = wiCone.ClosestVectorInCone(wr);
+        DCHECK(InsideNormalized(wiCone, wi));
+
+        return f(wo, wi, mode).MaxComponentValue();
     }
 
     PBRT_CPU_GPU
     Float Max_f(Vector3f woGlobal, Bounds3f wiBoundsGlobal, Point3f p,
                 const Frame& localFrame, TransportMode mode,
                 BxDFReflTransFlags flags) const {
-        return Float(1);
-        //DirectionCone wiConeGlobal = BoundSubtendedDirections(wiBoundsGlobal, p);
-        //DirectionCone wiCone = wiConeGlobal;
-        //wiCone.w = localFrame.ToLocal(wiCone.w);
-        //Vector3f wo = localFrame.ToLocal(woGlobal);
-        //HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
-        //if (wo.z == 0 || !(flags & BxDFReflTransFlags::Reflection) || !(h & HemisphereIntersection::SAME)) {
-        //    return SampledSpectrum(0.f);
-        //}
-        //
-        //Vector3f wiGlobal = Reflect(woGlobal, localFrame.z);
-        //if (mfDistrib.EffectivelySmooth()) {
-        //    // Perfect specular conductor BRDF
-        //    SampledSpectrum fmax(0.f);
-        //    if (wiBoundsGlobal.IntersectP(p, wiGlobal)) {
-        //        Vector3f wi = localFrame.ToLocal(wiGlobal);
-        //        fmax += FrComplex(AbsCosTheta(wi), eta, k) / AbsCosTheta(wi);
-        //    } 
-        //    return fmax;
-        //}
-        //
-        //// Get best possible estimate for wi,
-        //// that goes through the wiBounds
-        //wiGlobal = IntersectOrAdjust(wiBoundsGlobal, p, wiGlobal);
-        //Vector3f wi = localFrame.ToLocal(wiGlobal);
-        ////DCHECK(InsideNormalized(wiCone, wi));
-        //
-        //return f(wo, wi, mode);
+        if (mfDistrib.EffectivelySmooth()) return Float(0);
+        
+        DirectionCone wiConeGlobal = BoundSubtendedDirections(wiBoundsGlobal, p);
+        DirectionCone wiCone = wiConeGlobal;
+        wiCone.w = localFrame.ToLocal(wiCone.w);
+        Vector3f wo = localFrame.ToLocal(woGlobal);
+        HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
+        if (wo.z == 0 || !(flags & BxDFReflTransFlags::Reflection) || !(h & HemisphereIntersection::SAME)) {
+            return Float(0);
+        }
+        
+        Vector3f wrGlobal = Reflect(woGlobal, localFrame.z);
+        Vector3f wiGlobal = IntersectOrAdjust(wiBoundsGlobal, p, wrGlobal);
+        Vector3f wi = localFrame.ToLocal(wiGlobal);
+        
+        return f(wo, wi, mode).MaxComponentValue();
     }
 
     PBRT_CPU_GPU
@@ -1340,37 +1250,54 @@ class NormalizedFresnelBxDF {
     PBRT_CPU_GPU
     Float Max_f(Vector3f wo, DirectionCone wiCone,
                 TransportMode mode, BxDFReflTransFlags flags = BxDFReflTransFlags::All) const {
-        return Float(1);
-        //HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
-        //if (!(flags & BxDFReflTransFlags::Reflection) || !(h & HemisphereIntersection::SAME)) {
-        //    return SampledSpectrum(0.f);
-        //}
-        //
-        //// Maximalizing CosTheta(wi) by using the local normal
-        //Vector3f wi(0.f, 0.f, 1.f);
-        //wi = wiCone.ClosestVectorInCone(wi);
-        //return f(wo, wi, mode);
+        HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
+        if (h == HemisphereIntersection::DIFF) {
+            return 0;
+        }
+
+        // Find optimal wi closest to the normal (0, 0, 1)
+        // Fr is minimized (and f maximized) at normal incidence
+        Vector3f wiMax = wiCone.ClosestVectorInCone(Vector3f(0, 0, 1));
+
+        Float maxCosTheta = AbsCosTheta(wiMax);
+        Float c = 1 - 2 * FresnelMoment1(1 / eta);
+        Float fMax = (1 - FrDielectric(maxCosTheta, eta)) / (c * Pi);
+
+        // Update BSSRDF transmission term to account for adjoint light transport
+        if (mode == TransportMode::Radiance)
+            fMax *= Sqr(eta);
+
+        return fMax;
     }
 
     PBRT_CPU_GPU
     Float Max_f(Vector3f woGlobal, Bounds3f wiBoundsGlobal, Point3f p,
                 const Frame& localFrame, TransportMode mode,
                 BxDFReflTransFlags flags) const {
-        return Float(1);
-        //DirectionCone wiConeGlobal = BoundSubtendedDirections(wiBoundsGlobal, p);
-        //DirectionCone wiCone = wiConeGlobal;
-        //wiCone.w = localFrame.ToLocal(wiCone.w);
-        //Vector3f wo = localFrame.ToLocal(woGlobal);
-        //HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
-        //if (!(flags & BxDFReflTransFlags::Reflection) || !(h & HemisphereIntersection::SAME)) {
-        //    return SampledSpectrum(0.f);
-        //}
-        //
-        //Vector3f wiGlobal = localFrame.z;
-        //wiGlobal = IntersectOrAdjust(wiBoundsGlobal, p, wiGlobal);
-        //Vector3f wi = localFrame.ToLocal(wiGlobal);
-        //
-        //return f(wo, wi, mode);
+        Vector3f wo = localFrame.ToLocal(woGlobal);
+        if (wo.z == 0) return 0;
+
+        DirectionCone wiConeGlobal = BoundSubtendedDirections(wiBoundsGlobal, p);
+        DirectionCone wiCone(localFrame.ToLocal(wiConeGlobal.w), wiConeGlobal.cosTheta);
+        HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
+        if (h == HemisphereIntersection::DIFF) {
+            return 0;
+        }
+
+        // Find optimal wi closest to the normal (0, 0, 1)
+        // Fr is minimized (and f maximized) at normal incidence
+        Vector3f wiGlobal = IntersectOrAdjust(wiBoundsGlobal, p, localFrame.z);
+        Vector3f wiMax = localFrame.ToLocal(wiGlobal);
+
+        Float maxCosTheta = AbsCosTheta(wiMax);
+        Float c = 1 - 2 * FresnelMoment1(1 / eta);
+        Float fMax = (1 - FrDielectric(maxCosTheta, eta)) / (c * Pi);
+
+        // Update BSSRDF transmission term to account for adjoint light transport
+        if (mode == TransportMode::Radiance)
+            fMax *= Sqr(eta);
+
+        return fMax;
     }
 
     PBRT_CPU_GPU

@@ -82,59 +82,91 @@ class SLCLightSampler {
                 const Bounds3f nodeBound0 = children[0]->compactLightBounds.Bounds(m_tree.allLightBounds);
                 const Bounds3f nodeBound1 = children[1]->compactLightBounds.Bounds(m_tree.allLightBounds);
 
-                const Float diagonalLengthSqr0 = std::max(LengthSquared(nodeBound0.Diagonal()), minLengthSqr);
-                const Float diagonalLengthSqr1 = std::max(LengthSquared(nodeBound1.Diagonal()), minLengthSqr);
-
-                Float dist2Min0 = DistanceSquared(p, ClosestPoint(p, nodeBound0));
-                Float dist2Min1 = DistanceSquared(p, ClosestPoint(p, nodeBound1));
-
-                //Float dist2Min0 = std::max(DistanceSquared(p, ClosestPoint(p, nodeBound0)), minLengthSqr);
-                //Float dist2Min1 = std::max(DistanceSquared(p, ClosestPoint(p, nodeBound1)), minLengthSqr);
-
-                //Float dist2Max0 = std::max(DistanceSquared(p, FurthestPoint(p, nodeBound0)), 1e-6f);
-                //Float dist2Max1 = std::max(DistanceSquared(p, FurthestPoint(p, nodeBound1)), 1e-6f);
-
                 Float geomBound0 = ComputeGeometricBound(children[0], nodeBound0, shadingFrame, true, p, wo);
                 Float geomBound1 = ComputeGeometricBound(children[1], nodeBound1, shadingFrame, true, p, wo);
 
-                //Float ub0 = nodeIntensities[0];
-                //Float ub1 = nodeIntensities[1];
-                Float ub0 = geomBound0 * nodeIntensities[0];
-                Float ub1 = geomBound1 * nodeIntensities[1];
+                if (geomBound0 > MachineEpsilon && geomBound1 > MachineEpsilon) {
+                    Float ub0 = geomBound0 * nodeIntensities[0];
+                    Float ub1 = geomBound1 * nodeIntensities[1];
 
-                if (bsdf) {
-                    ub0 *= bsdf->Max_f(wo, nodeBound0, p);
-                    ub1 *= bsdf->Max_f(wo, nodeBound1, p);
-                }
+                    Float matBound0 = 1;
+                    Float matBound1 = 1;
 
-                //if (dist2Min0 > diagonalLengthSqr0 && dist2Min1 >= diagonalLengthSqr1) {
-                if (false) {
-                //if (dist2Min0 > 0 && dist2Min1 > 0) {
-                    
-                    Float dBoundMin0 = 1 / dist2Min0;
-                    Float dBoundMin1 = 1 / dist2Min1;
-                    //Float dBoundMax0 = 1 / dist2Max0;
-                    //Float dBoundMax1 = 1 / dist2Max1;
+                    if (bsdf) {
+                        matBound0 = bsdf->Max_f(wo, nodeBound0, p);
+                        matBound1 = bsdf->Max_f(wo, nodeBound1, p);
+                    }
 
-                    errBounds[0] = dBoundMin0 * ub0;
-                    errBounds[1] = dBoundMin1 * ub1;
+                    if ((matBound0 > MachineEpsilon && matBound1 > MachineEpsilon)) {
+                        ub0 *= matBound0;
+                        ub1 *= matBound1;
 
-                    //Float ebMin0 = std::max(dBoundMin0 * ub0, MachineEpsilon);
-                    //Float ebMin1 = std::max(dBoundMin1 * ub1, MachineEpsilon);
-                    //Float ebMax0 = std::max(dBoundMin0 * ub0, MachineEpsilon);
-                    //Float ebMax1 = std::max(dBoundMin1 * ub1, MachineEpsilon);
+                        const Float diagonalLengthSqr0 = std::max(LengthSquared(nodeBound0.Diagonal()), minLengthSqr);
+                        const Float diagonalLengthSqr1 = std::max(LengthSquared(nodeBound1.Diagonal()), minLengthSqr);
 
-                    //Float nwMin = std::min(1.f, ebMin0 / (ebMin0 + ebMin1));
-                    //Float nwMax = std::min(1.f, ebMax0 / (ebMax0 + ebMax1));
+                        Float dist2Min0 = DistanceSquared(p, ClosestPoint(p, nodeBound0));
+                        Float dist2Min1 = DistanceSquared(p, ClosestPoint(p, nodeBound1));
 
-                    //errBounds[0] = (nwMin + nwMax) * 0.5f;
-                    //errBounds[1] = 1 - errBounds[0];
+                        //Float dist2Max0 = DistanceSquared(p, FurthestPoint(p, nodeBound0));
+                        //Float dist2Max1 = DistanceSquared(p, FurthestPoint(p, nodeBound1));
 
+                        if (dist2Min0 > diagonalLengthSqr0 && dist2Min1 > diagonalLengthSqr1) {
+                            Float dBoundMin0 = 1 / dist2Min0;
+                            Float dBoundMin1 = 1 / dist2Min1;
+                        
+                            errBounds[0] = dBoundMin0 * ub0;
+                            errBounds[1] = dBoundMin1 * ub1;
+                        }
+                        else {
+                            errBounds[0] = ub0;
+                            errBounds[1] = ub1;
+                        }
+                    } else {
+                        if (matBound0 < MachineEpsilon && matBound1 < MachineEpsilon) {
+                            return {};
+                        }
+
+                        // weight of the first child will be 1 or 0 based on whether the other child is 0.
+                        errBounds[0] = static_cast<Float>(matBound1 < MachineEpsilon);
+                        errBounds[1] = 1 - errBounds[0];
+                    }
                 } else {
-                    errBounds[0] = ub0;
-                    errBounds[1] = ub1;
-                    //canEnd = false;
+                    if (geomBound0 < MachineEpsilon && geomBound1 < MachineEpsilon) {
+                        return {};
+                    }
+                    // weight of the first child will be 1 or 0 based on whether the other child is 0.
+                    errBounds[0] = static_cast<Float>(geomBound1 < MachineEpsilon);
+                    errBounds[1] = 1 - errBounds[0];
                 }
+                
+                //if (dist2Min0 > diagonalLengthSqr0 && dist2Min1 >= diagonalLengthSqr1) {
+                ////if (false) {
+                ////if (dist2Min0 > 0 && dist2Min1 > 0) {
+                //    
+                //    Float dBoundMin0 = 1 / dist2Min0;
+                //    Float dBoundMin1 = 1 / dist2Min1;
+                //    //Float dBoundMax0 = 1 / dist2Max0;
+                //    //Float dBoundMax1 = 1 / dist2Max1;
+                //
+                //    errBounds[0] = dBoundMin0 * ub0;
+                //    errBounds[1] = dBoundMin1 * ub1;
+                //
+                //    //Float ebMin0 = std::max(dBoundMin0 * ub0, MachineEpsilon);
+                //    //Float ebMin1 = std::max(dBoundMin1 * ub1, MachineEpsilon);
+                //    //Float ebMax0 = std::max(dBoundMin0 * ub0, MachineEpsilon);
+                //    //Float ebMax1 = std::max(dBoundMin1 * ub1, MachineEpsilon);
+                //
+                //    //Float nwMin = std::min(1.f, ebMin0 / (ebMin0 + ebMin1));
+                //    //Float nwMax = std::min(1.f, ebMax0 / (ebMax0 + ebMax1));
+                //
+                //    //errBounds[0] = (nwMin + nwMax) * 0.5f;
+                //    //errBounds[1] = 1 - errBounds[0];
+                //
+                //} else {
+                //    errBounds[0] = ub0;
+                //    errBounds[1] = ub1;
+                //    //canEnd = false;
+                //}
             } else {
                 if (nodeIntensities[0] == 0 && nodeIntensities[1] == 0) {
                     return {};
@@ -145,15 +177,15 @@ class SLCLightSampler {
                 //canEnd = false;
             }
 
-            if (errBounds[0] < MachineEpsilon) {
-                
-                if (errBounds[1] < MachineEpsilon) {
-                    return {};
-                }
-                errBounds[0] = MachineEpsilon;
-            } else if (errBounds[1] < MachineEpsilon){
-                errBounds[1] = MachineEpsilon;
-            }
+            //if (errBounds[0] < MachineEpsilon) {
+            //    
+            //    if (errBounds[1] < MachineEpsilon) {
+            //        return {};
+            //    }
+            //    errBounds[0] = MachineEpsilon;
+            //} else if (errBounds[1] < MachineEpsilon){
+            //    errBounds[1] = MachineEpsilon;
+            //}
 
             Float weights[2] = {0};
             weights[0] = std::min(OneMinusEpsilon, errBounds[0] / (errBounds[0] + errBounds[1]));
