@@ -1793,6 +1793,8 @@ enum HemisphereIntersection : uint8_t {
 };
 
 PBRT_CPU_GPU inline HemisphereIntersection WhichHemisphere(Vector3f w, Vector3f wp, Float cosTheta) {
+    if (cosTheta < 0) return BOTH;
+
     bool isUpper = w.z > 0;
 
     Float sinTheta = SafeSqrt(1 - cosTheta * cosTheta);
