@@ -23,6 +23,7 @@
 
 #include <pbrt/lightsamplers/lightcuts.h>
 #include <pbrt/lightsamplers/slc.h>
+#include <pbrt/lightsamplers/hslc.h>
 
 #include <algorithm>
 #include <cstdint>
