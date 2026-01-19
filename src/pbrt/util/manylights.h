@@ -442,7 +442,7 @@ inline Float ComputeClusterEstimate(const BSDF* bsdf, BxDFFlags flags, Point3f l
     Float I = phi;
 
     Float minDistSqr = DistanceSquared(point, lightPos);
-    Float clampedDistSqr = std::max(minDistSqr, MachineEpsilon);
+    Float clampedDistSqr = std::max(minDistSqr, 1e-6f);
     Float G = 1.0f / clampedDistSqr;
 
     n = bsdf ? Normal3f(bsdf->shadingFrame.z) : n;
@@ -454,7 +454,7 @@ inline Float ComputeClusterEstimate(const BSDF* bsdf, BxDFFlags flags, Point3f l
     Float M = 1.f;
     if (bsdf) {
         SampledSpectrum sp = bsdf->f(wo, wi);
-        Float M = sp.Average();
+        M = sp.MaxComponentValue();
         if ((!IsTransmissive(flags) && cosTheta < 0) ||
             (!IsReflective(flags) && cosTheta >= 0)) {
             cosTheta = 0;

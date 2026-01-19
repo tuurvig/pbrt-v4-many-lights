@@ -1288,7 +1288,7 @@ class Bounds3 {
     }
 
     PBRT_CPU_GPU
-    Point3<T> Centroid() const { return (pMax + pMin) * 0.5; }
+    Point3<T> Centroid() const { return (pMax + pMin) * static_cast<T>(0.5); }
 
     PBRT_CPU_GPU
     Vector3<T> Diagonal() const { return pMax - pMin; }
