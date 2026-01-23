@@ -206,8 +206,8 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
             const Bounds3f nodeBound0 = children[0]->compactLightBounds.Bounds(tree.allLightBounds);
             const Bounds3f nodeBound1 = children[1]->compactLightBounds.Bounds(tree.allLightBounds);
 
-            Float geomBound0 = ComputeGeometricBound(children[0], nodeBound0, shadingFrame, true, p, wo);
-            Float geomBound1 = ComputeGeometricBound(children[1], nodeBound1, shadingFrame, true, p, wo);
+            Float geomBound0 = ComputeGeometricBound(children[0], nodeBound0, shadingFrame, !isPoint, p, wo);
+            Float geomBound1 = ComputeGeometricBound(children[1], nodeBound1, shadingFrame, !isPoint, p, wo);
 
             if (geomBound0 > MachineEpsilon && geomBound1 > MachineEpsilon) {
                 Float ub0 = geomBound0 * nodeIntensities[0];

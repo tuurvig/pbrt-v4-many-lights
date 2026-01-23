@@ -153,7 +153,7 @@ class SLCLightSampler {
             repIntensity = node->compactLightBounds.PhiOrI();
         }
 
-        return SampledLight(m_tree.lights[node->childOrLightIndex], pmf / pmfRepresentant, clusterIntensity / repIntensity);
+        return SampledLight(m_tree.lights[node->childOrLightIndex], pmf, 1 / pmfRepresentant);
     }
 
     PBRT_CPU_GPU
@@ -229,8 +229,8 @@ class SLCLightSampler {
             constexpr Float minLengthSqr = 1e-6f;
 
             if (geomBound0 > MachineEpsilon && geomBound1 > MachineEpsilon) {
-                Float ub0 = geomBound0;
-                Float ub1 = geomBound1;
+                Float ub0 = geomBound0 * nodeI0;
+                Float ub1 = geomBound1 * nodeI1;
 
                 Float matBound0 = 1;
                 Float matBound1 = 1;
