@@ -551,9 +551,9 @@ void WavefrontPathIntegrator::HandleEmissiveIntersection() {
 
             // Compute area light's weighted radiance contribution to the path
             SampledSpectrum L(0.f);
-            if (discretizedAreaLights || w.depth == 0 || w.specularBounce) {
+            if (w.depth == 0 || w.specularBounce) {
                 L = w.beta * Le / w.r_u.Average();
-            } else {
+            } else if (!discretizedAreaLights){
                 // Compute MIS-weighted radiance contribution from area light
                 Vector3f wi = -w.wo;
                 LightSampleContext ctx = w.prevIntrCtx;
