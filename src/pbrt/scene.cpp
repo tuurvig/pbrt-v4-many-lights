@@ -168,86 +168,106 @@ static bool TryDiscretizeAreaLight(const std::string &name, const ParameterDicti
     if (!PrepareAreaLightDiscretization(parameters, loc, alloc, &data))
         return false;
 
-    std::vector<Float> cdf(lightShapesArea.shapeObjects.size() + 1);
-    cdf[0] = 0;
-    cdf[lightShapesArea.shapeObjects.size()] = 1;
-    for (size_t i = 1; i < lightShapesArea.shapeObjects.size(); ++i) {
-        Float area = lightShapesArea.shapeObjects[i].Area();
-        cdf[i] = cdf[i - 1] + area;
-        cdf[i - 1] /= lightShapesArea.totalArea;
+        std::vector<Float> areas(lightShapesArea.shapeObjects.size(), 0.f);
+    for (size_t i = 0; i < lightShapesArea.shapeObjects.size(); ++i) {
+        areas[i] = lightShapesArea.shapeObjects[i].Area();
     }
 
-    cdf[lightShapesArea.shapeObjects.size() - 1] /= lightShapesArea.totalArea;
-    
-    Float directionalFactor = data.twoSided ? 2 : 1;
-    Float baseScale = data.baseScale;
-
-    // If using photometric units (phi_v), normalize using total light statistics
-    if (data.phi_v > 0) {
-        Float averageLuminance = data.useImage ? data.imageAverageLuminance : 1;
-        Float k_e = directionalFactor * lightShapesArea.totalArea * Pi * averageLuminance;
-        baseScale *= data.phi_v / k_e;
+    std::vector<int> counts(lightShapesArea.shapeObjects.size(), 0);
+    std::vector<std::pair<Float, int>> remainders;
+    remainders.reserve(lightShapesArea.shapeObjects.size());
+    int assigned = 0;
+    for (size_t i = 0; i < lightShapesArea.shapeObjects.size(); ++i) {
+        if (areas[i] <= 0) {
+            remainders.emplace_back(0.f, int(i));
+            continue;
+        }
+        Float exact = (areas[i] / lightShapesArea.totalArea) * maxSamples;
+        int c = int(std::floor(exact));
+        counts[i] = c;
+        assigned += c;
+        remainders.emplace_back(exact - c, int(i));
     }
 
-    Float perSampleScale = baseScale * (lightShapesArea.totalArea / maxSamples);
-    if (perSampleScale <= 0) return false;
+    int remaining = maxSamples - assigned;
+    if (remaining > 0 && !remainders.empty()) {
+        std::sort(remainders.begin(), remainders.end(),
+                  [](const auto &a, const auto &b) {
+                      if (a.first != b.first)
+                          return a.first > b.first;
+                      return a.second < b.second;
+                  });
+        for (int k = 0; k < remaining && k < int(remainders.size()); ++k)
+            counts[remainders[k].second]++;
+    }
 
     std::vector<Light> newLights;
     newLights.reserve(maxSamples);
 
-    for (Point2f u : Hammersley2D(maxSamples)) {
-        const auto it = std::upper_bound(cdf.begin(), cdf.end(), u.x);
-        int idx = std::max(0, int(std::distance(cdf.begin(), it)) - 1);
-
-        Float cdfMin = cdf[idx];
-        Float cdfMax = cdf[idx + 1];
-        Float remappedU = (u.x - cdfMin) / (cdfMax - cdfMin);
-
-        Point2f sampleUV(remappedU, u.y);
-
-        pstd::optional<ShapeSample> ss = lightShapesArea.shapeObjects[idx].Sample(sampleUV);
-        if (!ss || ss->pdf == 0) {
+    for (size_t i = 0; i < lightShapesArea.shapeObjects.size(); ++i) {
+        int nSamples = counts[i];
+        Float shapeArea = areas[i];
+        if (shapeArea <= 0 || nSamples <= 0)
             continue;
+
+        Float areaPerSample = shapeArea / nSamples;
+        Float directionalFactor = data.twoSided ? 2 : 1;
+
+        Float shapeScale = data.baseScale;
+        if (data.phi_v > 0) {
+            Float averageLuminance = data.useImage ? data.imageAverageLuminance : 1;
+            Float k_e = directionalFactor * shapeArea * Pi * averageLuminance;
+            shapeScale *= data.phi_v / k_e;
         }
 
-        Interaction intr = ss->intr;
-        intr.mediumInterface = &mi;
+        // Convert diffuse radiance over the sampled patch into an equivalent isotropic point intensity.
+        Float perSampleScale = shapeScale * areaPerSample;
+        if (perSampleScale <= 0)
+            continue;
 
-        Spectrum emitted;
-        if (data.useImage && data.image) {
-            Point2f texUV = intr.uv;
-            texUV[1] = 1 - texUV[1];
-            RGB rgb;
-            for (int c = 0; c < 3; ++c) {
-                rgb[c] = data.image.BilerpChannel(texUV, c);
-            }
-            const RGBColorSpace *cs = data.colorSpace;
-            if (!cs) {
-                cs = RGBColorSpace::sRGB;
-            }
-            emitted = alloc.new_object<RGBIlluminantSpectrum>(*cs, ClampZero(rgb));
-        } else {
-            emitted = data.L;
-        }
+        for (Point2f u : Hammersley2D(nSamples)) {
+            pstd::optional<ShapeSample> ss = lightShapesArea.shapeObjects[i].Sample(u);
+            if (!ss || ss->pdf == 0)
+                continue;
 
-        Point3f p = intr.p();
-        Vector3f n = Normalize(Vector3f(intr.n));
-        if (LengthSquared(n) == 0)
-            n = Vector3f(0, 0, 1);
-        
-        Point3f offsetP = p + ShadowEpsilon * n;
-        Transform translate = Translate(Vector3f(offsetP.x, offsetP.y, offsetP.z));
-        //newLights.push_back(
-        //        alloc.new_object<PointLight>(translate, mi, emitted, perSampleScale / 2));
-        if (data.twoSided) {
-            newLights.push_back(
-                alloc.new_object<PointLight>(translate, mi, emitted, perSampleScale / 4));
-        } else {
-            Transform dirToZ = (Transform)Frame::FromZ(n);
-            Transform sampleRenderFromLight = translate * Inverse(dirToZ);
-            newLights.push_back(
-                alloc.new_object<SpotLight>(sampleRenderFromLight, mi, emitted, perSampleScale / 4,
-                                            90.f, 89.5f));
+            Interaction intr = ss->intr;
+            intr.mediumInterface = &mi;
+
+            Spectrum emitted;
+            if (data.useImage && data.image) {
+                Point2f texUV = intr.uv;
+                texUV[1] = 1 - texUV[1];
+                RGB rgb;
+                for (int c = 0; c < 3; ++c)
+                    rgb[c] = data.image.BilerpChannel(texUV, c);
+                const RGBColorSpace *cs = data.colorSpace;
+                if (!cs)
+                    cs = RGBColorSpace::sRGB;
+
+                emitted = alloc.new_object<RGBIlluminantSpectrum>(*cs, ClampZero(rgb));
+            } else {
+                emitted = data.L;
+            }
+
+            Point3f p = intr.p();
+            Vector3f n = Normalize(Vector3f(intr.n));
+            if (LengthSquared(n) == 0)
+                n = Vector3f(0, 0, 1);
+
+            Point3f offsetP = p + ShadowEpsilon * n;
+            Transform translate = Translate(Vector3f(offsetP.x, offsetP.y, offsetP.z));
+            //newLights.push_back(
+            //        alloc.new_object<PointLight>(translate, mi, emitted, perSampleScale / 2));
+            if (data.twoSided) {
+                newLights.push_back(
+                    alloc.new_object<PointLight>(translate, mi, emitted, perSampleScale / 2));
+            } else {
+                Transform dirToZ = (Transform)Frame::FromZ(n);
+                Transform sampleRenderFromLight = translate * Inverse(dirToZ);
+                newLights.push_back(
+                    alloc.new_object<SpotLight>(sampleRenderFromLight, mi, emitted, perSampleScale,
+                                                90.f, 0.f));
+            }
         }
     }
 
@@ -1592,6 +1612,7 @@ std::vector<Light> BasicScene::CreateLights(
                                            areaLightEntity.parameters,
                                            *sh.renderFromObject, mi, ps, alphaTex,
                                            &areaLightEntity.loc, alloc);
+                                           
             if (area) {
                 if (!discretized) {
                     lights.push_back(area);

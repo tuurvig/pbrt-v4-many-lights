@@ -667,9 +667,9 @@ SampledSpectrum PathIntegrator::Li(RayDifferential ray, SampledWavelengths &lamb
         // Incorporate emission from surface hit by ray
         SampledSpectrum Le = si->intr.Le(-ray.d, lambda);
         if (Le) {
-            if (discretizedAreaLights || depth == 0 || specularBounce)
+            if (depth == 0 || specularBounce)
                 L += beta * Le;
-            else {
+            else if (!discretizedAreaLights){
                 // Compute MIS weight for area light
                 Light areaLight(si->intr.areaLight);
                 LightPMF l_pmf = lightSampler.PMF(prevIntrCtx, bsdfPrev, areaLight);
@@ -1118,9 +1118,9 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, SampledWavelengths &l
 
         if (SampledSpectrum Le = isect.Le(-ray.d, lambda); Le) {
             // Add contribution of emission from intersected surface
-            if (discretizedAreaLights || depth == 0 || specularBounce)
+            if (depth == 0 || specularBounce)
                 L += beta * Le / r_u.Average();
-            else {
+            else if (!discretizedAreaLights){
                 // Add surface light contribution using both PDFs with MIS
                 Light areaLight(isect.areaLight);
                 LightPMF l_pmf = lightSampler.PMF(prevIntrContext, bsdfPrev, areaLight);
@@ -2969,9 +2969,9 @@ void SPPMIntegrator::Render() {
                     // Incorporate emission from surface hit by ray
                     SampledSpectrum Le = si->intr.Le(-ray.d, lambda);
                     if (Le) {
-                        if (discretizedAreaLights || depth == 0 || specularBounce)
+                        if (depth == 0 || specularBounce)
                             L += beta * Le;
-                        else {
+                        else if (!discretizedAreaLights){
                             // Compute MIS weight for area light
                             Light areaLight(si->intr.areaLight);
                             LightPMF l_pmf = lightSampler.PMF(prevIntrCtx, bsdfPrevPtr, areaLight);
