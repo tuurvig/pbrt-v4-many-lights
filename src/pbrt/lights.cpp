@@ -1469,6 +1469,113 @@ SpotLight *SpotLight::Create(const Transform &renderFromLight, Medium medium,
                                        coneangle - conedelta);
 }
 
+// CosineSpotLight Method Definitions
+
+CosineSpotLight::CosineSpotLight(const Transform &renderFromLight,
+                                 const MediumInterface &mediumInterface, Spectrum Iemit,
+                                 Float scale)
+    : LightBase(LightType::DeltaPosition, renderFromLight, mediumInterface),
+      Iemit(LookupSpectrum(Iemit)),
+      scale(scale) {
+}
+
+PBRT_CPU_GPU Float CosineSpotLight::PDF_Li(LightSampleContext, Vector3f,
+                                           bool allowIncompletePDF) const {
+    return 0.f; // Delta position lights have 0 PDF for random intersection
+}
+
+PBRT_CPU_GPU SampledSpectrum CosineSpotLight::I(Vector3f w,
+                                                SampledWavelengths lambda) const {
+    // Standard Cosine Emission Law: I = I_0 * cos(theta)
+    // In light space, the light points down +Z, so cos(theta) is just w.z
+    Float cosTheta = CosTheta(w);
+    
+    // Clamp to 0 for the back hemisphere
+    if (cosTheta <= 0) return SampledSpectrum(0.f);
+    
+    return scale * cosTheta * Iemit->Sample(lambda);
+}
+
+SampledSpectrum CosineSpotLight::Phi(SampledWavelengths lambda) const {
+    // Total Power of a Lambertian emitter = Peak Intensity * Pi
+    // \int_{H^2} cos(theta) dw = Pi
+    return scale * Iemit->Sample(lambda) * Pi;
+}
+
+pstd::optional<LightBounds> CosineSpotLight::Bounds() const {
+    Point3f p = renderFromLight(Point3f(0, 0, 0));
+    Vector3f w = Normalize(renderFromLight(Vector3f(0, 0, 1)));
+    
+    // Bounds calculation for a cosine lobe
+    // Power roughly scales with Pi
+    Float boundI = scale * Iemit->MaxValue();
+    Float phi = boundI * Pi; 
+    
+    // cosTheta_o is the opening angle of the bounding cone
+    // cosTheta_e is 0 because the light covers the full 90 degrees (hemisphere)
+    return LightBounds(Bounds3f(p, p), w, phi, boundI, 1.f, 0.f, false);
+}
+
+PBRT_CPU_GPU pstd::optional<LightLeSample> CosineSpotLight::SampleLe(
+    Point2f u1, Point2f u2, SampledWavelengths &lambda, Float time) const {
+    
+    // Sample direction using Cosine-Weighted Hemisphere sampling
+    Vector3f wLight = SampleCosineHemisphere(u1);
+    Float pdfDir = CosineHemispherePDF(wLight.z);
+
+    // Return sampled ray
+    Ray ray = renderFromLight(
+        Ray(Point3f(0, 0, 0), wLight, time, mediumInterface.outside));
+        
+    return LightLeSample(I(wLight, lambda), ray, 1, pdfDir);
+}
+
+PBRT_CPU_GPU void CosineSpotLight::PDF_Le(const Ray &ray, Float *pdfPos,
+                                          Float *pdfDir) const {
+    *pdfPos = 0;
+    
+    // Transform ray direction to light space
+    Vector3f w = renderFromLight.ApplyInverse(ray.d);
+    
+    // PDF is simply CosineHemispherePDF (z / Pi)
+    if (CosTheta(w) > 0)
+        *pdfDir = CosineHemispherePDF(CosTheta(w));
+    else
+        *pdfDir = 0;
+}
+
+std::string CosineSpotLight::ToString() const {
+    return StringPrintf("[ CosineSpotLight %s Iemit: %s scale: %f ]",
+                        BaseToString(), Iemit, scale);
+}
+
+// TODO: Create method to use it from scene files
+CosineSpotLight *CosineSpotLight::Create(const Transform &renderFromLight, Medium medium,
+                                         const ParameterDictionary &parameters,
+                                         const RGBColorSpace *colorSpace,
+                                         const FileLoc *loc, Allocator alloc) {
+    Spectrum I = parameters.GetOneSpectrum("I", &colorSpace->illuminant,
+                                           SpectrumType::Illuminant, alloc);
+    Float sc = parameters.GetOneFloat("scale", 1);
+    
+    // Standard Photometric normalization
+    if (I) sc /= SpectrumToPhotometric(I);
+    
+    // Apply power parameter if present
+    Float phi_v = parameters.GetOneFloat("power", -1);
+    if (phi_v > 0) {
+        // For a cosine lobe, Phi = I_peak * Pi. So scale = Phi / Pi.
+        sc *= phi_v / Pi;
+    }
+
+    if (!I) {
+        I = parameters.GetOneSpectrum("L", &colorSpace->illuminant, SpectrumType::Illuminant, alloc);
+        if (I) sc /= SpectrumToPhotometric(I);
+    }
+
+    return alloc.new_object<CosineSpotLight>(renderFromLight, medium, I, sc);
+}
+
 SampledSpectrum Light::Phi(SampledWavelengths lambda) const {
     auto phi = [&](auto ptr) { return ptr->Phi(lambda); };
     return DispatchCPU(phi);
@@ -1521,6 +1628,9 @@ Light Light::Create(const std::string &name, const ParameterDictionary &paramete
     else if (name == "spot")
         light = SpotLight::Create(renderFromLight, outsideMedium, parameters,
                                   parameters.ColorSpace(), loc, alloc);
+    else if (name == "cosinespot")
+        light = CosineSpotLight::Create(renderFromLight, outsideMedium, parameters,
+                                        parameters.ColorSpace(), loc, alloc);
     else if (name == "goniometric")
         light = GoniometricLight::Create(renderFromLight, outsideMedium, parameters,
                                          parameters.ColorSpace(), loc, alloc);

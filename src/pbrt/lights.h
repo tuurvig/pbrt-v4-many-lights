@@ -793,6 +793,68 @@ class SpotLight : public LightBase {
     Float scale, cosFalloffStart, cosFalloffEnd;
 };
 
+// CosineSpotLight Definition
+class CosineSpotLight : public LightBase {
+  public:
+    // CosineSpotLight Public Methods
+    CosineSpotLight(const Transform &renderFromLight, const MediumInterface &m,
+                    Spectrum I, Float scale);
+
+    static CosineSpotLight *Create(const Transform &renderFromLight, Medium medium,
+                                   const ParameterDictionary &parameters,
+                                   const RGBColorSpace *colorSpace, const FileLoc *loc,
+                                   Allocator alloc);
+
+    void Preprocess(const Bounds3f &sceneBounds) {}
+
+    PBRT_CPU_GPU
+    SampledSpectrum I(Vector3f w, SampledWavelengths) const;
+
+    SampledSpectrum Phi(SampledWavelengths lambda) const;
+
+    PBRT_CPU_GPU
+    Float PDF_Li(LightSampleContext, Vector3f, bool allowIncompletePDF) const;
+
+    PBRT_CPU_GPU
+    pstd::optional<LightLeSample> SampleLe(Point2f u1, Point2f u2,
+                                           SampledWavelengths &lambda, Float time) const;
+    PBRT_CPU_GPU
+    void PDF_Le(const Ray &, Float *pdfPos, Float *pdfDir) const;
+
+    PBRT_CPU_GPU
+    void PDF_Le(const Interaction &, Vector3f w, Float *pdfPos, Float *pdfDir) const {
+        LOG_FATAL("Shouldn't be called for non-area lights");
+    }
+
+    pstd::optional<LightBounds> Bounds() const;
+
+    std::string ToString() const;
+
+    PBRT_CPU_GPU
+    pstd::optional<LightLiSample> SampleLi(LightSampleContext ctx, Point2f u,
+                                           SampledWavelengths lambda,
+                                           bool allowIncompletePDF) const {
+        Point3f p = renderFromLight(Point3f(0, 0, 0));
+        Vector3f wi = Normalize(p - ctx.p());
+
+        // Transform incident direction to light space
+        Vector3f wLight = Normalize(renderFromLight.ApplyInverse(-wi));
+        
+        // Intensity includes the CosTheta factor internally in I()
+        SampledSpectrum Li = I(wLight, lambda) / DistanceSquared(p, ctx.p());
+
+        if (!Li)
+            return {};
+            
+        return LightLiSample(Li, wi, 1, Interaction(p, &mediumInterface));
+    }
+
+  private:
+    // CosineSpotLight Private Members
+    const DenselySampledSpectrum *Iemit;
+    Float scale;
+};
+
 PBRT_CPU_GPU inline pstd::optional<LightLiSample> Light::SampleLi(LightSampleContext ctx, Point2f u,
                                                      SampledWavelengths lambda,
                                                      bool allowIncompletePDF) const {
