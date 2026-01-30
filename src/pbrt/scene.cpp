@@ -177,6 +177,7 @@ static bool TryDiscretizeAreaLight(const std::string &name, const ParameterDicti
     std::vector<std::pair<Float, int>> remainders;
     remainders.reserve(lightShapesArea.shapeObjects.size());
     int assigned = 0;
+    Float unusedArea = 0;
     for (size_t i = 0; i < lightShapesArea.shapeObjects.size(); ++i) {
         if (areas[i] <= 0) {
             remainders.emplace_back(0.f, int(i));
@@ -187,6 +188,10 @@ static bool TryDiscretizeAreaLight(const std::string &name, const ParameterDicti
         counts[i] = c;
         assigned += c;
         remainders.emplace_back(exact - c, int(i));
+
+        if (c == 0) {
+            unusedArea += areas[i];
+        }
     }
 
     int remaining = maxSamples - assigned;
@@ -197,16 +202,24 @@ static bool TryDiscretizeAreaLight(const std::string &name, const ParameterDicti
                           return a.first > b.first;
                       return a.second < b.second;
                   });
-        for (int k = 0; k < remaining && k < int(remainders.size()); ++k)
-            counts[remainders[k].second]++;
+        for (int k = 0; k < remaining && k < int(remainders.size()); ++k) {
+            int index = remainders[k].second;
+            if (counts[index] == 0) {
+                unusedArea -= areas[index];
+            }
+
+            counts[index]++;
+        }
     }
 
     std::vector<Light> newLights;
     newLights.reserve(maxSamples);
 
+    Float areaError = unusedArea / maxSamples;
+
     for (size_t i = 0; i < lightShapesArea.shapeObjects.size(); ++i) {
         int nSamples = counts[i];
-        Float shapeArea = areas[i];
+        Float shapeArea = areas[i] + areaError;
         if (shapeArea <= 0 || nSamples <= 0)
             continue;
 
