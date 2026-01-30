@@ -29,6 +29,7 @@ class UniformInfiniteLight;
 class ImageInfiniteLight;
 class PortalImageInfiniteLight;
 class SpotLight;
+class CosineSpotLight;
 
 class LightSampleContext;
 class LightBounds;
@@ -40,7 +41,7 @@ struct LightLeSample;
 class Light : public TaggedPointer<  // Light Source Types
                   PointLight, DistantLight, ProjectionLight, GoniometricLight, SpotLight,
                   DiffuseAreaLight, UniformInfiniteLight, ImageInfiniteLight,
-                  PortalImageInfiniteLight
+                  PortalImageInfiniteLight, CosineSpotLight
 
                   > {
   public:

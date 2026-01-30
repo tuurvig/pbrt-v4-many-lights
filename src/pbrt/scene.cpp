@@ -257,16 +257,15 @@ static bool TryDiscretizeAreaLight(const std::string &name, const ParameterDicti
             Point3f offsetP = p + ShadowEpsilon * n;
             Transform translate = Translate(Vector3f(offsetP.x, offsetP.y, offsetP.z));
             //newLights.push_back(
-            //        alloc.new_object<PointLight>(translate, mi, emitted, perSampleScale / 2));
+            //        alloc.new_object<PointLight>(translate, mi, emitted, perSampleScale / 4));
             if (data.twoSided) {
                 newLights.push_back(
-                    alloc.new_object<PointLight>(translate, mi, emitted, perSampleScale / 2));
+                    alloc.new_object<PointLight>(translate, mi, emitted, perSampleScale / 4));
             } else {
                 Transform dirToZ = (Transform)Frame::FromZ(n);
                 Transform sampleRenderFromLight = translate * Inverse(dirToZ);
                 newLights.push_back(
-                    alloc.new_object<SpotLight>(sampleRenderFromLight, mi, emitted, perSampleScale,
-                                                90.f, 0.f));
+                    alloc.new_object<CosineSpotLight>(sampleRenderFromLight, mi, emitted, perSampleScale));
             }
         }
     }
