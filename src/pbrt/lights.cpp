@@ -156,6 +156,7 @@ PBRT_CPU_GPU Float LightBounds::Importance(Point3f p, Normal3f n) const {
         importance *= cosThetap_i;
     }
 
+    importance = std::min<Float>(importance, MaxImportance);
     importance = std::max<Float>(importance, 0);
     return importance;
 }

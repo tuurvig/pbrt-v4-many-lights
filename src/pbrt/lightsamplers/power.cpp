@@ -23,8 +23,13 @@ PowerLightSampler::PowerLightSampler(pstd::span<const Light> lights, Allocator a
     pstd::vector<Float> lightPower;
     SampledWavelengths lambda = SampledWavelengths::SampleVisible(0.5f);
     for (const auto &light : lights) {
-        SampledSpectrum phi = SafeDiv(light.Phi(lambda), lambda.PDF());
-        lightPower.push_back(phi.Average());
+        pstd::optional<LightBounds> bounds = light.Bounds();
+        if (bounds) {
+            lightPower.push_back(bounds->phi);
+        } else {
+            SampledSpectrum phi = SafeDiv(light.Phi(lambda), lambda.PDF());
+            lightPower.push_back(phi.Average());
+        }
     }
     if (std::accumulate(lightPower.begin(), lightPower.end(), 0.f) == 0.f)
         std::fill(lightPower.begin(), lightPower.end(), 1.f);

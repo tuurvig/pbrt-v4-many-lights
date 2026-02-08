@@ -32,8 +32,9 @@ namespace pbrt {
 #define OneMinusEpsilon FloatOneMinusEpsilon
 #endif
 
-#define Infinity std::numeric_limits<Float>::infinity()
-#define MachineEpsilon std::numeric_limits<Float>::epsilon() * 0.5f
+static PBRT_GPU constexpr Float Infinity = std::numeric_limits<Float>::infinity();
+static PBRT_GPU constexpr Float MachineEpsilon = std::numeric_limits<Float>::epsilon() * 0.5;
+static PBRT_GPU constexpr Float MaxImportance = std::numeric_limits<Float>::max() * 0.25;
 
 #else
 
@@ -41,6 +42,7 @@ namespace pbrt {
 static constexpr Float Infinity = std::numeric_limits<Float>::infinity();
 
 static constexpr Float MachineEpsilon = std::numeric_limits<Float>::epsilon() * 0.5;
+static constexpr Float MaxImportance = std::numeric_limits<Float>::max() * 0.25;
 
 static constexpr double DoubleOneMinusEpsilon = 0x1.fffffffffffffp-1;
 static constexpr float FloatOneMinusEpsilon = 0x1.fffffep-1;
