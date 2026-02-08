@@ -82,7 +82,8 @@ class CompactLightBounds {
         // Compute clamped squared distance to reference point
         Point3f pc = (bounds.pMin + bounds.pMax) / 2;
         Float d2 = DistanceSquared(p, pc);
-        d2 = std::max(d2, Length(bounds.Diagonal()) / 2);
+        d2 = std::max(d2, LengthSquared(bounds.Diagonal()) / 2);
+        d2 = std::max(d2, ShadowEpsilon);
 
         // Define cosine and sine clamped subtraction lambdas
         auto cosSubClamped = [](Float sinTheta_a, Float cosTheta_a, Float sinTheta_b,
@@ -130,6 +131,7 @@ class CompactLightBounds {
             importance *= cosThetap_i;
         }
 
+        importance = std::min(importance, MaxImportance);
         importance = std::max<Float>(importance, 0);
         return importance;
     }
