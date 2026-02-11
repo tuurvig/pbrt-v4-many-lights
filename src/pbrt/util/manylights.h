@@ -471,14 +471,49 @@ inline Float ComputeClusterEstimate(const BSDF* bsdf, BxDFFlags flags, Point3f l
 
 PBRT_CPU_GPU
 inline Float GeomTermBoundInFrame(Point3f point, const Frame& frame, const Bounds3f& bounds) {
-    // furthest point on the box along normal N
-    Float zMax = MaxDistAlong(point, frame.z, bounds);
-    if (zMax <= 0) return 0.0f;
+    // furthest point on the box along vector z of frame
+    //Float zMax = MaxDistAlong(point, frame.z, bounds);
+    //if (zMax <= 0) return 0.0f;
+    //
+    //const Float xMin = AbsMinDistAlong(point, frame.x, bounds);
+    //const Float yMin = AbsMinDistAlong(point, frame.y, bounds);
+    //const Float hyp = SafeSqrt(Sqr(xMin) + Sqr(yMin) + Sqr(zMax));
+    //return zMax / hyp;
+    Vector3f localX, localY;
+    Bounds3f localBounds;
+    for (int i = 0; i < 8; ++i) {
+        Point3f corner = bounds.Corner(i);
+        Vector3f v = corner - point;
 
-    const Float xMin = AbsMinDistAlong(point, frame.x, bounds);
-    const Float yMin = AbsMinDistAlong(point, frame.y, bounds);
-    const Float hyp = SafeSqrt(Sqr(xMin) + Sqr(yMin) + Sqr(zMax));
-    return zMax / hyp;
+        Point3f localP = Point3f(frame.ToLocal(v));
+        localBounds = Union(localBounds, localP);
+    }
+
+    const Float minX = localBounds.pMin.x;
+    const Float maxX = localBounds.pMax.x;
+    const Float minY = localBounds.pMin.y;
+    const Float maxY = localBounds.pMax.y;
+
+    const Float maxZ = localBounds.pMax.z;
+
+    Float boundXSqr = 0, boundYSqr = 0;
+    if (maxZ >= 0) {
+        // if the range spans 0 the true min(p^2) is 0
+        if (minX > 0 || maxX < 0) {
+            boundXSqr = std::min(maxX * maxX, minX * minX);
+        }
+        if (minY > 0 || maxY < 0) {
+            boundYSqr = std::min(maxY * maxY, minY * minY);
+        }
+    } else {
+        boundXSqr = std::max(maxX * maxX, minX * minX);
+        boundYSqr = std::max(maxY * maxY, minY * minY);
+    }
+
+    Float distSqr = std::max(boundXSqr + boundYSqr + maxZ * maxZ, 1e-6f);
+
+    Float cosThetaBox = maxZ / std::sqrt(distSqr);
+    return cosThetaBox;
 }
 
 PBRT_CPU_GPU
@@ -489,13 +524,13 @@ inline Float ComputeGeometricBound(const LightcutsTreeNode* node, const Bounds3f
         const Point3f refMin = point + (point - nodeBounds.pMax);
         const Point3f refMax = point + (point - nodeBounds.pMin);
         const Bounds3f refBounds(refMin, refMax);
-
+    
         Frame coneFrame = Frame::FromZ(node->compactLightBounds.W());
         const Float boundCos = GeomTermBoundInFrame(point, coneFrame, refBounds);
         
         const Float halfAngle = std::acos(node->compactLightBounds.CosTheta_o());
         const Float maxCos = std::max((Float)0, std::cos(std::max((Float)0, std::acos(boundCos) - halfAngle)));
-
+    
         G *= maxCos;
     }
 

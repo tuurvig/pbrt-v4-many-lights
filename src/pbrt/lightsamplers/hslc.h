@@ -66,36 +66,72 @@ class HSLCLightSampler {
             
             constexpr Float minLengthSqr = 1e-6f;
 
+            //const Bounds3f nodeBound0 = children[0]->compactLightBounds.Bounds(m_tree.allLightBounds);
+            //const Bounds3f nodeBound1 = children[1]->compactLightBounds.Bounds(m_tree.allLightBounds);
+            //
+            //Float geomBound0 = ComputeGeometricBound(children[0], nodeBound0, shadingFrame, true, p, wo);
+            //Float geomBound1 = ComputeGeometricBound(children[1], nodeBound1, shadingFrame, true, p, wo);
+            //
+            //Float ub0 = geomBound0 * nodeIntensities[0];
+            //Float ub1 = geomBound1 * nodeIntensities[1];
+            //
+            //if (bsdf) {
+            //    ub0 *= bsdf->Max_f(wo, nodeBound0, p);
+            //    ub1 *= bsdf->Max_f(wo, nodeBound1, p);
+            //}
+            //
+            //const Float diagonalLengthSqr0 = LengthSquared(nodeBound0.Diagonal());
+            //const Float diagonalLengthSqr1 = LengthSquared(nodeBound1.Diagonal());
+            //
+            //Float dist2Min0 = std::max(DistanceSquared(p, ClosestPoint(p, nodeBound0)), minLengthSqr);
+            //Float dist2Min1 = std::max(DistanceSquared(p, ClosestPoint(p, nodeBound1)), minLengthSqr);
+            //
+            //if (dist2Min0 >= diagonalLengthSqr0 && dist2Min1 >= diagonalLengthSqr1) {
+            //    errBounds[0] = ub0 / dist2Min0;
+            //    errBounds[1] = ub1 / dist2Min1;
+            //}
+            //else {
+            //    errBounds[0] = ub0;
+            //    errBounds[1] = ub1;
+            //}
+            //
+            //if (errBounds[0] == 0 && errBounds[1] == 0) {
+            //    return {};
+            //}
+
             if (nodeIntensities[0] != 0 && nodeIntensities[1] != 0) {
                 const Bounds3f nodeBound0 = children[0]->compactLightBounds.Bounds(m_tree.allLightBounds);
                 const Bounds3f nodeBound1 = children[1]->compactLightBounds.Bounds(m_tree.allLightBounds);
-
+            
                 Float geomBound0 = ComputeGeometricBound(children[0], nodeBound0, shadingFrame, true, p, wo);
                 Float geomBound1 = ComputeGeometricBound(children[1], nodeBound1, shadingFrame, true, p, wo);
-
-                if (geomBound0 > MachineEpsilon && geomBound1 > MachineEpsilon) {
+            
+                //Float geomBound0 = 1;
+                //Float geomBound1 = 1;
+            
+                if (geomBound0 != 0 && geomBound1 != 0) {
                     Float ub0 = geomBound0 * nodeIntensities[0];
                     Float ub1 = geomBound1 * nodeIntensities[1];
-
+            
                     Float matBound0 = 1;
                     Float matBound1 = 1;
-
+            
                     if (bsdf) {
                         matBound0 = bsdf->Max_f(wo, nodeBound0, p);
                         matBound1 = bsdf->Max_f(wo, nodeBound1, p);
                     }
-
-                    if ((matBound0 > MachineEpsilon && matBound1 > MachineEpsilon)) {
+            
+                    if ((matBound0 != 0 && matBound1 != 0)) {
                         ub0 *= matBound0;
                         ub1 *= matBound1;
-
+            
                         const Float diagonalLengthSqr0 = std::max(LengthSquared(nodeBound0.Diagonal()), minLengthSqr);
                         const Float diagonalLengthSqr1 = std::max(LengthSquared(nodeBound1.Diagonal()), minLengthSqr);
-
-                        Float dist2Min0 = DistanceSquared(p, ClosestPoint(p, nodeBound0));
-                        Float dist2Min1 = DistanceSquared(p, ClosestPoint(p, nodeBound1));
-
-                        if (dist2Min0 > diagonalLengthSqr0 && dist2Min1 > diagonalLengthSqr1) {
+                        
+                        Float dist2Min0 = std::max(DistanceSquared(p, ClosestPoint(p, nodeBound0)), minLengthSqr);
+                        Float dist2Min1 = std::max(DistanceSquared(p, ClosestPoint(p, nodeBound1)), minLengthSqr);
+                        
+                        if (dist2Min0 >= diagonalLengthSqr0 && dist2Min1 >= diagonalLengthSqr1) {
                             Float dBoundMin0 = 1 / dist2Min0;
                             Float dBoundMin1 = 1 / dist2Min1;
                         
@@ -107,20 +143,20 @@ class HSLCLightSampler {
                             errBounds[1] = ub1;
                         }
                     } else {
-                        if (matBound0 < MachineEpsilon && matBound1 < MachineEpsilon) {
+                        if (matBound0 == 0 && matBound1 == 0) {
                             return {};
                         }
-
+            
                         // weight of the first child will be 1 or 0 based on whether the other child is 0.
-                        errBounds[0] = static_cast<Float>(matBound1 < MachineEpsilon);
+                        errBounds[0] = static_cast<Float>(matBound1 == 0);
                         errBounds[1] = 1 - errBounds[0];
                     }
                 } else {
-                    if (geomBound0 < MachineEpsilon && geomBound1 < MachineEpsilon) {
+                    if (geomBound0 == 0 && geomBound1 == 0) {
                         return {};
                     }
                     // weight of the first child will be 1 or 0 based on whether the other child is 0.
-                    errBounds[0] = static_cast<Float>(geomBound1 < MachineEpsilon);
+                    errBounds[0] = static_cast<Float>(geomBound1 == 0);
                     errBounds[1] = 1 - errBounds[0];
                 }
             } else {
@@ -144,12 +180,18 @@ class HSLCLightSampler {
                 currentU = static_cast<uint32_t>((static_cast<float>(currentU) / weights[0]));
             } else {
                 child = 1;
-
+            
                 currentU -= threshold;
                 currentU = static_cast<uint32_t>((static_cast<float>(currentU) / weights[1]));
             }
             
             currentU ^= FastIntegerHash(nodeIndex);
+            
+            // Randomly sample light BVH child node
+            //Float nodePMF;
+            //int child = SampleDiscrete(weights, u, &nodePMF, &u);
+            //pmf *= nodePMF;
+
             pmf *= weights[child];
             nodeIndex = childrenIndices[child];
             node = &m_tree.nodes[nodeIndex];
