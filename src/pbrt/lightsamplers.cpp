@@ -31,26 +31,26 @@ std::string SampledLight::ToString() const {
 
 LightSampler LightSampler::Create(const std::string &name, pstd::span<const Light> lights, bool discretizedLights,
                                   Allocator alloc) {
-    if (name == "uniform")
-        return alloc.new_object<UniformLightSampler>(lights, alloc);
-    else if (name == "power")
+    //if (name == "uniform")
+    //    return alloc.new_object<UniformLightSampler>(lights, alloc);
+    if (name == "power")
         return alloc.new_object<PowerLightSampler>(lights, alloc);
     else if (name == "bvh")
         return alloc.new_object<BVHLightSampler>(lights, alloc);
-    else if (name == "lightcuts") {
-        if (discretizedLights) {
-            return alloc.new_object<LightcutsLightSampler>(lights, alloc);
-        }
-        Error(R"(Cannot use lightcuts lightsampler without discretizing area lights. Using "bvh".)");
-    }
+    //else if (name == "lightcuts") {
+    //    if (discretizedLights) {
+    //        return alloc.new_object<LightcutsLightSampler>(lights, alloc);
+    //    }
+    //    Error(R"(Cannot use lightcuts lightsampler without discretizing area lights. Using "bvh".)");
+    //}
     //else if (name == "slc") {
     //    return alloc.new_object<SLCLightSampler>(lights, alloc);
     //}
-    //else if (name == "hslc") {
-    //    return alloc.new_object<HSLCLightSampler>(lights, alloc);
-    //}
-    else if (name == "exhaustive")
-        return alloc.new_object<ExhaustiveLightSampler>(lights, alloc);
+    else if (name == "hslc") {
+        return alloc.new_object<HSLCLightSampler>(lights, alloc);
+    }
+    //else if (name == "exhaustive")
+    //    return alloc.new_object<ExhaustiveLightSampler>(lights, alloc);
     else {
         Error(R"(Light sample distribution type "%s" unknown. Using "bvh".)",
               name.c_str());
