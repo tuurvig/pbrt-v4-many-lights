@@ -2019,28 +2019,44 @@ PBRT_CPU_GPU inline Frame::Frame(Vector3f x, Vector3f y, Vector3f z) : x(x), y(y
 
 PBRT_CPU_GPU
 inline Float MaxDistAlong(Point3f p, Vector3f dir, const Bounds3f& bounds) {
+    //Float dmax = Dot(dir, bounds.pMin - p);
+    //for (int i = 1; i < 8; ++i) {
+    //    Float d = Dot(dir, bounds.Corner(i) - p);
+    //    if (dmax < d) dmax = d;
+    //}
+    //return dmax;
     Vector3f mx0, mx1;
-
-    Float dirP = dir.x * p.x;
-    Float minVal = (dir.x * bounds.pMin.x) - dirP;
-    Float maxVal = (dir.x * bounds.pMax.x) - dirP;
+    
+    Float minVal = dir.x * (bounds.pMin.x - p.x);
+    Float maxVal = dir.x * (bounds.pMax.x - p.x);
     Float maxX = std::max(minVal, maxVal);
-
-    dirP = dir.y * p.y;
-    minVal = (dir.y * bounds.pMin.y) - dirP;
-    maxVal = (dir.y * bounds.pMax.y) - dirP;
+    
+    minVal = dir.y * (bounds.pMin.y - p.y);
+    maxVal = dir.y * (bounds.pMax.y - p.y);
     Float maxY = std::max(minVal, maxVal);
-
-    dirP = dir.z * p.z;
-    minVal = (dir.z * bounds.pMin.z) - dirP;
-    maxVal = (dir.z * bounds.pMax.z) - dirP;
+    
+    minVal = dir.z * (bounds.pMin.z - p.z);
+    maxVal = dir.z * (bounds.pMax.z - p.z);
     Float maxZ = std::max(minVal, maxVal);
-
+    
     return maxX + maxY + maxZ;
 }
 
 PBRT_CPU_GPU
 inline Float AbsMinDistAlong(Point3f p, Vector3f dir, const Bounds3f& bounds) {
+    //Float dmin = Dot(dir, (bounds.pMin - p));
+    //bool hasPositive = false;
+    //bool hasNegative = false;
+    //dmin = std::abs(dmin);
+    //for (int i = 1; i < 8; ++i) {
+    //    Float d = Dot(dir, bounds.Corner(i) - p);
+    //    hasPositive |= d > 0;
+    //    hasNegative |= d < 0;
+    //    d = std::abs(d);
+    //    if (dmin > d) dmin = d;
+    //}
+    //return hasPositive && hasNegative ? 0.f : dmin;
+
     // 1. Calculate projection of the point p onto dir
     Float projP = Dot(Vector3f(p), dir);
 
@@ -2050,45 +2066,45 @@ inline Float AbsMinDistAlong(Point3f p, Vector3f dir, const Bounds3f& bounds) {
     // which is mathematically equivalent to checking all 8 corners
     Float projBoxMin = 0;
     Float projBoxMax = 0;
-
+    
     Float minVal = dir.x * bounds.pMin.x;
     Float maxVal = dir.x * bounds.pMax.x;
     if (minVal > maxVal) {
         pstd::swap(minVal, maxVal);
     }
-
+    
     projBoxMin += minVal;
     projBoxMax += maxVal;
-
+    
     minVal = dir.y * bounds.pMin.y;
     maxVal = dir.y * bounds.pMax.y;
-
+    
     if (minVal > maxVal) {
         pstd::swap(minVal, maxVal);
     }
-
+    
     projBoxMin += minVal;
     projBoxMax += maxVal;
-
+    
     minVal = dir.z * bounds.pMin.z;
     maxVal = dir.z * bounds.pMax.z;
-
+    
     if (minVal > maxVal) {
         pstd::swap(minVal, maxVal);
     }
-
+    
     projBoxMin += minVal;
     projBoxMax += maxVal;
-
+    
     // 3. Shift the interval relative to p
     // The range of signed distances is now [distMin, distMax]
     Float distMin = projBoxMin - projP;
     Float distMax = projBoxMax - projP;
-
-    if (distMin <= 0 && distMax >= 0) {
+    
+    if (distMin >= 0 && distMax <= 0) {
         return 0.f;
     }
-
+    
     return std::min(std::abs(distMin), std::abs(distMax));
 }
 
