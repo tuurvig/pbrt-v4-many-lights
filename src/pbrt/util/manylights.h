@@ -513,13 +513,14 @@ inline Float GeomTermBoundInFrame(Point3f point, const Frame& frame, const Bound
 
     Float distSqr = std::max(boundXSqr + boundYSqr + maxZ * maxZ, 1e-6f);
 
-    Float cosThetaBox = std::abs(maxZ) / std::sqrt(distSqr);
+    Float cosThetaBox = maxZ / std::sqrt(distSqr);
     return cosThetaBox;
 }
 
 PBRT_CPU_GPU
 inline Float ComputeGeometricBound(const LightcutsTreeNode* node, const Bounds3f& nodeBounds, const Frame& frame, bool isOriented, Point3f point, Vector3f wo, bool isTransmissive) {
     Float G = GeomTermBoundInFrame(point, frame, nodeBounds);
+    G = std::abs(G);
 
     if (isOriented) {
         const Point3f refMin = point + (point - nodeBounds.pMax);
@@ -532,7 +533,7 @@ inline Float ComputeGeometricBound(const LightcutsTreeNode* node, const Bounds3f
         const Float halfAngle = std::acos(node->compactLightBounds.CosTheta_o());
         const Float maxCos = std::max((Float)0, std::cos(std::max((Float)0, std::acos(boundCos) - halfAngle)));
     
-        G *= maxCos;
+        G *= std::abs(maxCos);
     }
 
     return G;
