@@ -27,7 +27,7 @@ class SLCLightSampler {
     SLCLightSampler(pstd::span<const Light> lights, Allocator alloc, Float threshold = 0.02);
 
     PBRT_CPU_GPU
-    pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, Float u) const {
+    pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t seed, Float u) const {
         Float pmf = 1;
         if (!m_infiniteLights.empty()) {
             pstd::optional<SampledLight> infiniteLightSample = InfiniteLightSimpleSample(m_infiniteLights, m_tree.nodes.size(), pmf, u);
@@ -219,12 +219,14 @@ class SLCLightSampler {
         const Float nodeI0 = child0->compactLightBounds.PhiOrI();
         const Float nodeI1 = child1->compactLightBounds.PhiOrI();
 
+        BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
+        
         if (nodeI0 != 0 && nodeI1 != 0) {
             const Bounds3f nodeBound0 = child0->compactLightBounds.Bounds(allLightBounds);
             const Bounds3f nodeBound1 = child1->compactLightBounds.Bounds(allLightBounds);
 
-            Float geomBound0 = ComputeGeometricBound(child0, nodeBound0, frame, isOriented, p, wo);
-            Float geomBound1 = ComputeGeometricBound(child1, nodeBound1, frame, isOriented, p, wo);
+            Float geomBound0 = ComputeGeometricBound(child0, nodeBound0, frame, isOriented, p, wo, bsdf && IsTransmissive(bsdfFlags));
+            Float geomBound1 = ComputeGeometricBound(child1, nodeBound1, frame, isOriented, p, wo, bsdf && IsTransmissive(bsdfFlags));
 
             constexpr Float minLengthSqr = 1e-6f;
 

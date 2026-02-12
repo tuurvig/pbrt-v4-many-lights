@@ -27,7 +27,7 @@ class HSLCLightSampler {
     HSLCLightSampler(pstd::span<const Light> lights, Allocator alloc, Float threshold = 0.02);
 
     PBRT_CPU_GPU
-    pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, Float u) const {
+    pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t seed, Float u) const {
         Float pmf = 1;
         if (!m_infiniteLights.empty()) {
             pstd::optional<SampledLight> infiniteLightSample = InfiniteLightSimpleSample(m_infiniteLights, m_tree.nodes.size(), pmf, u);
@@ -103,8 +103,8 @@ class HSLCLightSampler {
                 const Bounds3f nodeBound0 = children[0]->compactLightBounds.Bounds(m_tree.allLightBounds);
                 const Bounds3f nodeBound1 = children[1]->compactLightBounds.Bounds(m_tree.allLightBounds);
             
-                Float geomBound0 = ComputeGeometricBound(children[0], nodeBound0, shadingFrame, true, p, wo);
-                Float geomBound1 = ComputeGeometricBound(children[1], nodeBound1, shadingFrame, true, p, wo);
+                Float geomBound0 = ComputeGeometricBound(children[0], nodeBound0, shadingFrame, true, p, wo, false);
+                Float geomBound1 = ComputeGeometricBound(children[1], nodeBound1, shadingFrame, true, p, wo, false);
             
                 //Float geomBound0 = 1;
                 //Float geomBound1 = 1;
@@ -243,8 +243,8 @@ class HSLCLightSampler {
                 const Bounds3f nodeBound0 = children[0]->compactLightBounds.Bounds(m_tree.allLightBounds);
                 const Bounds3f nodeBound1 = children[1]->compactLightBounds.Bounds(m_tree.allLightBounds);
 
-                Float geomBound0 = ComputeGeometricBound(children[0], nodeBound0, shadingFrame, true, p, wo);
-                Float geomBound1 = ComputeGeometricBound(children[1], nodeBound1, shadingFrame, true, p, wo);
+                Float geomBound0 = ComputeGeometricBound(children[0], nodeBound0, shadingFrame, true, p, wo, false);
+                Float geomBound1 = ComputeGeometricBound(children[1], nodeBound1, shadingFrame, true, p, wo, false);
 
                 if (geomBound0 > MachineEpsilon && geomBound1 > MachineEpsilon) {
                     Float ub0 = geomBound0 * nodeIntensities[0];

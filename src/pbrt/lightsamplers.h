@@ -32,8 +32,8 @@
 namespace pbrt {
 
 PBRT_CPU_GPU inline pstd::optional<SampledLight> LightSampler::Sample(const LightSampleContext &ctx,
-                                                         const BSDF* bsdf, Float u) const {
-    auto s = [&](auto ptr) { return ptr->Sample(ctx, bsdf, u); };
+                                                         const BSDF* bsdf, uint32_t seed, Float u) const {
+    auto s = [&](auto ptr) { return ptr->Sample(ctx, bsdf, seed, u); };
     return Dispatch(s);
 }
 

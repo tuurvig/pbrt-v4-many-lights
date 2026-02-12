@@ -23,7 +23,7 @@ class ExhaustiveLightSampler {
     ExhaustiveLightSampler(pstd::span<const Light> lights, Allocator alloc);
 
     PBRT_CPU_GPU
-    pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, Float u) const;
+    pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t seed, Float u) const;
 
     PBRT_CPU_GPU
     LightPMF PMF(const LightSampleContext &ctx, const BSDF* bsdf, Light light) const;

@@ -43,6 +43,8 @@ void WavefrontPathIntegrator::SampleSubsurface(int wavefrontDepth) {
 
     aggregate->IntersectOneRandom(maxQueueSize, subsurfaceScatterQueue);
 
+    const int sampleIndex = currentSampleIndex;
+
     ForAllQueued(
         "Handle out-scattering after SSS", ProfilerKernelGroup::WAVEFRONT,
         subsurfaceScatterQueue, maxQueueSize, PBRT_CPU_GPU_LAMBDA(SubsurfaceScatterWorkItem w) {
@@ -150,7 +152,7 @@ void WavefrontPathIntegrator::SampleSubsurface(int wavefrontDepth) {
             if (IsNonSpecular(bsdf.Flags())) {
                 LightSampleContext ctx(intr.pi, intr.n, intr.ns, Vector3f(0, 0, 0));
                 pstd::optional<SampledLight> sampledLight =
-                    lightSampler.Sample(ctx, &bsdf, raySamples.direct.uc);
+                    lightSampler.Sample(ctx, &bsdf, sampleIndex ^ w.pixelIndex, raySamples.direct.uc);
                 if (!sampledLight)
                     return;
                 Light light = sampledLight->light;

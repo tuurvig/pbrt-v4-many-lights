@@ -61,7 +61,7 @@ class LightSampler : public TaggedPointer<//UniformLightSampler,
     PBRT_CPU_GPU inline pstd::optional<SampledLight> Sample(Float u) const;
     PBRT_CPU_GPU inline LightPMF PMF(Light light) const;
 
-    PBRT_CPU_GPU inline pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, Float u) const;
+    PBRT_CPU_GPU inline pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t seed, Float u) const;
     PBRT_CPU_GPU inline LightPMF PMF(const LightSampleContext &ctx, const BSDF* bsdf, Light light) const;
 };
 

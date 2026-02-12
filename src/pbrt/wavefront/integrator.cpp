@@ -333,23 +333,23 @@ Float WavefrontPathIntegrator::Render() {
 
     ProgressReporter progress(lastSampleIndex - firstSampleIndex, "Rendering",
                               Options->quiet || Options->interactive, Options->useGPU);
-    for (int sampleIndex = firstSampleIndex; sampleIndex < lastSampleIndex || gui;
-         ++sampleIndex) {
+    currentSampleIndex = firstSampleIndex;
+    for (; currentSampleIndex < lastSampleIndex || gui; ++currentSampleIndex) {
         // Attempt to work around issue #145.
 #if !(defined(PBRT_IS_WINDOWS) && defined(PBRT_BUILD_GPU_RENDERER) && \
       __CUDACC_VER_MAJOR__ == 11 && __CUDACC_VER_MINOR__ == 1)
         CheckCallbackScope _([&]() {
             return StringPrintf("Wavefront rendering failed at sample %d. Debug with "
                                 "\"--debugstart %d\"\n",
-                                sampleIndex, sampleIndex);
+                                currentSampleIndex, currentSampleIndex);
         });
 #endif
 
         // Keep running the outer for loop but don't take more samples if
         // the GUI is being used so that the user can move the camera, etc.
-        if (sampleIndex < lastSampleIndex) {
+        if (currentSampleIndex < lastSampleIndex) {
             // Render image for sample _sampleIndex_
-            LOG_VERBOSE("Starting to submit work for sample %d", sampleIndex);
+            LOG_VERBOSE("Starting to submit work for sample %d", currentSampleIndex);
             for (int y0 = pixelBounds.pMin.y; y0 < pixelBounds.pMax.y;
                  y0 += scanlinesPerPass) {
                 // Generate camera rays for current scanline range
@@ -357,7 +357,7 @@ Float WavefrontPathIntegrator::Render() {
                 Do(
                    "Reset ray queue", PBRT_CPU_GPU_LAMBDA() {
                        PBRT_DBG("Starting scanlines at y0 = %d, sample %d / %d\n", y0,
-                                sampleIndex, samplesPerPixel);
+                                currentSampleIndex, samplesPerPixel);
                        cameraRayQueue->Reset();
                    });
 
@@ -365,7 +365,7 @@ Float WavefrontPathIntegrator::Render() {
                 if (gui)
                     cameraMotion =
                         renderFromCamera * gui->GetCameraTransform() * cameraFromRender;
-                GenerateCameraRays(y0, cameraMotion, sampleIndex);
+                GenerateCameraRays(y0, cameraMotion, currentSampleIndex);
                 Do(
                    "Update camera ray stats",
                    PBRT_CPU_GPU_LAMBDA() { stats->cameraRays += cameraRayQueue->Size(); });
@@ -397,7 +397,7 @@ Float WavefrontPathIntegrator::Render() {
                        });
 
                     // Follow active ray paths and accumulate radiance estimates
-                    GenerateRaySamples(wavefrontDepth, sampleIndex);
+                    GenerateRaySamples(wavefrontDepth, currentSampleIndex);
 
                     // Find closest intersections along active rays
                     aggregate->IntersectClosest(
@@ -461,7 +461,7 @@ Float WavefrontPathIntegrator::Render() {
             if (state == DisplayState::EXIT)
                 break;
             else if (state == DisplayState::RESET) {
-                sampleIndex = firstSampleIndex - 1;
+                currentSampleIndex = firstSampleIndex - 1;
                 ParallelFor(
                     "Reset pixels", resolution.x * resolution.y,
                     PBRT_CPU_GPU_LAMBDA(int i) {

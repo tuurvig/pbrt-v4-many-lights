@@ -20,7 +20,7 @@ ExhaustiveLightSampler::ExhaustiveLightSampler(pstd::span<const Light> lights,
 }
 
 PBRT_CPU_GPU pstd::optional<SampledLight> ExhaustiveLightSampler::Sample(const LightSampleContext &ctx,
-                                                            const BSDF* /*bsdf*/, Float u) const {
+                                                            const BSDF* /*bsdf*/, uint32_t /*seed*/, Float u) const {
     Float pInfinite = Float(infiniteLights.size()) /
                       Float(infiniteLights.size() + (!lightBounds.empty() ? 1 : 0));
 
