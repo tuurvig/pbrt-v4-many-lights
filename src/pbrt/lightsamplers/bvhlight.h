@@ -62,6 +62,9 @@ class BVHLightSampler {
                 pmf *= nodePMF;
                 nodeIndex = (child == 0) ? (nodeIndex + 1) : node.childOrLightIndex;
 
+                const Float scrambleOffset = HashFloat(nodeIndex, seed);
+                u += scrambleOffset;
+                if (u >= 1) u -= 1;
             } else {
                 // Confirm light has nonzero importance before returning light sample
                 if (nodeIndex > 0)
