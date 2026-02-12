@@ -29,7 +29,7 @@ public:
         return SampledLight(m_lights[lightIndex], 1.f / static_cast<float>(m_lights.size()));
     }
 
-    PBRT_CPU_GPU pstd::optional<SampledLight> Sample(const LightSampleContext & /*ctx*/, const BSDF* /*bsdf*/, Float u) const {
+    PBRT_CPU_GPU pstd::optional<SampledLight> Sample(const LightSampleContext & /*ctx*/, const BSDF* /*bsdf*/, uint32_t /*seed*/, Float u) const {
         return Sample(u);
     }
 

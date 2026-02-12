@@ -64,6 +64,8 @@ void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQue
         "%s + BxDF eval (%s tex)", ConcreteMaterial::Name(),
         std::is_same_v<TextureEvaluator, BasicTextureEvaluator> ? "Basic" : "Universal");
 
+    const int sampleIndex = currentSampleIndex;
+
     RayQueue *nextRayQueue = NextRayQueue(wavefrontDepth);
     auto queue = evalQueue->Get<MaterialEvalWorkItem<ConcreteMaterial>>();
     ForAllQueued(
@@ -269,7 +271,7 @@ void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQue
                 else if (IsTransmissive(flags) && IsReflective(flags))
                     ctx.pi = OffsetRayOrigin(ctx.pi, w.n, -wo);
                 pstd::optional<SampledLight> sampledLight =
-                    lightSampler.Sample(ctx, &bsdf, raySamples.direct.uc);
+                    lightSampler.Sample(ctx, &bsdf, sampleIndex ^ w.pixelIndex, raySamples.direct.uc);
                 if (!sampledLight)
                     return;
                 Light light = sampledLight->light;

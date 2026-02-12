@@ -25,7 +25,7 @@ class BVHLightSampler {
     BVHLightSampler(pstd::span<const Light> lights, Allocator alloc);
 
     PBRT_CPU_GPU
-    pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* /*bsdf*/, Float u) const {
+    pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* /*bsdf*/, uint32_t seed, Float u) const {
         Float pmf = 1;
         if (!m_infiniteLights.empty()) {
             pstd::optional<SampledLight> infiniteLightSample = InfiniteLightSimpleSample(m_infiniteLights, m_nodes.size(), pmf, u);

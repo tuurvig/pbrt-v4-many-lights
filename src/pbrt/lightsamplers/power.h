@@ -34,7 +34,7 @@ class PowerLightSampler {
     }
 
     PBRT_CPU_GPU
-    pstd::optional<SampledLight> Sample(const LightSampleContext &/*ctx*/, const BSDF* /*bsdf*/, Float u) const {
+    pstd::optional<SampledLight> Sample(const LightSampleContext &/*ctx*/, const BSDF* /*bsdf*/, uint32_t /*seed*/, Float u) const {
         return Sample(u);
     }
 

@@ -159,7 +159,7 @@ class WavefrontPathIntegrator {
     pstd::vector<Light> *infiniteLights;
     LightSampler lightSampler;
 
-    int maxDepth, samplesPerPixel;
+    int maxDepth, samplesPerPixel, currentSampleIndex;
     bool regularize;
 
     int scanlinesPerPass, maxQueueSize;
