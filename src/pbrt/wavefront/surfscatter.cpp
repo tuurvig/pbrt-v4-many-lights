@@ -271,7 +271,7 @@ void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQue
                 else if (IsTransmissive(flags) && IsReflective(flags))
                     ctx.pi = OffsetRayOrigin(ctx.pi, w.n, -wo);
                 pstd::optional<SampledLight> sampledLight =
-                    lightSampler.Sample(ctx, &bsdf, sampleIndex ^ w.pixelIndex, raySamples.direct.uc);
+                    lightSampler.Sample(ctx, &bsdf, Hash(sampleIndex, w.pixelIndex), raySamples.direct.uc);
                 if (!sampledLight)
                     return;
                 Light light = sampledLight->light;
