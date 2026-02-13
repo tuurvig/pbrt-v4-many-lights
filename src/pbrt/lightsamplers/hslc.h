@@ -24,7 +24,7 @@ namespace pbrt {
 class HSLCLightSampler {
   public:
     // LightcutsLightSampler Public Methods
-    HSLCLightSampler(pstd::span<const Light> lights, Allocator alloc, Float threshold = 0.02);
+    HSLCLightSampler(pstd::span<const Light> lights, Allocator alloc);
 
     PBRT_CPU_GPU
     pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t seed, Float u) const {
@@ -240,7 +240,6 @@ class HSLCLightSampler {
     LightcutsTree m_tree;
     pstd::vector<Light> m_infiniteLights;
     HashMap<Light, uint32_t> m_lightToBitTrail;
-    Float m_threshold;
 };
 
 }

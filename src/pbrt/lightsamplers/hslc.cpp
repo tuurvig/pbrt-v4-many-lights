@@ -22,8 +22,8 @@ namespace pbrt {
 
 STAT_MEMORY_COUNTER("Memory/Hierarchic Stochastic Lightcuts LightTree", HSLCLightTreeBytes);
 
-HSLCLightSampler::HSLCLightSampler(pstd::span<const Light> lights, Allocator alloc, Float threshold) :
-    m_tree(alloc), m_infiniteLights(alloc), m_lightToBitTrail(alloc), m_threshold(threshold) {
+HSLCLightSampler::HSLCLightSampler(pstd::span<const Light> lights, Allocator alloc) :
+    m_tree(alloc), m_infiniteLights(alloc), m_lightToBitTrail(alloc) {
     std::vector<LightcutsBuildContainer> treeLights;
     for (size_t i = 0; i < lights.size(); ++i) {
         // Store $i$th light in either _infiniteLights_ or _treeLights_
