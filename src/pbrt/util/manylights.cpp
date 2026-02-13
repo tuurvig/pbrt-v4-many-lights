@@ -40,7 +40,7 @@ int LightHierarchyNodeEmitter::ReserveInterior() {
     return index;
 }
 
-LightHierarchyNodeBuildResult LightHierarchyNodeEmitter::EmitLeaf(const LightBVHBuildContainer& item, uint32_t bitTrail) {
+LightBVHBuildContainer LightHierarchyNodeEmitter::EmitLeaf(const LightBVHBuildContainer& item, uint32_t bitTrail) {
     int nodeIndex = static_cast<int>(nodes->size());
     const LightBVHBuildContainer& container(item);
     CompactLightBounds cb(container.bounds, container.bounds.phi, allLightBounds);
@@ -49,10 +49,10 @@ LightHierarchyNodeBuildResult LightHierarchyNodeEmitter::EmitLeaf(const LightBVH
     return {item.bounds, nodeIndex};
 }
 
-LightHierarchyNodeBuildResult LightHierarchyNodeEmitter::FinalizeInterior(int reservationIndex, const LightHierarchyNodeBuildResult& left, const LightHierarchyNodeBuildResult& right, Float& u) {
+LightBVHBuildContainer LightHierarchyNodeEmitter::FinalizeInterior(int reservationIndex, const LightBVHBuildContainer& left, const LightBVHBuildContainer& right, Float& u) {
     LightBounds lb = Union(left.bounds, right.bounds);
     CompactLightBounds cb(lb, lb.phi, allLightBounds);
-    (*nodes)[reservationIndex] = LightBVHNode::MakeInterior(right.nodeIdx, cb);
+    (*nodes)[reservationIndex] = LightBVHNode::MakeInterior(right.index, cb);
     return {lb, reservationIndex};
 }
 
@@ -72,7 +72,7 @@ LightcutsBuildResult LightcutsNodeEmitter::EmitLeaf(const LightcutsBuildContaine
     tree->lights.emplace_back(leaf.light);
     tree->nodes.emplace_back(LightcutsTreeNode::MakeLeaf(lightIndex, nodeIndex, cb));
     lightToLocation->Insert(leaf.light, {static_cast<uint32_t>(isPoint), bitTrail});
-    return {leaf.bounds, nodeIndex, nodeIndex};
+    return LightcutsBuildResult(leaf.bounds, nodeIndex, nodeIndex);
 }
 
 LightcutsBuildResult LightcutsNodeEmitter::FinalizeInterior(int reservationIndex, const LightcutsBuildResult& left, const LightcutsBuildResult& right, Float& u) {    
@@ -85,7 +85,7 @@ LightcutsBuildResult LightcutsNodeEmitter::FinalizeInterior(int reservationIndex
     CompactLightBounds cb(lb, lb.I, tree->allLightBounds);
     
     tree->nodes[reservationIndex] = LightcutsTreeNode::MakeInterior(right.nodeIdx, successorIdx, cb);
-    return {lb, successorIdx, reservationIndex};
+    return LightcutsBuildResult(lb, successorIdx, reservationIndex);
 }
 
 int SLCNodeEmitter::ReserveInterior() {
@@ -117,7 +117,7 @@ LightcutsBuildResult SLCNodeEmitter::FinalizeInterior(int reservationIndex, cons
     CompactLightBounds cb(lb, lb.I, tree->allLightBounds);
     
     tree->nodes[reservationIndex] = LightcutsTreeNode::MakeInterior(right.nodeIdx, successorIdx, cb);
-    return {lb, successorIdx, reservationIndex};
+    return LightcutsBuildResult(lb, successorIdx, reservationIndex);
 }
 
 }

@@ -275,14 +275,11 @@ struct SAOHCostEvaluator {
 /// Light Hierarchy Build results
 //////////////////////////////////////////////////////////
 
-struct LightcutsBuildResult {
-    LightBounds bounds;
+struct LightcutsBuildResult : public BuildContainerInterface<LightBounds> {
+    PBRT_CPU_GPU
+    LightcutsBuildResult(const LightBounds& bounds, int representantIdx, int nodeIdx) :
+        BuildContainerInterface<LightBounds>(bounds), representantIdx(representantIdx), nodeIdx(nodeIdx) {}
     int representantIdx;
-    int nodeIdx;
-};
-
-struct LightHierarchyNodeBuildResult {
-    LightBounds bounds;
     int nodeIdx;
 };
 
@@ -336,7 +333,7 @@ struct LightLocation {
 /// Light Hierarchy Node Emitters
 //////////////////////////////////////////////////////////
 
-struct LightHierarchyNodeEmitter : public NodeEmitterInterface<LightBVHBuildContainer, LightHierarchyNodeBuildResult> {
+struct LightHierarchyNodeEmitter : public NodeEmitterInterface<LightBVHBuildContainer, LightBVHBuildContainer> {
     LightHierarchyNodeEmitter(pstd::vector<LightBVHNode>& nodes, HashMap<Light, uint32_t>& lightToBitTrail, const pstd::span<const Light>& lights, const Bounds3f& allLightBounds) : 
         nodes(&nodes), lightToBitTrail(&lightToBitTrail), lights(lights), allLightBounds(allLightBounds) {}
 
@@ -346,8 +343,8 @@ struct LightHierarchyNodeEmitter : public NodeEmitterInterface<LightBVHBuildCont
     Bounds3f allLightBounds;
 
     virtual int ReserveInterior() override;
-    virtual LightHierarchyNodeBuildResult EmitLeaf(const LightBVHBuildContainer& item, uint32_t bitTrail) override;
-    virtual LightHierarchyNodeBuildResult FinalizeInterior(int reservationIndex, const LightHierarchyNodeBuildResult& left, const LightHierarchyNodeBuildResult& right, Float& u) override;
+    virtual LightBVHBuildContainer EmitLeaf(const LightBVHBuildContainer& item, uint32_t bitTrail) override;
+    virtual LightBVHBuildContainer FinalizeInterior(int reservationIndex, const LightBVHBuildContainer& left, const LightBVHBuildContainer& right, Float& u) override;
 };
 
 struct LightcutsNodeEmitter : public NodeEmitterInterface<LightcutsBuildContainer, LightcutsBuildResult> {
