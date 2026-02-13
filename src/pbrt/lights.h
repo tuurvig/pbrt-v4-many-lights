@@ -157,6 +157,57 @@ inline PBRT_CPU_GPU LightBounds Union(const LightBounds &a, const LightBounds &b
                        cosTheta_e, a.twoSided | b.twoSided);
 }
 
+class SphericalLightBounds {
+  public:
+      SphericalLightBounds() = default;
+
+      PBRT_CPU_GPU
+      SphericalLightBounds(const Bounds3f &b, Float phi) : 
+          center(b.Centroid()),
+          radius(Distance(b.pMax, b.pMin) * Float(0.5)),
+          phi(phi) {}
+
+      PBRT_CPU_GPU
+      SphericalLightBounds(const Point3f &c, Float r, Float phi) : 
+          center(c), radius(r), phi(phi) {}
+
+      PBRT_CPU_GPU
+      Point3f Centroid() const { return center; }
+
+      PBRT_CPU_GPU
+      Float Radius() const { return radius; }
+
+      PBRT_CPU_GPU
+      Float Phi() const { return phi; }
+
+      PBRT_CPU_GPU
+      Float Importance(Point3f p, Normal3f n) const;
+
+      std::string ToString() const;
+  private:
+    Point3f center;
+    Float radius;
+    Float phi = 0; // Total Energy
+};
+
+inline PBRT_CPU_GPU SphericalLightBounds Union(const SphericalLightBounds &a, const SphericalLightBounds &b) {
+    if (a.Phi() == 0) return b;
+    if (b.Phi() == 0) return a;
+
+    const Float dist = Distance(a.Centroid(), b.Centroid());
+
+    // If one sphere is inside the other
+    if (dist + b.Radius() <= a.Radius()) return SphericalLightBounds(a.Centroid(), a.Radius(), a.Phi() + b.Phi());
+    if (dist + b.Radius() <= a.Radius()) return SphericalLightBounds(b.Centroid(), b.Radius(), a.Phi() + b.Phi());
+
+    // Compute new enclosing sphere
+    const Float newRadius = (dist + a.Radius() + b.Radius()) * Float(0.5);
+    const Float k = (newRadius - a.Radius()) / dist;
+    const Point3f newCenter = a.Centroid() + (b.Centroid() - a.Centroid()) * k;
+
+    return SphericalLightBounds(newCenter, newRadius, a.Phi() + b.Phi());
+}
+
 // LightBase Definition
 class LightBase {
   public:
