@@ -20,7 +20,7 @@ namespace pbrt{
 
 #ifdef PBRT_BUILD_GPU_RENDERER
 
-class BVHLightTreeBuilder final : public LightTreeBuilderGPU<uint64_t, SAOHCostEvaluator> {
+class BVHLightTreeBuilder final : public LightTreeBuilderGPU<LightBounds, uint64_t, SAOHCostEvaluator> {
   public:
     explicit BVHLightTreeBuilder(const Bounds3f &bounds) : m_allLightBounds(bounds) {}
 
@@ -30,7 +30,7 @@ class BVHLightTreeBuilder final : public LightTreeBuilderGPU<uint64_t, SAOHCostE
 
         Allocate(static_cast<uint32_t>(lights.size()), m_allLightBounds);
 
-        LightTreeBuildState buildState(State());
+        LightTreeBuildState<LightBounds> buildState(State());
         std::array<uint8_t, 3> ax = DetermineAxisOrder(buildState.allLightBounds);
 
         LightBVHBuildContainer* dLightsContainer = GPUAllocAsync<LightBVHBuildContainer>(buildState.nLights);
@@ -39,7 +39,7 @@ class BVHLightTreeBuilder final : public LightTreeBuilderGPU<uint64_t, SAOHCostE
         uint64_t* dMortonCodes = MortonCodes();
         MortonCodes() = SortNodesMorton(State(), MortonCodes(), [buildState, ax, dLightsContainer, dMortonCodes] PBRT_GPU(int idx) {
             LightBVHBuildContainer cont = dLightsContainer[idx];
-            LightTreeConstructionNodeGPU leaf{cont.bounds, kInvalidIndex, static_cast<uint32_t>(cont.index)};
+            LightTreeConstructionNodeGPU<LightBounds> leaf{cont.bounds, kInvalidIndex, static_cast<uint32_t>(cont.index)};
             Point3f centroid = cont.bounds.Centroid();
             Vector3f offset = buildState.allLightBounds.Offset(centroid);
 
@@ -57,7 +57,7 @@ class BVHLightTreeBuilder final : public LightTreeBuilderGPU<uint64_t, SAOHCostE
     }
 
     void FlattenTree(const pstd::vector<Light>& lights, pstd::vector<LightBVHNode>& nodes, HashMap<Light, uint32_t>& bitTrailContainer) {
-        const LightTreeBuildState &state(State());
+        const LightTreeBuildState<LightBounds> &state(State());
         if (state.nLights == 0)
             return;
 
@@ -65,7 +65,7 @@ class BVHLightTreeBuilder final : public LightTreeBuilderGPU<uint64_t, SAOHCostE
         uint32_t rootIndex = 0;
         GPUCopyToHost(&nNodes, state.nMergedClusters, 1);
         GPUCopyToHost(&rootIndex, state.dClusterIndices, 1);
-        std::vector<LightTreeConstructionNodeGPU> hostNodes(nNodes);
+        std::vector<LightTreeConstructionNodeGPU<LightBounds>> hostNodes(nNodes);
         GPUCopyToHost(hostNodes.data(), state.dNodes, nNodes);
 
         nodes.reserve(nNodes);
@@ -77,8 +77,8 @@ class BVHLightTreeBuilder final : public LightTreeBuilderGPU<uint64_t, SAOHCostE
         FlattenLightTree<GPUToLightBVHLeaf, LightHierarchyNodeEmitter>(adapter, rootIndex, 0, 0, emitter, u);
     }
 
-    static uint64_t* UploadSortedLeaves(LightTreeBuildState& buildState, uint64_t* dMortonCodes, const std::vector<LightBVHBuildContainer> &lights) {
-        LightTreeBuildState localState = buildState;
+    static uint64_t* UploadSortedLeaves(LightTreeBuildState<LightBounds>& buildState, uint64_t* dMortonCodes, const std::vector<LightBVHBuildContainer> &lights) {
+        LightTreeBuildState<LightBounds> localState = buildState;
         std::array<uint8_t, 3> ax = DetermineAxisOrder(localState.allLightBounds);
 
         LightBVHBuildContainer* dLightsContainer = GPUAllocAsync<LightBVHBuildContainer>(buildState.nLights);
@@ -86,7 +86,7 @@ class BVHLightTreeBuilder final : public LightTreeBuilderGPU<uint64_t, SAOHCostE
 
         GPUParallelFor("Assign Morton Codes", ProfilerKernelGroup::HPLOC, localState.nLights, [=] PBRT_GPU(int idx) {
             LightBVHBuildContainer cont = dLightsContainer[idx];
-            LightTreeConstructionNodeGPU leaf{cont.bounds, kInvalidIndex, static_cast<uint32_t>(cont.index)};
+            LightTreeConstructionNodeGPU<LightBounds> leaf{cont.bounds, kInvalidIndex, static_cast<uint32_t>(cont.index)};
             Point3f centroid = cont.bounds.Centroid();
             Vector3f offset = buildState.allLightBounds.Offset(centroid);
 

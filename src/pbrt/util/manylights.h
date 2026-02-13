@@ -289,18 +289,18 @@ struct LightHierarchyNodeBuildResult {
 /// Light Hierarchy Build containers
 //////////////////////////////////////////////////////////
 
-struct LightBVHBuildContainer : public BuildContainerInterface {
+struct LightBVHBuildContainer : public BuildContainerInterface<LightBounds> {
     PBRT_CPU_GPU
     LightBVHBuildContainer(const LightBounds& bounds, int index) 
-        : BuildContainerInterface(bounds), index(index) {}
+        : BuildContainerInterface<LightBounds>(bounds), index(index) {}
 
     int index;
 };
 
-struct LightcutsBuildContainer : public BuildContainerInterface {
+struct LightcutsBuildContainer : public BuildContainerInterface<LightBounds> {
     PBRT_CPU_GPU
     LightcutsBuildContainer(const LightBounds& bounds, const Light& light) 
-        : BuildContainerInterface(bounds), light(light) {}
+        : BuildContainerInterface<LightBounds>(bounds), light(light) {}
 
     Light light;
     uint32_t index;
@@ -309,11 +309,13 @@ struct LightcutsBuildContainer : public BuildContainerInterface {
 // Intermediate BVH node that stores spatial bounds and child references.
 // Leaves store the light index in both child slots and use kInvalidIndex to
 // signal that no further subdivision is needed.
-struct LightTreeConstructionNodeGPU : public BuildContainerInterface {
+template<typename LightBoundsType>
+struct LightTreeConstructionNodeGPU : public BuildContainerInterface<LightBoundsType> {
     LightTreeConstructionNodeGPU() = default;
 
     PBRT_CPU_GPU
-    LightTreeConstructionNodeGPU(const LightBounds& bounds, uint32_t left, uint32_t right) : BuildContainerInterface(bounds), left(left), right(right) {}
+    LightTreeConstructionNodeGPU(const LightBoundsType& bounds, uint32_t left, uint32_t right)
+        : BuildContainerInterface<LightBoundsType>(bounds), left(left), right(right) {}
 
     uint32_t left; // invalidIdx == leaf
     uint32_t right; // leaf => lightIdx
@@ -376,30 +378,34 @@ struct SLCNodeEmitter : public NodeEmitterInterface<LightcutsBuildContainer, Lig
 /// Light Hierarchy Node Converters
 //////////////////////////////////////////////////////////
 
-template <typename OutputTypeT>
-struct TreeLeafGPUAdapter : public TreeLeafAdapterInterface<LightTreeConstructionNodeGPU, OutputTypeT> {
-    TreeLeafGPUAdapter(std::vector<LightTreeConstructionNodeGPU>& nodes) : nodes(&nodes) {}
+template <typename LightBoundsType, typename OutputTypeT>
+struct TreeLeafGPUAdapter : public TreeLeafAdapterInterface<LightTreeConstructionNodeGPU<LightBoundsType>, OutputTypeT> {
+    using SpecifiedNodesGPU = LightTreeConstructionNodeGPU<LightBoundsType>;
+    TreeLeafGPUAdapter(std::vector<SpecifiedNodesGPU>& nodes) : nodes(&nodes) {}
     
-    virtual const LightTreeConstructionNodeGPU& At(uint32_t idx) const override { return nodes->at(idx); }
-    virtual uint32_t Left (const LightTreeConstructionNodeGPU& node) const override { return node.left; }
-    virtual uint32_t Right(const LightTreeConstructionNodeGPU& node) const override { return node.right; }
-    virtual bool IsLeaf(const LightTreeConstructionNodeGPU& node) const override { return node.left == std::numeric_limits<uint32_t>::max(); }
+    virtual const SpecifiedNodesGPU& At(uint32_t idx) const override { return nodes->at(idx); }
+    virtual uint32_t Left (const SpecifiedNodesGPU& node) const override { return node.left; }
+    virtual uint32_t Right(const SpecifiedNodesGPU& node) const override { return node.right; }
+    virtual bool IsLeaf(const SpecifiedNodesGPU& node) const override { return node.left == std::numeric_limits<uint32_t>::max(); }
     
-    std::vector<LightTreeConstructionNodeGPU>* nodes;
+    std::vector<SpecifiedNodesGPU>* nodes;
 };
 
-struct GPUToLightBVHLeaf : public TreeLeafGPUAdapter<LightBVHBuildContainer> {
-    GPUToLightBVHLeaf(std::vector<LightTreeConstructionNodeGPU>& nodes) : TreeLeafGPUAdapter(nodes) {};
+struct GPUToLightBVHLeaf : public TreeLeafGPUAdapter<LightBounds, LightBVHBuildContainer> {
+    using BaseClass = TreeLeafGPUAdapter<LightBounds, LightBVHBuildContainer>;
+    GPUToLightBVHLeaf(std::vector<LightTreeConstructionNodeGPU<LightBounds>>& nodes) : BaseClass(nodes) {};
 
-    virtual LightBVHBuildContainer Convert(const LightTreeConstructionNodeGPU& node) const override {
+    virtual LightBVHBuildContainer Convert(const LightTreeConstructionNodeGPU<LightBounds>& node) const override {
         return LightBVHBuildContainer(node.bounds, node.right);
     }
 };
 
-struct GPUToLightcutsLeaf : public TreeLeafGPUAdapter<LightcutsBuildContainer> {
-    GPUToLightcutsLeaf(std::vector<LightTreeConstructionNodeGPU>& nodes, std::vector<LightcutsBuildContainer>& lights) : TreeLeafGPUAdapter(nodes), lights(&lights) {};
+struct GPUToLightcutsLeaf : public TreeLeafGPUAdapter<LightBounds, LightcutsBuildContainer> {
+    using BaseClass = TreeLeafGPUAdapter<LightBounds, LightcutsBuildContainer>;
+    GPUToLightcutsLeaf(std::vector<LightTreeConstructionNodeGPU<LightBounds>>& nodes, std::vector<LightcutsBuildContainer>& lights) :
+        BaseClass(nodes), lights(&lights) {};
 
-    virtual LightcutsBuildContainer Convert(const LightTreeConstructionNodeGPU& node) const override {
+    virtual LightcutsBuildContainer Convert(const LightTreeConstructionNodeGPU<LightBounds>& node) const override {
         return LightcutsBuildContainer(node.bounds, lights->at(node.right).light);
     }
 

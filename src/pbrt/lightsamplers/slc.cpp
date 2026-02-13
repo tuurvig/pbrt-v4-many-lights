@@ -56,7 +56,7 @@ SLCLightSampler::SLCLightSampler(pstd::span<const Light> lights, Allocator alloc
                          m_lightToBitTrail.capacity() * (sizeof(Light) + sizeof(uint32_t));
 }
 
-class SLCTreeBuilderGPU final : public LightTreeBuilderGPU<uint64_t, SAOHCostEvaluator> {
+class SLCTreeBuilderGPU final : public LightTreeBuilderGPU<LightBounds, uint64_t, SAOHCostEvaluator> {
   public:
     explicit SLCTreeBuilderGPU(const Bounds3f &bounds) : m_allLightBounds(bounds) {}
 
@@ -66,7 +66,7 @@ class SLCTreeBuilderGPU final : public LightTreeBuilderGPU<uint64_t, SAOHCostEva
 
         Allocate(static_cast<uint32_t>(lights.size()), m_allLightBounds);
 
-        LightTreeBuildState buildState(State());
+        LightTreeBuildState<LightBounds> buildState(State());
         std::array<uint8_t, 3> ax = DetermineAxisOrder(buildState.allLightBounds);
 
         LightcutsBuildContainer* dLightsContainer = GPUAllocAsync<LightcutsBuildContainer>(buildState.nLights);
@@ -75,7 +75,7 @@ class SLCTreeBuilderGPU final : public LightTreeBuilderGPU<uint64_t, SAOHCostEva
         uint64_t* dMortonCodes = MortonCodes();
         MortonCodes() = SortNodesMorton(State(), MortonCodes(), [buildState, ax, dLightsContainer, dMortonCodes] PBRT_GPU(int idx) {
             LightcutsBuildContainer cont = dLightsContainer[idx];
-            LightTreeConstructionNodeGPU leaf(cont.bounds, kInvalidIndex, idx);
+            LightTreeConstructionNodeGPU<LightBounds> leaf(cont.bounds, kInvalidIndex, idx);
             Point3f centroid = cont.bounds.Centroid();
             Vector3f offset = buildState.allLightBounds.Offset(centroid);
 
@@ -96,7 +96,7 @@ class SLCTreeBuilderGPU final : public LightTreeBuilderGPU<uint64_t, SAOHCostEva
     }
 
     void FlattenTree(LightcutsTree& tree, std::vector<LightcutsBuildContainer> &lights, HashMap<Light, uint32_t>& bitTrailContainer, Float& u) {
-        const LightTreeBuildState &state(State());
+        const LightTreeBuildState<LightBounds> &state(State());
         if (state.nLights == 0)
             return;
 
@@ -104,7 +104,7 @@ class SLCTreeBuilderGPU final : public LightTreeBuilderGPU<uint64_t, SAOHCostEva
         uint32_t rootIndex = 0;
         GPUCopyToHost(&nNodes, state.nMergedClusters, 1);
         GPUCopyToHost(&rootIndex, state.dClusterIndices, 1);
-        std::vector<LightTreeConstructionNodeGPU> hostNodes(nNodes);
+        std::vector<LightTreeConstructionNodeGPU<LightBounds>> hostNodes(nNodes);
         GPUCopyToHost(hostNodes.data(), state.dNodes, nNodes);
 
         tree.nodes.reserve(nNodes);
