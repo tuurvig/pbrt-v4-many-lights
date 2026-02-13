@@ -13,13 +13,15 @@
 
 namespace pbrt {
 
+template<typename LightBoundsTypeT>
 struct BuildContainerInterface {
+    using LightBoundsType = LightBoundsTypeT;
     BuildContainerInterface() = default;
 
     PBRT_CPU_GPU
-    BuildContainerInterface(const LightBounds& bounds) : bounds(bounds) {}
+    BuildContainerInterface(const LightBoundsTypeT& bounds) : bounds(bounds) {}
     
-    LightBounds bounds;
+    LightBoundsTypeT bounds;
 };
 
 template <typename BuildContainerTypeT, typename ResultTypeT>
@@ -92,7 +94,7 @@ typename NodeEmitter::ResultType BuildLightTree(std::vector<BuildContainer>& ite
         if (centroidBounds.pMax[dim] == centroidBounds.pMin[dim])
             continue;
 
-        LightBounds bucketLightBounds[NBuckets];
+        typename BuildContainer::LightBoundsType bucketLightBounds[NBuckets];
         for (int i = start; i < end; ++i) {
             Point3f pc = items[i].bounds.Centroid();
             int b = NBuckets * centroidBounds.Offset(pc)[dim];
@@ -100,8 +102,8 @@ typename NodeEmitter::ResultType BuildLightTree(std::vector<BuildContainer>& ite
             bucketLightBounds[b] = Union(bucketLightBounds[b], items[i].bounds);
         }
 
-        LightBounds leftBoundsSum[NBuckets];
-        LightBounds rightBoundsSum[NBuckets];
+        typename BuildContainer::LightBoundsType leftBoundsSum[NBuckets];
+        typename BuildContainer::LightBoundsType rightBoundsSum[NBuckets];
         
         // Simultaneous forward and backward scan
         leftBoundsSum[0] = bucketLightBounds[0];
