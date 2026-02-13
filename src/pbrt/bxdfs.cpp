@@ -224,10 +224,12 @@ PBRT_CPU_GPU Float DielectricBxDF::Max_f(Vector3f woGlobal, Bounds3f wiBoundsGlo
     // Reflection bounds
     if ((flags & BxDFReflTransFlags::Reflection) && (h & HemisphereIntersection::SAME)) {
         // Ideal reflection direction in global space
-        Vector3f wrGlobal = Reflect(woGlobal, localFrame.z);
+        Vector3f wiGlobal = Reflect(woGlobal, localFrame.z);
         
         // Adjust to bounds
-        Vector3f wiGlobal = IntersectOrAdjust(wiBoundsGlobal, p, wrGlobal);
+        if (!IntersectOrAdjust(wiGlobal, wiBoundsGlobal, p, wiGlobal)) {
+            return 0;
+        }
         Vector3f wi = localFrame.ToLocal(wiGlobal);
     
         // Evaluate (f handles hemisphere checks)
@@ -237,13 +239,15 @@ PBRT_CPU_GPU Float DielectricBxDF::Max_f(Vector3f woGlobal, Bounds3f wiBoundsGlo
     // Transmission bounds
     if ((flags & BxDFReflTransFlags::Transmission) && (h & HemisphereIntersection::DIFF)) {
         // Ideal transmission direction in global space
-        Vector3f wtGlobal;
+        Vector3f wiGlobal;
         Float etap;
-        bool valid = Refract(woGlobal, Normal3f(localFrame.z), eta, &etap, &wtGlobal);
+        bool valid = Refract(woGlobal, Normal3f(localFrame.z), eta, &etap, &wiGlobal);
         CHECK_RARE(1e-5f, !valid);
         if (valid) {
             // Adjust to bounds
-            Vector3f wiGlobal = IntersectOrAdjust(wiBoundsGlobal, p, wtGlobal);
+            if (!IntersectOrAdjust(wiGlobal, wiBoundsGlobal, p, wiGlobal)) {
+                return 0;
+            }
             Vector3f wi = localFrame.ToLocal(wiGlobal);
     
             // Evaluate
@@ -1199,7 +1203,9 @@ PBRT_CPU_GPU Float MeasuredBxDF::Max_f(Vector3f woGlobal, Bounds3f wiBoundsGloba
     }
 
     Vector3f wiGlobal = localFrame.FromLocal(wi);
-    wiGlobal = IntersectOrAdjust(wiBoundsGlobal, p, wiGlobal);
+    if (!IntersectOrAdjust(wiGlobal, wiBoundsGlobal, p, wiGlobal)) {
+        return false;
+    }
 
     Vector3f wiAdjusted = localFrame.ToLocal(wiGlobal);
 

@@ -198,57 +198,38 @@ class HSLCLightSampler {
 
         Float geomBound0 = ComputeGeometricBound(child0, nodeBound0, frame, true, p, wo, bsdf && IsTransmissive(bsdfFlags));
         Float geomBound1 = ComputeGeometricBound(child1, nodeBound1, frame, true, p, wo, bsdf && IsTransmissive(bsdfFlags));
-
+        
         constexpr Float minLengthSqr = 1e-6f;
+        
+        Float ub0 = geomBound0 * nodeI0;
+        Float ub1 = geomBound1 * nodeI1; 
 
-        if (geomBound0 > MachineEpsilon && geomBound1 > MachineEpsilon) {
-            Float ub0 = geomBound0 * nodeI0;
-            Float ub1 = geomBound1 * nodeI1;
+        if (ub0 > MachineEpsilon && ub1 > MachineEpsilon) {   
+            Float dist2Min0 = DistanceSquared(p, ClosestPoint(p, nodeBound0));
+            Float dist2Min1 = DistanceSquared(p, ClosestPoint(p, nodeBound1));
 
-            Float matBound0 = 1;
-            Float matBound1 = 1;
+            const Float diagonalLengthSqr0 = LengthSquared(nodeBound0.Diagonal());
+            const Float diagonalLengthSqr1 = LengthSquared(nodeBound1.Diagonal());
 
-            if (bsdf) {
-                matBound0 = bsdf->Max_f(wo, nodeBound0, p);
-                matBound1 = bsdf->Max_f(wo, nodeBound1, p);
+            if (dist2Min0 >= diagonalLengthSqr0 && dist2Min1 >= diagonalLengthSqr1) {
+                if (bsdf) {
+                    ub0 *= bsdf->Max_f(wo, nodeBound0, p);
+                    ub1 *= bsdf->Max_f(wo, nodeBound1, p);
+                }
+
+                err0 = ub0 / std::max(dist2Min0, minLengthSqr);
+                err1 = ub1 / std::max(dist2Min1, minLengthSqr);
             }
-            
-            if ((matBound0 > MachineEpsilon && matBound1 > MachineEpsilon)) {
-                ub0 *= matBound0;
-                ub1 *= matBound1;
-
-                const Float diagonalLengthSqr0 = std::max(LengthSquared(nodeBound0.Diagonal()), minLengthSqr);
-                const Float diagonalLengthSqr1 = std::max(LengthSquared(nodeBound1.Diagonal()), minLengthSqr);
-
-                Float dist2Min0 = DistanceSquared(p, ClosestPoint(p, nodeBound0));
-                Float dist2Min1 = DistanceSquared(p, ClosestPoint(p, nodeBound1));
-
-                if (dist2Min0 > diagonalLengthSqr0 && dist2Min1 > diagonalLengthSqr1) {
-                    Float dBoundMin0 = 1 / dist2Min0;
-                    Float dBoundMin1 = 1 / dist2Min1;
-                
-                    err0 = dBoundMin0 * ub0;
-                    err1 = dBoundMin1 * ub1;
-                }
-                else {
-                    err0 = ub0;
-                    err1 = ub1;
-                }
-            } else {
-                if (matBound0 <= MachineEpsilon && matBound1 <= MachineEpsilon) {
-                    return false;
-                }
-
-                // weight of the first child will be 1 or 0 based on whether the other child is 0.
-                err0 = static_cast<Float>(matBound1 < MachineEpsilon);
-                err1 = 1 - err0;
+            else {
+                err0 = ub0;
+                err1 = ub1;
             }
         } else {
-            if (geomBound0 < MachineEpsilon && geomBound1 < MachineEpsilon) {
+            if (ub0 <= MachineEpsilon && ub1 <= MachineEpsilon) {
                 return false;
             }
             // weight of the first child will be 1 or 0 based on whether the other child is 0.
-            err0 = static_cast<Float>(geomBound1 < MachineEpsilon);
+            err0 = static_cast<Float>(ub1 <= MachineEpsilon);
             err1 = 1 - err0;
         }
         
