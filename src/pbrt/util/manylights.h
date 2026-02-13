@@ -477,14 +477,6 @@ inline Float ComputeClusterEstimate(const BSDF* bsdf, BxDFFlags flags, Point3f l
 
 PBRT_CPU_GPU
 inline Float GeomTermBoundInFrame(Point3f point, const Frame& frame, const Bounds3f& bounds) {
-    // furthest point on the box along vector z of frame
-    //Float zMax = MaxDistAlong(point, frame.z, bounds);
-    //if (zMax <= 0) return 0.0f;
-    //
-    //const Float xMin = AbsMinDistAlong(point, frame.x, bounds);
-    //const Float yMin = AbsMinDistAlong(point, frame.y, bounds);
-    //const Float hyp = SafeSqrt(Sqr(xMin) + Sqr(yMin) + Sqr(zMax));
-    //return zMax / hyp;
     Vector3f localX, localY;
     Bounds3f localBounds;
     for (int i = 0; i < 8; ++i) {
@@ -537,9 +529,9 @@ inline Float ComputeGeometricBound(const LightcutsTreeNode* node, const Bounds3f
         const Float boundCos = GeomTermBoundInFrame(point, coneFrame, refBounds);
         
         const Float halfAngle = std::acos(node->compactLightBounds.CosTheta_o());
-        const Float maxCos = std::max((Float)0, std::cos(std::max((Float)0, std::acos(boundCos) - halfAngle)));
+        const Float maxCos = std::max(Float(0), std::cos(std::max((Float)0, std::acos(boundCos) - halfAngle)));
     
-        G *= std::abs(maxCos);
+        G *= maxCos;
     }
 
     return G;
