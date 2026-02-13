@@ -161,6 +161,42 @@ PBRT_CPU_GPU Float LightBounds::Importance(Point3f p, Normal3f n) const {
     return importance;
 }
 
+std::string SphericalLightBounds::ToString() const {
+    return StringPrintf("[ SphericalLightBounds center: %s radius: %s phi: %f ]",
+                        center, radius, phi);
+}
+
+PBRT_CPU_GPU Float SphericalLightBounds::Importance(Point3f p, Normal3f n) const
+{
+    const Float d2 = DistanceSquared(center, p);
+    const Float radius2 = radius * radius;
+
+    //  Case where p is inside the cluster bounds to avoid singularities
+    if (d2 <= radius2) {
+        return std::sqrt(phi) / radius2;
+    }
+
+    const Float d = std::sqrt(d2);
+
+    // Theta_c (angle subtended by sphere)
+    const Float sinTheta_c = radius / d;
+    const Float theta_c = std::asin(std::min(sinTheta_c, Float(1)));
+
+    // Theta_n (angle between normal and vector to center)
+    Vector3f w = (center - p) / d;
+    Float cosTheta_n = Dot(n, w);
+    Float theta_n = std::acos(Clamp(cosTheta_n, -1, 1));
+
+    // Conservative irradiance estimation I(center, p)
+    // I(center, p) = cos(max(0, theta_n - theta_c))
+    Float angleTerm = std::max(Float(0), theta_n - theta_c);
+    Float I_cp = std::cos(angleTerm);
+
+    // h(center) - heuristic
+    Float distTerm = std::max(radius, d);
+    return (I_cp * std::sqrt(phi)) / distTerm * distTerm;
+}
+
 // PointLight Method Definitions
 SampledSpectrum PointLight::Phi(SampledWavelengths lambda) const {
     return 4 * Pi * scale * I->Sample(lambda);
