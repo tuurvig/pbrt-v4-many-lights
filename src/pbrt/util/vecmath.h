@@ -1580,24 +1580,32 @@ PBRT_CPU_GPU inline Bounds3<T> Expand(const Bounds3<T> &b, U delta) {
 }
 
 template <typename T>
-PBRT_CPU_GPU inline Vector3f IntersectOrAdjust(const Bounds3<T>& bounds, Point3f origin, Vector3f direction) {
+PBRT_CPU_GPU inline bool IntersectOrAdjust(Vector3f& out, const Bounds3<T>& bounds, Point3f origin, Vector3f direction) {
     if (bounds.IntersectP(origin, direction)) {
-        return direction;
+        out = direction;
+        return true;
     }
 
-    float bestDot = -Infinity;
-    Vector3f bestDir;
+    Float maxDot = -1;
+    bool foundValid = false;
     for (int i = 0; i < 8; ++i) {
-        const Vector3f toCorner = Normalize(bounds.Corner(i) - origin);
-        float d = Dot(toCorner, direction);
+        Vector3f toCorner = bounds.Corner(i) - origin;
+        
+        Float len2 = LengthSquared(toCorner);
+        if (len2 <= MachineEpsilon) continue;
 
-        if (d > bestDot) {
-            bestDot = d;
-            bestDir = toCorner;
+        toCorner /= std::sqrt(len2); // Normalize
+        
+        Float d = Dot(toCorner, direction);
+
+        if (d > maxDot) {
+            maxDot = d;
+            out = toCorner;
+            foundValid = true;
         }
     }
 
-    return bestDir;
+    return foundValid;
 }
 
 template <typename T>

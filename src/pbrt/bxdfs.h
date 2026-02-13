@@ -451,8 +451,10 @@ class ConductorBxDF {
             return Float(0);
         }
         
-        Vector3f wrGlobal = Reflect(woGlobal, localFrame.z);
-        Vector3f wiGlobal = IntersectOrAdjust(wiBoundsGlobal, p, wrGlobal);
+        Vector3f wiGlobal = Reflect(woGlobal, localFrame.z);
+        if (!IntersectOrAdjust(wiGlobal, wiBoundsGlobal, p, wiGlobal)) {
+            return 0;
+        }
         Vector3f wi = localFrame.ToLocal(wiGlobal);
         
         return f(wo, wi, mode).MaxComponentValue();
@@ -1286,7 +1288,10 @@ class NormalizedFresnelBxDF {
 
         // Find optimal wi closest to the normal (0, 0, 1)
         // Fr is minimized (and f maximized) at normal incidence
-        Vector3f wiGlobal = IntersectOrAdjust(wiBoundsGlobal, p, localFrame.z);
+        Vector3f wiGlobal;
+        if (!IntersectOrAdjust(wiGlobal, wiBoundsGlobal, p, localFrame.z)) {
+            return 0;
+        }
         Vector3f wiMax = localFrame.ToLocal(wiGlobal);
 
         Float maxCosTheta = AbsCosTheta(wiMax);
