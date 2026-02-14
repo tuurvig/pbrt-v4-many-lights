@@ -23,7 +23,7 @@ namespace pbrt {
 // Hierarchic Stochastic Lightcuts Lightsampler Definition
 class HSLCLightSampler {
   public:
-    // LightcutsLightSampler Public Methods
+    // HierarchicLightcutsLightSampler Public Methods
     HSLCLightSampler(pstd::span<const Light> lights, Allocator alloc);
 
     PBRT_CPU_GPU
@@ -182,6 +182,7 @@ class HSLCLightSampler {
     std::string ToString() const;
 
   private:
+    // HierarchicLightcutsLightSampler Private Methods
 #ifdef PBRT_BUILD_GPU_RENDERER
     bool buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights, Float& u);
 #endif
@@ -236,7 +237,7 @@ class HSLCLightSampler {
         return true;
     }
 
-    // LightcutsLightSampler Private Members
+    // HierarchicLightcutsLightSampler Private Members
     LightcutsTree m_tree;
     pstd::vector<Light> m_infiniteLights;
     HashMap<Light, uint32_t> m_lightToBitTrail;
@@ -244,4 +245,4 @@ class HSLCLightSampler {
 
 }
 
-#endif // PBRT_SLC_LIGHTSAMPLER_H
+#endif // PBRT_HSLC_LIGHTSAMPLER_H

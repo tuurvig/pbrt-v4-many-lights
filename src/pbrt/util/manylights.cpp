@@ -18,6 +18,11 @@ std::string LightcutsTreeNode::ToString() const {
         "[ LightcutsTreeNode lightBounds: %s representantIndex: %d childOrLightIndex: %d isLeaf: %d ]", compactLightBounds, representantIdx, childOrLightIndex, isLeaf);
 }
 
+std::string ResampledTreeNode::ToString() const {
+    return StringPrintf(
+        "[ ResampledTreeNode sphericalLightBounds: %s childOrLightIndex: %d isLeaf: %d ]", bounds, childOrLightIndex, isLeaf);
+}
+
 std::string CompactLightBounds::ToString() const {
     return StringPrintf(
         "[ CompactLightBounds qb: [ [ %u %u %u ] [ %u %u %u ] ] w: %s (%s) phiOrI: %f "
@@ -33,6 +38,17 @@ std::string CompactLightBounds::ToString(const Bounds3f &allBounds) const {
         Bounds(allBounds), qb[0][0], qb[0][1], qb[0][2], qb[1][0], qb[1][1], qb[1][2], w,
         Vector3f(w), phiOrI, qCosTheta_o, CosTheta_o(), qCosTheta_e, CosTheta_e(), twoSided);
 }
+
+std::string CompactLight::ToString() const {
+        return StringPrintf(
+        "[ CompactLight compactLightBounds: %s light: %d ]", bounds, light);
+}
+
+LightcutsTree::LightcutsTree(Allocator alloc) 
+    : lights(alloc), nodes(alloc) {}
+
+ResampledTree::ResampledTree(Allocator alloc)
+    : leaves(alloc), innerNodes(alloc) {}
 
 int LightHierarchyNodeEmitter::ReserveInterior() {
     int index = static_cast<int>(nodes->size());
@@ -118,6 +134,30 @@ LightcutsBuildResult SLCNodeEmitter::FinalizeInterior(int reservationIndex, cons
     
     tree->nodes[reservationIndex] = LightcutsTreeNode::MakeInterior(right.nodeIdx, successorIdx, cb);
     return LightcutsBuildResult(lb, successorIdx, reservationIndex);
+}
+
+int RHTNodeEmitter::ReserveInterior() {
+    int index = static_cast<int>(tree->innerNodes.size());
+    tree->innerNodes.emplace_back();
+    return index;
+}
+
+RHTBuildContainer RHTNodeEmitter::EmitLeaf(const RHTBuildContainer& item, uint32_t bitTrail) {
+    int nodeIndex = static_cast<int>(tree->innerNodes.size());
+    const CompactLight& compactLight(tree->leaves[item.index]);
+
+    tree->innerNodes.push_back(ResampledTreeNode::MakeLeaf(item.index, item.bounds));
+    lightToBitTrail->Insert(compactLight.light, bitTrail);
+    return {item.bounds, nodeIndex};
+}
+
+RHTBuildContainer RHTNodeEmitter::FinalizeInterior(int reservationIndex, const RHTBuildContainer& left, const RHTBuildContainer& right, Float& u) {    
+    Float intensities[2] = {left.bounds.Phi(), right.bounds.Phi()};
+
+    SphericalLightBounds sb = Union(left.bounds, right.bounds);
+    
+    tree->innerNodes[reservationIndex] = ResampledTreeNode::MakeInterior(right.index, sb);
+    return RHTBuildContainer(sb, reservationIndex);
 }
 
 }

@@ -130,19 +130,6 @@ inline float BitsToFloat(uint32_t ui) {
 }
 
 PBRT_CPU_GPU
-inline uint32_t MapNormalizedFloatToUint(Float f) {
-    constexpr Float floatUintMax = 0x1p32f;
-    if (f >= (Float)1) {
-        return std::numeric_limits<uint32_t>::max();
-    }
-#ifdef PBRT_IS_GPU_CODE
-    return __float2uint_rd(f * floatUintMax); 
-#else
-    return static_cast<uint32_t>(f * floatUintMax);
-#endif
-}
-
-PBRT_CPU_GPU
 inline int Exponent(float v) {
     return (FloatToBits(v) >> 23) - 127;
 }
@@ -310,6 +297,14 @@ inline PBRT_CPU_GPU Float SqrtRoundDown(Float a) {
 #endif
 #else  // CPU
     return std::max<Float>(0, NextFloatDown(std::sqrt(a)));
+#endif
+}
+
+inline PBRT_CPU_GPU Float InvSqrtRoot(Float a) {
+#ifdef PBRT_IS_GPU_CODE
+    return __frsqrt_rn(a);
+#else // CPU
+    return 1 / std::sqrt(a);
 #endif
 }
 
