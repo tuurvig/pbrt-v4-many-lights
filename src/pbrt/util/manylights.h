@@ -177,9 +177,8 @@ struct alignas(32) LightBVHNode {
     }
 
     PBRT_CPU_GPU
-    static LightBVHNode MakeInterior(unsigned int child1Index,
-                                     const CompactLightBounds &cb) {
-        return LightBVHNode{cb, {child1Index, 0}};
+    static LightBVHNode MakeInterior(unsigned int childIndex, const CompactLightBounds &cb) {
+        return LightBVHNode{cb, {childIndex, 0}};
     }
 
     //PBRT_CPU_GPU
@@ -215,6 +214,27 @@ struct alignas(32) LightcutsTreeNode {
         uint32_t childOrLightIndex : 31;
         uint32_t isLeaf : 1;
     };
+};
+
+struct alignas(32) ResampledTreeNode {
+    ResampledTreeNode() = default;
+
+    PBRT_CPU_GPU
+    static ResampledTreeNode MakeLeaf(unsigned int leafIdx, const SphericalLightBounds &sb) {
+        return ResampledTreeNode{sb, leafIdx, 1};
+    }
+
+    PBRT_CPU_GPU
+    static ResampledTreeNode MakeInterior(unsigned int childIndex, const SphericalLightBounds &sb) {
+        return ResampledTreeNode{sb, childIndex, 0};
+    }
+
+    std::string ToString() const;
+
+    // ResampledTreeNode Public Members
+    SphericalLightBounds bounds; // 20 bytes
+    uint32_t childOrLightIndex; // 4 bytes
+    uint32_t isLeaf; // 4 bytes
 };
 
 /// Cost functions and evaluators
@@ -272,6 +292,19 @@ struct SAOHCostEvaluator {
     }
 };
 
+// cost from Resampled Tree 2024 paper Conty, et al. 
+// simplified version of CostSAOH without orientation
+PBRT_CPU_GPU
+inline Float CostEnergyWeightedSAH(const SphericalLightBounds& b) {
+    return b.Phi() * b.SurfaceArea();
+};
+
+struct SphericalBoundsCostEvaluator {
+    PBRT_CPU_GPU Float operator()(const SphericalLightBounds &bounds) const {
+        return CostEnergyWeightedSAH(bounds);
+    }
+};
+
 /// Light Hierarchy Build results
 //////////////////////////////////////////////////////////
 
@@ -303,6 +336,14 @@ struct LightcutsBuildContainer : public BuildContainerInterface<LightBounds> {
     uint32_t index;
 };
 
+struct RHTBuildContainer : public BuildContainerInterface<SphericalLightBounds> {
+    PBRT_CPU_GPU
+    RHTBuildContainer(const SphericalLightBounds& bounds, int index)
+        : BuildContainerInterface<SphericalLightBounds>(bounds), index(index) {}
+
+    int index;
+};
+
 // Intermediate BVH node that stores spatial bounds and child references.
 // Leaves store the light index in both child slots and use kInvalidIndex to
 // signal that no further subdivision is needed.
@@ -318,6 +359,21 @@ struct LightTreeConstructionNodeGPU : public BuildContainerInterface<LightBounds
     uint32_t right; // leaf => lightIdx
 };
 
+struct alignas(8) LightLocation {
+    uint32_t treeIdx;
+    uint32_t identifier;
+};
+
+struct alignas(32) CompactLight {
+    CompactLight(const LightBounds &lb, Float phiOrI, const Bounds3f &allb, Light light)
+        : bounds(lb, phiOrI, allb), light(light) {}
+
+    std::string ToString() const;
+
+    CompactLightBounds bounds;
+    Light light;
+};
+
 struct LightcutsTree {
     LightcutsTree(Allocator alloc);
     pstd::vector<Light> lights;
@@ -325,10 +381,14 @@ struct LightcutsTree {
     Bounds3f allLightBounds;
 };
 
-struct LightLocation {
-    uint32_t treeIdx;
-    uint32_t identifier;
+struct ResampledTree {
+    ResampledTree(Allocator alloc);
+    pstd::vector<CompactLight> leaves;
+    pstd::vector<ResampledTreeNode> innerNodes;
+    Bounds3f allLightBounds;
 };
+
+
 
 /// Light Hierarchy Node Emitters
 //////////////////////////////////////////////////////////
@@ -372,6 +432,18 @@ struct SLCNodeEmitter : public NodeEmitterInterface<LightcutsBuildContainer, Lig
     virtual LightcutsBuildResult FinalizeInterior(int reservationIndex, const LightcutsBuildResult& left, const LightcutsBuildResult& right, Float& u) override;
 };
 
+struct RHTNodeEmitter : public NodeEmitterInterface<RHTBuildContainer, RHTBuildContainer> {
+    RHTNodeEmitter(ResampledTree& tree, HashMap<Light, uint32_t>& lightToBitTrail)
+        : tree(&tree), lightToBitTrail(&lightToBitTrail) {}
+
+    ResampledTree* tree;
+    HashMap<Light, uint32_t>* lightToBitTrail;
+
+    virtual int ReserveInterior() override;
+    virtual RHTBuildContainer EmitLeaf(const RHTBuildContainer& item, uint32_t bitTrail) override;
+    virtual RHTBuildContainer FinalizeInterior(int reservationIndex, const RHTBuildContainer& left, const RHTBuildContainer& right, Float& u) override;
+};
+
 /// Light Hierarchy Node Converters
 //////////////////////////////////////////////////////////
 
@@ -390,23 +462,34 @@ struct TreeLeafGPUAdapter : public TreeLeafAdapterInterface<LightTreeConstructio
 
 struct GPUToLightBVHLeaf : public TreeLeafGPUAdapter<LightBounds, LightBVHBuildContainer> {
     using BaseClass = TreeLeafGPUAdapter<LightBounds, LightBVHBuildContainer>;
-    GPUToLightBVHLeaf(std::vector<LightTreeConstructionNodeGPU<LightBounds>>& nodes) : BaseClass(nodes) {};
+    GPUToLightBVHLeaf(std::vector<LightTreeConstructionNodeGPU<LightBounds>>& nodes)
+        : BaseClass(nodes) {};
 
-    virtual LightBVHBuildContainer Convert(const LightTreeConstructionNodeGPU<LightBounds>& node) const override {
+    virtual inline LightBVHBuildContainer Convert(const LightTreeConstructionNodeGPU<LightBounds>& node) const override {
         return LightBVHBuildContainer(node.bounds, node.right);
     }
 };
 
 struct GPUToLightcutsLeaf : public TreeLeafGPUAdapter<LightBounds, LightcutsBuildContainer> {
     using BaseClass = TreeLeafGPUAdapter<LightBounds, LightcutsBuildContainer>;
-    GPUToLightcutsLeaf(std::vector<LightTreeConstructionNodeGPU<LightBounds>>& nodes, std::vector<LightcutsBuildContainer>& lights) :
-        BaseClass(nodes), lights(&lights) {};
+    GPUToLightcutsLeaf(std::vector<LightTreeConstructionNodeGPU<LightBounds>>& nodes, std::vector<LightcutsBuildContainer>& lights)
+        : BaseClass(nodes), lights(&lights) {};
 
-    virtual LightcutsBuildContainer Convert(const LightTreeConstructionNodeGPU<LightBounds>& node) const override {
+    virtual inline LightcutsBuildContainer Convert(const LightTreeConstructionNodeGPU<LightBounds>& node) const override {
         return LightcutsBuildContainer(node.bounds, lights->at(node.right).light);
     }
 
     std::vector<LightcutsBuildContainer>* lights;
+};
+
+struct GPUToRHTLeaf : public TreeLeafGPUAdapter<SphericalLightBounds, RHTBuildContainer> {
+    using BaseClass = TreeLeafGPUAdapter<SphericalLightBounds, RHTBuildContainer>;
+    GPUToRHTLeaf(std::vector<LightTreeConstructionNodeGPU<SphericalLightBounds>>& nodes, std::vector<RHTBuildContainer>& lights)
+        : BaseClass(nodes) {};
+
+    virtual inline RHTBuildContainer Convert(const LightTreeConstructionNodeGPU<SphericalLightBounds>& node) const override {
+        return RHTBuildContainer(node.bounds, node.right);
+    }
 };
 
 /// Infinite Light Sample functions
@@ -443,9 +526,7 @@ inline Float InfiniteLightSimplePMF(const pstd::vector<Light>& infiniteLights, s
 //////////////////////////////////////////////////////////
 
 PBRT_CPU_GPU
-inline Float ComputeClusterEstimate(const BSDF* bsdf, BxDFFlags flags, Point3f lightPos, Point3f point, Normal3f n, Vector3f wo, Float phi) {
-    Float I = phi;
-
+inline Float ComputeClusterEstimate(const BSDF* bsdf, BxDFFlags flags, Point3f lightPos, Point3f point, Normal3f n, Vector3f wo, Float I) {
     Float minDistSqr = DistanceSquared(point, lightPos);
     Float clampedDistSqr = std::max(minDistSqr, 1e-6f);
     Float G = 1.0f / clampedDistSqr;

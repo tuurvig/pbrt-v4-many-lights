@@ -79,10 +79,11 @@ typename NodeEmitter::ResultType BuildLightTree(std::vector<BuildContainer>& ite
     }
 
     // 2. Compute bounds for split heuristics
-    Bounds3f parentBounds, centroidBounds;
+    Bounds3f centroidBounds;
+    typename BuildContainer::LightBoundsType::BoundsType parentBounds;
     for (int i = start; i < end; ++i) {
         centroidBounds = Union(centroidBounds, items[i].bounds.Centroid());
-        parentBounds = Union(parentBounds, items[i].bounds.bounds);
+        parentBounds = Union(parentBounds, items[i].bounds.Bounds());
     }
 
     // 3. Find Best Split

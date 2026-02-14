@@ -106,12 +106,17 @@ class LightBounds {
   public:
     // LightBounds Public Methods
     LightBounds() = default;
+    using BoundsType = Bounds3f;
+
     PBRT_CPU_GPU
     LightBounds(const Bounds3f &b, Vector3f w, Float phi, Float I, Float cosTheta_o,
                 Float cosTheta_e, bool twoSided);
 
     PBRT_CPU_GPU
-    Point3f Centroid() const { return (bounds.pMin + bounds.pMax) / 2; }
+    inline Point3f Centroid() const { return (bounds.pMin + bounds.pMax) / 2; }
+
+    PBRT_CPU_GPU
+    inline BoundsType Bounds() const { return bounds; }
 
     PBRT_CPU_GPU
     Float Importance(Point3f p, Normal3f n) const;
@@ -160,6 +165,7 @@ inline PBRT_CPU_GPU LightBounds Union(const LightBounds &a, const LightBounds &b
 class SphericalLightBounds {
   public:
       SphericalLightBounds() = default;
+      using BoundsType = SphericalLightBounds;
 
       PBRT_CPU_GPU
       SphericalLightBounds(const Bounds3f &b, Float phi) : 
@@ -172,16 +178,32 @@ class SphericalLightBounds {
           center(c), radius(r), phi(phi) {}
 
       PBRT_CPU_GPU
-      Point3f Centroid() const { return center; }
+      inline Point3f Centroid() const { return center; }
 
       PBRT_CPU_GPU
-      Float Radius() const { return radius; }
+      inline Float Radius() const { return radius; }
+
+      PBRT_CPU_GPU Vector3f Diagonal() const {
+          const Point3f pMin(center.x - radius, center.y - radius, center.z - radius);
+          const Point3f pMax(center.x + radius, center.y + radius, center.z + radius);
+          return pMax - pMin;
+      } 
+      
+      PBRT_CPU_GPU
+      inline Float Phi() const { return phi; }
 
       PBRT_CPU_GPU
-      Float Phi() const { return phi; }
+      inline BoundsType Bounds() const {
+          return *this;
+      };
 
       PBRT_CPU_GPU
       Float Importance(Point3f p, Normal3f n) const;
+
+      PBRT_CPU_GPU
+      inline Float SurfaceArea() const {
+          return 4 * Pi * radius * radius;
+      }
 
       std::string ToString() const;
   private:

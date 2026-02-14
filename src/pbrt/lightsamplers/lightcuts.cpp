@@ -95,9 +95,6 @@ STAT_MEMORY_COUNTER("Memory/Lightcuts LightTree", lightCutsLightTreeBytes);
 constexpr uint32_t infiniteLightsIndex = 2;
 constexpr uint32_t otherLightsIndex = 3;
 
-LightcutsTree::LightcutsTree(Allocator alloc) 
-    : lights(alloc), nodes(alloc) {}
-
 LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, Allocator alloc, Float threshold) :
     m_pointTree(alloc), m_spotTree(alloc), m_otherLights(alloc), m_infiniteLights(alloc),
     m_lightToLocation(alloc), m_otherLightIntensities(0), m_threshold(threshold) {

@@ -40,6 +40,7 @@ class BVHLightSampler;
 class LightcutsLightSampler;
 class SLCLightSampler;
 class HSLCLightSampler;
+class RHTLightSampler;
 
 // LightSampler Definition
 class LightSampler : public TaggedPointer<//UniformLightSampler,
@@ -48,7 +49,9 @@ class LightSampler : public TaggedPointer<//UniformLightSampler,
                                           BVHLightSampler,
                                           //LightcutsLightSampler> {
                                           //SLCLightSampler,
-                                          HSLCLightSampler> {
+                                          //SLCLightSampler,
+                                          HSLCLightSampler,
+                                          RHTLightSampler> {
   public:
     // LightSampler Interface
     using TaggedPointer::TaggedPointer;
