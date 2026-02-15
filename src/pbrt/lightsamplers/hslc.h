@@ -131,7 +131,7 @@ class HSLCLightSampler {
 
             const int child = bitTrail & 1;
             if (weights[child] == 0) {
-                DCHECK_GT(ci[child], 0);
+                DCHECK_GT(weights[child], 0);
                 return 0;
             }
 
