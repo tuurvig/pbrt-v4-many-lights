@@ -28,6 +28,23 @@ class RHTLightSampler {
 
     PBRT_CPU_GPU
     pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t seed, Float u) const {
+        Float pmf = 1;
+        if (!m_infiniteLights.empty()) {
+            pstd::optional<SampledLight> infiniteLightSample = InfiniteLightSimpleSample(m_infiniteLights, m_tree.leaves.size(), pmf, u);
+            if (infiniteLightSample) {
+                return infiniteLightSample;
+            }
+        }
+        
+        if (m_tree.innerNodes.empty())
+            return {};
+
+        // Declare common variables for light BVH traversal
+        Point3f p = ctx.p();
+        Normal3f n = ctx.ns;
+
+        int nodeIndex = 0;
+
         return Sample(u);
     }
 

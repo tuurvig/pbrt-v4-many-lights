@@ -49,7 +49,6 @@ class LightSampler : public TaggedPointer<//UniformLightSampler,
                                           BVHLightSampler,
                                           //LightcutsLightSampler> {
                                           //SLCLightSampler,
-                                          //SLCLightSampler,
                                           HSLCLightSampler,
                                           RHTLightSampler> {
   public:
