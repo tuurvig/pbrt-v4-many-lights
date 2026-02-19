@@ -20,7 +20,7 @@
         "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
         "PBRT_GPU_SHADER_MODEL": "sm_89",
         //"CMAKE_CUDA_COMPILER": "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.8/bin/nvcc.exe",
-        "PBRT_OPTIX7_PATH": "C:/ProgramData/NVIDIA Corporation/OptiX SDK 7.4.0",
+        "PBRT_OPTIX7_PATH": "C:/ProgramData/NVIDIA Corporation/OptiX SDK 7.7.0",
         "VCPKG_TARGET_TRIPLET": "x64-windows",
         "VCPKG_PLATFORM_TOOLSET": "v142"
       }
