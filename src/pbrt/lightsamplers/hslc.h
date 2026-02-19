@@ -30,7 +30,7 @@ class HSLCLightSampler {
     pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t seed, Float u) const {
         Float pmf = 1;
         if (!m_infiniteLights.empty()) {
-            pstd::optional<SampledLight> infiniteLightSample = InfiniteLightSimpleSample(m_infiniteLights, m_tree.nodes.size(), pmf, u);
+            pstd::optional<SampledLight> infiniteLightSample = InfiniteLightSimpleSample(m_infiniteLights, m_tree.lights.size(), pmf, u);
             if (infiniteLightSample) {
                 return infiniteLightSample;
             }
@@ -42,10 +42,10 @@ class HSLCLightSampler {
 
         Point3f p = ctx.p();
         Vector3f wo = ctx.wo;
-        Normal3f n = ctx.n;
+        Normal3f n = ctx.ns;
 
         BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
-        Frame shadingFrame(bsdf ? bsdf->shadingFrame : Frame::FromZ(ctx.n));
+        Frame shadingFrame(bsdf ? bsdf->shadingFrame : Frame::FromZ(ctx.ns));
 
         int nodeIndex = 0;
         const LightcutsTreeNode* node = &m_tree.nodes[nodeIndex];
@@ -107,7 +107,7 @@ class HSLCLightSampler {
         int nodeIndex = 0;
 
         BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
-        Frame shadingFrame(bsdf ? bsdf->shadingFrame : Frame::FromZ(ctx.n));
+        Frame shadingFrame(bsdf ? bsdf->shadingFrame : Frame::FromZ(ctx.ns));
 
         const LightcutsTreeNode *node = &m_tree.nodes[nodeIndex];
 
@@ -145,7 +145,7 @@ class HSLCLightSampler {
         }
 
         DCHECK_EQ(light, m_tree.lights[node->childOrLightIndex]);
-        return pmf;
+        return LightPMF(pmf);
     }
 
     PBRT_CPU_GPU
@@ -165,18 +165,19 @@ class HSLCLightSampler {
 
     PBRT_CPU_GPU
     LightPMF PMF(Light light) const {
-        // Compute infinite light sampling probability _pInfinite_
-        Float pInfinite = InfiniteLightSimplePMF(m_infiniteLights, m_tree.lights.size());
-        
         // Handle infinite _light_ PMF
         if (!m_lightToBitTrail.HasKey(light))
-            return pInfinite;
+            return InfiniteLightSimplePMF(m_infiniteLights, m_tree.nodes.size());;
 
+        // Compute infinite light sampling probability _pInfinite_
+        Float pInfinite = Float(m_infiniteLights.size()) /
+                          Float(m_infiniteLights.size() + (m_tree.nodes.size() == 0 ? 0 : 1));
+        
         if (m_tree.lights.empty())
             return 0;
 
         Float pmf = 1 - pInfinite;
-        return pmf / m_tree.lights.size(); 
+        return LightPMF(pmf / m_tree.lights.size()); 
     }
 
     std::string ToString() const;
