@@ -49,6 +49,27 @@ class PowerLightSampler {
 
     PBRT_CPU_GPU
     LightPMF PMF(const LightSampleContext &/*ctx*/, const BSDF* /*bsdf*/, Light light) const { return PMF(light); }
+    
+    template <typename ScatterEval>
+    PBRT_CPU_GPU pstd::optional<SampledLd> SampleLd(const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const {
+        pstd::optional<SampledLight> sampledLight = Sample(u);
+        if (!sampledLight) {
+            return {};
+        }
+
+        Light light = sampledLight->light;
+        DCHECK(light && sampledLight->p != 0);
+        pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
+        if (!ls || !ls->L || ls->pdf == 0)
+            return {};
+
+        Float lightPDF = sampledLight->p * ls->pdf;
+        ls->L *= sampledLight->scale;
+        
+        Float scatterPDF = 0;
+        SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
+        return SampledLd(f_hat * ls->L, ls->pLight, lightPDF, scatterPDF);
+    }
 
     std::string ToString() const;
 

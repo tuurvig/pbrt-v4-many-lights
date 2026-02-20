@@ -151,41 +151,19 @@ void WavefrontPathIntegrator::SampleSubsurface(int wavefrontDepth) {
             // Direct lighting...
             if (IsNonSpecular(bsdf.Flags())) {
                 LightSampleContext ctx(intr.pi, intr.n, intr.ns, Vector3f(0, 0, 0));
-                pstd::optional<SampledLight> sampledLight =
-                    lightSampler.Sample(ctx, &bsdf, Hash(sampleIndex, w.pixelIndex), raySamples.direct.uc);
-                if (!sampledLight)
+
+                BSDFScatterEval<ConcreteBxDF> scatterEval(&bsdf, intr.ns);
+                pstd::optional<SampledLd> sLd =
+                    lightSampler.SampleLd(ctx, lambda, &bsdf, Hash(sampleIndex, w.pixelIndex),
+                                          raySamples.direct.uc, raySamples.direct.u, scatterEval);
+                if (!sLd) {
                     return;
-                Light light = sampledLight->light;
+                }
 
-                pstd::optional<LightLiSample> ls =
-                    light.SampleLi(ctx, raySamples.direct.u, lambda, true);
-                if (!ls || !ls->L || ls->pdf == 0)
-                    return;
+                SampledSpectrum r_l = r_u * sLd->lightPDF;
+                r_u *= sLd->scatterPDF;
 
-                ls->L *= sampledLight->scale;
-
-                Vector3f wi = ls->wi;
-                SampledSpectrum f = bsdf.f<ConcreteBxDF>(wo, wi);
-                if (!f)
-                    return;
-
-                SampledSpectrum beta = betap * f * AbsDot(wi, intr.ns);
-
-                PBRT_DBG(
-                    "depth %d beta %f %f %f %f f %f %f %f %f ls.L %f %f %f %f ls.pdf "
-                    "%f\n",
-                    w.depth, beta[0], beta[1], beta[2], beta[3], f[0], f[1], f[2], f[3],
-                    ls->L[0], ls->L[1], ls->L[2], ls->L[3], ls->pdf);
-
-                Float lightPDF = ls->pdf * sampledLight->p;
-                // This causes r_u to be zero for the shadow ray, so that
-                // part of MIS just becomes a no-op.
-                Float bsdfPDF =
-                    IsDeltaLight(light.Type()) ? 0.f : bsdf.PDF<ConcreteBxDF>(wo, wi);
-                SampledSpectrum r_l = r_u * lightPDF;
-                r_u *= bsdfPDF;
-
-                SampledSpectrum Ld = beta * ls->L;
+                SampledSpectrum Ld = betap * sLd->Ld;
 
                 PBRT_DBG("depth %d Ld %f %f %f %f "
                          "new beta %f %f %f %f beta/uni %f %f %f %f Ld/uni %f %f %f %f\n",
@@ -195,7 +173,7 @@ void WavefrontPathIntegrator::SampleSubsurface(int wavefrontDepth) {
                          SafeDiv(Ld, r_u)[0], SafeDiv(Ld, r_u)[1],
                          SafeDiv(Ld, r_u)[2], SafeDiv(Ld, r_u)[3]);
 
-                Ray ray = SpawnRayTo(intr.pi, intr.n, time, ls->pLight.pi, ls->pLight.n);
+                Ray ray = SpawnRayTo(intr.pi, intr.n, time, sLd->pLight.pi, sLd->pLight.n);
                 if (haveMedia)
                     // TODO: as above, always take outside here?
                     ray.medium = Dot(ray.d, intr.n) > 0 ? w.mediumInterface.outside
