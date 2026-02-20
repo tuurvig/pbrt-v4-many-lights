@@ -270,48 +270,23 @@ void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQue
                     ctx.pi = OffsetRayOrigin(ctx.pi, w.n, wo);
                 else if (IsTransmissive(flags) && IsReflective(flags))
                     ctx.pi = OffsetRayOrigin(ctx.pi, w.n, -wo);
-                pstd::optional<SampledLight> sampledLight =
-                    lightSampler.Sample(ctx, &bsdf, Hash(sampleIndex, w.pixelIndex), raySamples.direct.uc);
-                if (!sampledLight)
-                    return;
-                Light light = sampledLight->light;
 
-                // Sample light source and evaluate BSDF for direct lighting
-                pstd::optional<LightLiSample> ls =
-                    light.SampleLi(ctx, raySamples.direct.u, lambda, true);
-                if (!ls || !ls->L || ls->pdf == 0)
+                BSDFScatterEval<ConcreteBxDF> scatterEval(&bsdf, ns);
+                pstd::optional<SampledLd> sLd =
+                    lightSampler.SampleLd(ctx, lambda, &bsdf, Hash(sampleIndex, w.pixelIndex),
+                                          raySamples.direct.uc, raySamples.direct.u, scatterEval);
+                if (!sLd) {
                     return;
-
-                ls->L *= sampledLight->scale;
-
-                Vector3f wi = ls->wi;
-                SampledSpectrum f = bsdf.f<ConcreteBxDF>(wo, wi);
-                if (!f)
-                    return;
+                }
 
                 // Compute path throughput and path PDFs for light sample
-                SampledSpectrum beta = w.beta * f * AbsDot(wi, ns);
-                PBRT_DBG("w.beta %f %f %f %f f %f %f %f %f dot %f\n", w.beta[0],
-                         w.beta[1], w.beta[2], w.beta[3], f[0], f[1], f[2], f[3],
-                         AbsDot(wi, ns));
+                SampledSpectrum r_u = w.r_u * sLd->scatterPDF;
+                SampledSpectrum r_l = w.r_u * sLd->lightPDF;
 
-                PBRT_DBG(
-                    "me index %d depth %d beta %f %f %f %f f %f %f %f %f ls.L %f %f %f "
-                    "%f ls.pdf %f\n",
-                    w.pixelIndex, w.depth, beta[0], beta[1], beta[2], beta[3], f[0], f[1],
-                    f[2], f[3], ls->L[0], ls->L[1], ls->L[2], ls->L[3], ls->pdf);
-
-                Float lightPDF = ls->pdf * sampledLight->p;
-                // This causes r_u to be zero for the shadow ray, so that
-                // part of MIS just becomes a no-op.
-                Float bsdfPDF =
-                    IsDeltaLight(light.Type()) ? 0.f : bsdf.PDF<ConcreteBxDF>(wo, wi);
-                SampledSpectrum r_u = w.r_u * bsdfPDF;
-                SampledSpectrum r_l = w.r_u * lightPDF;
-
+                SampledSpectrum Ld = w.beta * sLd->Ld;
+                
                 // Enqueue shadow ray with tentative radiance contribution
-                SampledSpectrum Ld = beta * ls->L;
-                Ray ray = SpawnRayTo(w.pi, w.n, w.time, ls->pLight.pi, ls->pLight.n);
+                Ray ray = SpawnRayTo(w.pi, w.n, w.time, sLd->pLight.pi, sLd->pLight.n);
                 // Initialize _ray_ medium if media are present
                 if (haveMedia)
                     ray.medium = Dot(ray.d, w.n) > 0 ? w.mediumInterface.outside
@@ -320,14 +295,10 @@ void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQue
                 shadowRayQueue->Push(ShadowRayWorkItem{ray, 1 - ShadowEpsilon, lambda, Ld,
                                                        r_u, r_l, w.pixelIndex});
 
-                PBRT_DBG("w.index %d spawned shadow ray depth %d Ld %f %f %f %f "
-                         "new beta %f %f %f %f beta/uni %f %f %f %f Ld/uni %f %f %f %f\n",
-                         w.pixelIndex, w.depth, Ld[0], Ld[1], Ld[2], Ld[3], beta[0],
-                         beta[1], beta[2], beta[3], SafeDiv(beta, r_u)[0],
-                         SafeDiv(beta, r_u)[1], SafeDiv(beta, r_u)[2],
-                         SafeDiv(beta, r_u)[3], SafeDiv(Ld, r_u)[0],
-                         SafeDiv(Ld, r_u)[1], SafeDiv(Ld, r_u)[2],
-                         SafeDiv(Ld, r_u)[3]);
+                PBRT_DBG("w.index %d spawned shadow ray depth %d Ld/uni %f %f %f %f\n",
+                         w.pixelIndex, w.depth, Ld[0], Ld[1], Ld[2], Ld[3],
+                         SafeDiv(Ld, r_u)[0], SafeDiv(Ld, r_u)[1],
+                         SafeDiv(Ld, r_u)[2], SafeDiv(Ld, r_u)[3]);
             }
         });
 }

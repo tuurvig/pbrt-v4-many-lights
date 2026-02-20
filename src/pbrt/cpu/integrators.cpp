@@ -62,6 +62,39 @@ std::string RandomWalkIntegrator::ToString() const {
 // Integrator Method Definitions
 Integrator::~Integrator() {}
 
+struct BSDFScatterEval {
+    PBRT_CPU_GPU
+    BSDFScatterEval(const BSDF* bsdf, Normal3f ns) : bsdf(bsdf), ns(ns) {}
+    const BSDF* bsdf;
+    Normal3f ns;
+
+    PBRT_CPU_GPU
+    SampledSpectrum operator()(Float& scatterPDF, Vector3f wo, Vector3f wi, bool isDeltaLight) const {
+        scatterPDF = isDeltaLight ? 0.f : bsdf->PDF(wo, wi);
+        return bsdf->f(wo, wi) * AbsDot(wi, ns);
+    }
+};
+
+struct BSDFAndMediumScatterEval {
+    PBRT_CPU_GPU
+    BSDFAndMediumScatterEval(const BSDF* bsdf, PhaseFunction phase, Normal3f ns) : bsdf(bsdf), phase(phase), ns(ns) {}
+    const BSDF* bsdf;
+    PhaseFunction phase;
+    Normal3f ns;
+
+    PBRT_CPU_GPU
+    SampledSpectrum operator()(Float& scatterPDF, Vector3f wo, Vector3f wi, bool isDeltaLight) const {
+        if (bsdf) {
+            scatterPDF = isDeltaLight ? 0.f : bsdf->PDF(wo, wi);
+            return bsdf->f(wo, wi) * AbsDot(wi, ns);
+        } else {
+            scatterPDF = isDeltaLight ? 0.f : phase.PDF(wo, wi);
+            return SampledSpectrum(phase.p(wo, wi));
+        }
+        return SampledSpectrum(0);
+    }
+};
+
 // ImageTileIntegrator Method Definitions
 void ImageTileIntegrator::Render() {
     // Handle debugStart, if set
@@ -784,34 +817,21 @@ SampledSpectrum PathIntegrator::SampleLd(const SurfaceInteraction &intr, int sam
 
     // Choose a light source for the direct lighting calculation
     Float u = sampler.Get1D();
-    pstd::optional<SampledLight> sampledLight = lightSampler.Sample(ctx, bsdf, sampleIndex, u);
     Point2f uLight = sampler.Get2D();
-    if (!sampledLight)
+    BSDFScatterEval scatterEval(bsdf, intr.shading.n);
+    pstd::optional<SampledLd> sLd = lightSampler.SampleLd(ctx, lambda, bsdf, sampleIndex, u, uLight, scatterEval);
+    if (!sLd || !Unoccluded(intr, sLd->pLight)) {
         return {};
-
-    // Sample a point on the light source for direct lighting
-    Light light = sampledLight->light;
-    DCHECK(light && sampledLight->p > 0);
-    pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
-    if (!ls || !ls->L || ls->pdf == 0)
-        return {};
-
-    ls->L *= sampledLight->scale;
-
-    // Evaluate BSDF for light sample and check light visibility
-    Vector3f wo = intr.wo, wi = ls->wi;
-    SampledSpectrum f = bsdf->f(wo, wi) * AbsDot(wi, intr.shading.n);
-    if (!f || !Unoccluded(intr, ls->pLight))
-        return {};
-
-    // Return light's contribution to reflected radiance
-    Float p_l = sampledLight->p * ls->pdf;
-    if (IsDeltaLight(light.Type()))
-        return ls->L * f / p_l;
+    }
+    
+    Float p_b = sLd->scatterPDF;
+    Float p_l = sLd->lightPDF;
+    if (p_b == 0) {
+        return sLd->Ld / p_l;
+    }
     else {
-        Float p_b = bsdf->PDF(wo, wi);
         Float w_l = PowerHeuristic(1, p_l, 1, p_b);
-        return w_l * ls->L * f / p_l;
+        return w_l * sLd->Ld / p_l;
     }
 }
 
@@ -1317,41 +1337,19 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, int sampleI
 
     // Sample a light source using _lightSampler_
     Float u = sampler.Get1D();
-    pstd::optional<SampledLight> sampledLight = lightSampler.Sample(ctx, bsdf, sampleIndex, u);
     Point2f uLight = sampler.Get2D();
-    if (!sampledLight)
-        return SampledSpectrum(0.f);
-    Light light = sampledLight->light;
-    DCHECK(light && sampledLight->p != 0);
 
-    // Sample a point on the light source
-    pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
-    if (!ls || !ls->L || ls->pdf == 0)
-        return SampledSpectrum(0.f);
-    Float p_l = sampledLight->p * ls->pdf;
-    ls->L *= sampledLight->scale;
-
-    // Evaluate BSDF or phase function for light sample direction
-    Float scatterPDF;
-    SampledSpectrum f_hat;
-    Vector3f wo = intr.wo, wi = ls->wi;
-    if (bsdf) {
-        // Update _f_hat_ and _scatterPDF_ accounting for the BSDF
-        f_hat = bsdf->f(wo, wi) * AbsDot(wi, intr.AsSurface().shading.n);
-        scatterPDF = bsdf->PDF(wo, wi);
-
-    } else {
-        // Update _f_hat_ and _scatterPDF_ accounting for the phase function
-        CHECK(intr.IsMediumInteraction());
-        PhaseFunction phase = intr.AsMedium().phase;
-        f_hat = SampledSpectrum(phase.p(wo, wi));
-        scatterPDF = phase.PDF(wo, wi);
+    CHECK(intr.IsMediumInteraction());
+    PhaseFunction phase = intr.AsMedium().phase;
+    BSDFAndMediumScatterEval scatterEval(bsdf, phase, intr.AsSurface().shading.n);
+    pstd::optional<SampledLd> sLd = lightSampler.SampleLd(ctx, lambda, bsdf, sampleIndex, u, uLight, scatterEval);
+    
+    if (!sLd) {
+        return SampledSpectrum(0);
     }
-    if (!f_hat)
-        return SampledSpectrum(0.f);
 
     // Declare path state variables for ray to light source
-    Ray lightRay = intr.SpawnRayTo(ls->pLight);
+    Ray lightRay = intr.SpawnRayTo(sLd->pLight);
     SampledSpectrum T_ray(1.f), r_l(1.f), r_u(1.f);
     RNG rng(Hash(lightRay.o), Hash(lightRay.d));
 
@@ -1405,15 +1403,18 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, int sampleI
             return SampledSpectrum(0.f);
         if (!si)
             break;
-        lightRay = si->intr.SpawnRayTo(ls->pLight);
+        lightRay = si->intr.SpawnRayTo(sLd->pLight);
     }
+
     // Return path contribution function estimate for direct lighting
-    r_l *= r_p * p_l;
-    r_u *= r_p * scatterPDF;
-    if (IsDeltaLight(light.Type()))
-        return beta * f_hat * T_ray * ls->L / r_l.Average();
-    else
-        return beta * f_hat * T_ray * ls->L / (r_l + r_u).Average();
+    r_l *= r_p * sLd->lightPDF;
+    if (sLd->scatterPDF == 0) {
+        return beta * sLd->Ld * T_ray / r_l.Average();
+    }
+    else {
+        r_u *= r_p * sLd->scatterPDF;
+        return beta * sLd->Ld * T_ray / (r_l + r_u).Average();
+    }
 }
 
 std::string VolPathIntegrator::ToString() const {
@@ -3328,34 +3329,22 @@ SampledSpectrum SPPMIntegrator::SampleLd(const SurfaceInteraction &intr, int sam
 
     // Choose a light source for the direct lighting calculation
     Float u = sampler.Get1D();
-    pstd::optional<SampledLight> sampledLight = lightSampler.Sample(ctx, bsdf, sampleIndex, u);
     Point2f uLight = sampler.Get2D();
-    if (!sampledLight)
-        return {};
+    BSDFScatterEval scatterEval(&b, intr.shading.n);
+    pstd::optional<SampledLd> sLd = lightSampler.SampleLd(ctx, lambda, bsdf, sampleIndex, u, uLight, scatterEval);
 
-    // Sample a point on the light source for direct lighting
-    Light light = sampledLight->light;
-    DCHECK(light && sampledLight->p > 0);
-    pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
-    if (!ls || !ls->L || ls->pdf == 0)
+    if (!sLd || !Unoccluded(intr, sLd->pLight)) {
         return {};
-
-    ls->L *= sampledLight->scale;
-
-    // Evaluate BSDF for light sample and check light visibility
-    Vector3f wo = intr.wo, wi = ls->wi;
-    SampledSpectrum f = bsdf->f(wo, wi) * AbsDot(wi, intr.shading.n);
-    if (!f || !Unoccluded(intr, ls->pLight))
-        return {};
+    }
 
     // Return light's contribution to reflected radiance
-    Float p_l = sampledLight->p * ls->pdf;
-    if (IsDeltaLight(light.Type()))
-        return ls->L * f / p_l;
+    Float p_l = sLd->lightPDF;
+    Float p_b = sLd->scatterPDF;
+    if (p_b == 0)
+        return sLd->Ld / p_l;
     else {
-        Float p_b = bsdf->PDF(wo, wi);
         Float w_l = PowerHeuristic(1, p_l, 1, p_b);
-        return w_l * ls->L * f / p_l;
+        return w_l * sLd->Ld / p_l;
     }
 }
 

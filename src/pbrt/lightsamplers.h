@@ -53,6 +53,12 @@ PBRT_CPU_GPU inline LightPMF LightSampler::PMF(Light light) const {
     return Dispatch(pdf);
 }
 
+template <typename ScatterEval>
+PBRT_CPU_GPU inline pstd::optional<SampledLd> LightSampler::SampleLd(const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const {
+    auto pdf = [&](auto ptr) { return ptr->SampleLd(ctx, lambda, bsdf, seed, u, uLight, scatterEval); };
+    return Dispatch(pdf);
+}
+
 }  // namespace pbrt
 
 #endif  // PBRT_LIGHTSAMPLERS_H

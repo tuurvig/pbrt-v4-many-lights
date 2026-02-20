@@ -272,46 +272,32 @@ void WavefrontPathIntegrator::SampleMediumScattering(int wavefrontDepth) {
             RaySamples raySamples = pixelSampleState.samples[w.pixelIndex];
             Vector3f wo = w.wo;
 
-            // Sample direct lighting at medium scattering event.  First,
-            // choose a light source.
+            // Sample direct lighting at medium scattering event.
             LightSampleContext ctx(Point3fi(w.p), Normal3f(0, 0, 0), Normal3f(0, 0, 0), w.wo);
-            pstd::optional<SampledLight> sampledLight =
-                lightSampler.Sample(ctx, nullptr, Hash(sampleIndex, w.pixelIndex), raySamples.direct.uc);
+            PhaseFunction phaseFuncPtr(w.phase);
+            MediumScatterEval scatterEval(phaseFuncPtr);
+            pstd::optional<SampledLd> sLd = lightSampler.SampleLd(ctx, w.lambda, nullptr, Hash(sampleIndex, w.pixelIndex), raySamples.direct.uc, raySamples.direct.u, scatterEval);
 
-            if (sampledLight) {
-                Light light = sampledLight->light;
-                // And now sample a point on the light.
-                pstd::optional<LightLiSample> ls =
-                    light.SampleLi(ctx, raySamples.direct.u, w.lambda, true);
-                if (ls && ls->L && ls->pdf > 0) {
-                    Vector3f wi = ls->wi;
-                    SampledSpectrum beta = w.beta * w.phase->p(wo, wi);
+            if (sLd) {
+                SampledSpectrum Ld = w.beta * sLd->Ld;
+                
+                // Compute PDFs for direct lighting MIS calculation.
+                SampledSpectrum r_u = w.r_u * sLd->scatterPDF;
+                SampledSpectrum r_l = w.r_u * sLd->lightPDF;
 
-                    PBRT_DBG("Phase phase beta %f %f %f %f\n", beta[0], beta[1], beta[2],
-                             beta[3]);
+                Ray ray(w.p, sLd->pLight.p() - w.p, w.time, w.medium);
+                
+                // Enqueue shadow ray
+                shadowRayQueue->Push(ShadowRayWorkItem{ray, 1 - ShadowEpsilon,
+                                                       w.lambda, Ld, r_u, r_l,
+                                                       w.pixelIndex});
 
-                    // Compute PDFs for direct lighting MIS calculation.
-                    Float lightPDF = ls->pdf * sampledLight->p;
-                    Float phasePDF =
-                        IsDeltaLight(light.Type()) ? 0.f : w.phase->PDF(wo, wi);
-                    SampledSpectrum r_u = w.r_u * phasePDF;
-                    SampledSpectrum r_l = w.r_u * lightPDF;
-
-                    SampledSpectrum Ld = beta * ls->L;
-                    Ray ray(w.p, ls->pLight.p() - w.p, w.time, w.medium);
-
-                    // Enqueue shadow ray
-                    shadowRayQueue->Push(ShadowRayWorkItem{ray, 1 - ShadowEpsilon,
-                                                           w.lambda, Ld, r_u, r_l,
-                                                           w.pixelIndex});
-
-                    PBRT_DBG("Enqueued medium shadow ray depth %d "
-                             "Ld %f %f %f %f r_u %f %f %f %f "
-                             "r_l %f %f %f %f pixel index %d\n",
-                             w.depth, Ld[0], Ld[1], Ld[2], Ld[3], r_u[0], r_u[1],
-                             r_u[2], r_u[3], r_l[0], r_l[1], r_l[2],
-                             r_l[3], w.pixelIndex);
-                }
+                PBRT_DBG("Enqueued medium shadow ray depth %d "
+                         "Ld %f %f %f %f r_u %f %f %f %f "
+                         "r_l %f %f %f %f pixel index %d\n",
+                         w.depth, Ld[0], Ld[1], Ld[2], Ld[3], r_u[0], r_u[1],
+                         r_u[2], r_u[3], r_l[0], r_l[1], r_l[2],
+                         r_l[3], w.pixelIndex);
             }
 
             // Sample indirect lighting.

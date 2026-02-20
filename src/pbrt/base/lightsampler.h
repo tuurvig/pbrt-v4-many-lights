@@ -6,6 +6,7 @@
 #define PBRT_BASE_LIGHTSAMPLER_H
 
 #include <pbrt/pbrt.h>
+#include <pbrt/interaction.h>
 
 #include <pbrt/util/taggedptr.h>
 
@@ -30,6 +31,16 @@ struct LightPMF {
     LightPMF(Float pmf, Float scale = 1) : pmf(pmf), scale(scale) {}
     Float pmf = 0;
     Float scale = 1;
+};
+
+struct SampledLd {
+    PBRT_CPU_GPU SampledLd(const SampledSpectrum& s, const Interaction& intr, Float lightPDF, Float scatterPDF) :
+        Ld(s), pLight(intr), lightPDF(lightPDF), scatterPDF(scatterPDF) {}
+    SampledSpectrum Ld;
+    Interaction pLight;
+    Float lightPDF;
+    Float scatterPDF;
+    
 };
 
 class UniformLightSampler;
@@ -65,6 +76,9 @@ class LightSampler : public TaggedPointer<//UniformLightSampler,
 
     PBRT_CPU_GPU inline pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t seed, Float u) const;
     PBRT_CPU_GPU inline LightPMF PMF(const LightSampleContext &ctx, const BSDF* bsdf, Light light) const;
+
+    template <typename ScatterEval>
+    PBRT_CPU_GPU pstd::optional<SampledLd> SampleLd(const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const;
 };
 
 }  // namespace pbrt
