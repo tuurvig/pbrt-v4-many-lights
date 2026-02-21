@@ -26,7 +26,7 @@ class RHTLightSampler {
     // Resampled Hierarchic Tree Light Sampler Public Methods
     RHTLightSampler(pstd::span<const Light> lights, Allocator alloc);
 
-    PBRT_CPU_GPU
+    PBRT_CPU_GPU PBRT_NOINLINE
     pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t seed, Float u) const {
         Float pmf = 1;
         if (!m_infiniteLights.empty()) {
@@ -53,7 +53,7 @@ class RHTLightSampler {
         return PMF(light);
     }
 
-    PBRT_CPU_GPU
+    PBRT_CPU_GPU PBRT_NOINLINE
     pstd::optional<SampledLight> Sample(Float u) const {
         Float pmf = 1;
         {
@@ -68,7 +68,7 @@ class RHTLightSampler {
         return SampledLight{m_tree.leaves[index].light, pmf};
     }
 
-    PBRT_CPU_GPU
+    PBRT_CPU_GPU PBRT_NOINLINE
     LightPMF PMF(Light light) const {
         // Compute infinite light sampling probability _pInfinite_
         Float pInfinite = InfiniteLightSimplePMF(m_infiniteLights, m_tree.leaves.size());
@@ -85,7 +85,7 @@ class RHTLightSampler {
     }
     
     template <typename ScatterEval>
-    PBRT_CPU_GPU pstd::optional<SampledLd> SampleLd(const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const {
+    PBRT_CPU_GPU PBRT_NOINLINE pstd::optional<SampledLd> SampleLd(const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const {
         pstd::optional<SampledLight> sampledLight = Sample(ctx, bsdf, seed, u);
         if (!sampledLight) {
             return {};

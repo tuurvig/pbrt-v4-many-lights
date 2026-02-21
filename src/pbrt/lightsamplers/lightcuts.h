@@ -27,7 +27,7 @@ public:
     // LightcutsLightSampler Public Methods
     LightcutsLightSampler(pstd::span<const Light> lights, Allocator alloc, Float threshold = 0.02);
 
-    PBRT_CPU_GPU pstd::optional<SampledLight> Sample(const LightSampleContext& ctx, const BSDF* bsdf, uint32_t seed, Float u) const {
+    PBRT_CPU_GPU PBRT_NOINLINE pstd::optional<SampledLight> Sample(const LightSampleContext& ctx, const BSDF* bsdf, uint32_t seed, Float u) const {
         const size_t totalSize = m_pointTree.lights.size() + m_spotTree.lights.size() + m_otherLights.size();
         Float pmf = 1;
         if (!m_infiniteLights.empty()) {
@@ -57,7 +57,7 @@ public:
         return SampledLight{m_otherLights[index], pmf};
     }
 
-    PBRT_CPU_GPU LightPMF PMF(const LightSampleContext& ctx, const BSDF* bsdf, Light light) const {
+    PBRT_CPU_GPU PBRT_NOINLINE LightPMF PMF(const LightSampleContext& ctx, const BSDF* bsdf, Light light) const {
         const size_t totalSize = m_pointTree.lights.size() + m_spotTree.lights.size() + m_otherLights.size();
 
         // Compute infinite light sampling probability _pInfinite_
@@ -82,7 +82,7 @@ public:
         return 0;
     }
 
-    PBRT_CPU_GPU pstd::optional<SampledLight> Sample(Float u) const {
+    PBRT_CPU_GPU PBRT_NOINLINE pstd::optional<SampledLight> Sample(Float u) const {
         const size_t totalSize = m_pointTree.lights.size() + m_spotTree.lights.size() + m_otherLights.size();
         Float pmf = 1;
         {
@@ -113,7 +113,7 @@ public:
         return SampledLight{m_otherLights[index], pmf};
     }
 
-    PBRT_CPU_GPU LightPMF PMF(Light light) const {
+    PBRT_CPU_GPU PBRT_NOINLINE LightPMF PMF(Light light) const {
         const size_t totalSize = m_pointTree.lights.size() + m_spotTree.lights.size() + m_otherLights.size();
         LightLocation loc = m_lightToLocation[light];
 
@@ -139,7 +139,7 @@ public:
     }
     
     template <typename ScatterEval>
-    PBRT_CPU_GPU pstd::optional<SampledLd> SampleLd(const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const {
+    PBRT_CPU_GPU PBRT_NOINLINE pstd::optional<SampledLd> SampleLd(const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const {
         pstd::optional<SampledLight> sampledLight = Sample(ctx, bsdf, seed, u);
         if (!sampledLight) {
             return {};
