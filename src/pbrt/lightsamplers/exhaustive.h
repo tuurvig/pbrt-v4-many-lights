@@ -45,7 +45,7 @@ class ExhaustiveLightSampler {
     }
     
     template <typename ScatterEval>
-    PBRT_CPU_GPU pstd::optional<SampledLd> SampleLd(const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const {
+    PBRT_CPU_GPU PBRT_NOINLINE pstd::optional<SampledLd> SampleLd(const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const {
         pstd::optional<SampledLight> sampledLight = Sample(ctx, bsdf, seed, u);
         if (!sampledLight) {
             return {};

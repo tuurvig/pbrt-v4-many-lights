@@ -26,7 +26,7 @@ class HSLCLightSampler {
     // HierarchicLightcutsLightSampler Public Methods
     HSLCLightSampler(pstd::span<const Light> lights, Allocator alloc);
 
-    PBRT_CPU_GPU
+    PBRT_CPU_GPU PBRT_NOINLINE
     pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t seed, Float u) const {
         Float pmf = 1;
         if (!m_infiniteLights.empty()) {
@@ -87,7 +87,7 @@ class HSLCLightSampler {
         return SampledLight(m_tree.lights[node->childOrLightIndex], pmf);
     }
 
-    PBRT_CPU_GPU
+    PBRT_CPU_GPU PBRT_NOINLINE
     LightPMF PMF(const LightSampleContext &ctx, const BSDF* bsdf, Light light) const {
         // Handle infinite _light_ PMF
         if (!m_lightToBitTrail.HasKey(light))
@@ -181,7 +181,7 @@ class HSLCLightSampler {
     }
     
     template <typename ScatterEval>
-    PBRT_CPU_GPU pstd::optional<SampledLd> SampleLd(const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const {
+    PBRT_CPU_GPU PBRT_NOINLINE pstd::optional<SampledLd> SampleLd(const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const {
         pstd::optional<SampledLight> sampledLight = Sample(ctx, bsdf, seed, u);
         if (!sampledLight) {
             return {};

@@ -78,7 +78,7 @@ class LightSampler : public TaggedPointer<//UniformLightSampler,
     PBRT_CPU_GPU inline LightPMF PMF(const LightSampleContext &ctx, const BSDF* bsdf, Light light) const;
 
     template <typename ScatterEval>
-    PBRT_CPU_GPU pstd::optional<SampledLd> SampleLd(const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const;
+    PBRT_CPU_GPU inline pstd::optional<SampledLd> SampleLd(const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const;
 };
 
 }  // namespace pbrt

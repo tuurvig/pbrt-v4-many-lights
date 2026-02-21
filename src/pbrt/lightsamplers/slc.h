@@ -26,7 +26,7 @@ class SLCLightSampler {
     // LightcutsLightSampler Public Methods
     SLCLightSampler(pstd::span<const Light> lights, Allocator alloc, Float threshold = 0.02);
 
-    PBRT_CPU_GPU
+    PBRT_CPU_GPU PBRT_NOINLINE
     pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t seed, Float u) const {
         Float pmf = 1;
         if (!m_infiniteLights.empty()) {
@@ -156,7 +156,7 @@ class SLCLightSampler {
         return SampledLight(m_tree.lights[node->childOrLightIndex], pmf, 1 / pmfRepresentant);
     }
 
-    PBRT_CPU_GPU
+    PBRT_CPU_GPU PBRT_NOINLINE
     LightPMF PMF(const LightSampleContext &ctx, const BSDF* bsdf, Light light) const {
         // Compute infinite light sampling probability _pInfinite_
         Float pInfinite = InfiniteLightSimplePMF(m_infiniteLights, m_tree.nodes.size());
@@ -208,7 +208,7 @@ class SLCLightSampler {
     }
 
     template <typename ScatterEval>
-    PBRT_CPU_GPU pstd::optional<SampledLd> SampleLd(const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const {
+    PBRT_CPU_GPU PBRT_NOINLINE pstd::optional<SampledLd> SampleLd(const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const {
         pstd::optional<SampledLight> sampledLight = Sample(ctx, bsdf, seed, u);
         if (!sampledLight) {
             return {};
