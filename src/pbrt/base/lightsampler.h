@@ -54,12 +54,12 @@ class HSLCLightSampler;
 class RHTLightSampler;
 
 // LightSampler Definition
-class LightSampler : public TaggedPointer<//UniformLightSampler,
+class LightSampler : public TaggedPointer<UniformLightSampler,
                                           PowerLightSampler,
-                                          //ExhaustiveLightSampler,
+                                          ExhaustiveLightSampler,
                                           BVHLightSampler,
-                                          //LightcutsLightSampler> {
-                                          //SLCLightSampler,
+                                          LightcutsLightSampler,
+                                          SLCLightSampler,
                                           HSLCLightSampler,
                                           RHTLightSampler> {
   public:
