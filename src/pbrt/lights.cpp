@@ -197,6 +197,24 @@ PBRT_CPU_GPU Float SphericalLightBounds::Importance(Point3f p, Normal3f n) const
     return (I_cp * std::sqrt(phi)) / distTerm * distTerm;
 }
 
+
+PBRT_CPU_GPU Float SphericalLightBounds::SplitProbability(Point3f p, Float gamma) const {
+    if (radius <= MathEpsilon) {
+        return 0;
+    }
+
+    // distance fromt he shading point to the cluster center
+    Float d = Distance(center, p);
+
+    // distance to cluster boundary normalized by radius
+    Float t = std::max(Float(0), d - radius) / radius;
+
+    // Cauchy bell-shaped curve
+    Float splitProb = 1 / (1 + Sqr(t) / Sqr(gamma));
+
+    return splitProb;
+}
+
 // PointLight Method Definitions
 SampledSpectrum PointLight::Phi(SampledWavelengths lambda) const {
     return 4 * Pi * scale * I->Sample(lambda);

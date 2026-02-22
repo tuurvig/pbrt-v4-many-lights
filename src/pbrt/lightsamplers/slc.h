@@ -58,7 +58,7 @@ class SLCLightSampler {
         const LightcutsTreeNode* node = &m_tree.nodes[nodeIndex];
 
         Float clusterIntensity = 1;
-        Float repIntensity = 1;
+        //Float repIntensity = 1;
 
         while (!node->isLeaf) {
             uint32_t childrenIndices[2] = {static_cast<uint32_t>(nodeIndex + 1), node->childOrLightIndex};
@@ -110,7 +110,7 @@ class SLCLightSampler {
 
             if (errBounds[child] < m_threshold * estL) {
                 clusterIntensity = nodeIntensities[child];
-                repIntensity = clusterIntensity;
+                //repIntensity = clusterIntensity;
                 break;
             }
         }
@@ -150,14 +150,14 @@ class SLCLightSampler {
             nodeIndex = childrenIndices[child];
             node = &m_tree.nodes[nodeIndex];
 
-            repIntensity = node->compactLightBounds.PhiOrI();
+            //repIntensity = node->compactLightBounds.PhiOrI();
         }
 
         return SampledLight(m_tree.lights[node->childOrLightIndex], pmf, 1 / pmfRepresentant);
     }
 
     PBRT_CPU_GPU PBRT_NOINLINE
-    LightPMF PMF(const LightSampleContext &ctx, const BSDF* bsdf, Light light) const {
+    LightPMF PMF(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t /*seed*/, Light light) const {
         // Compute infinite light sampling probability _pInfinite_
         Float pInfinite = InfiniteLightSimplePMF(m_infiniteLights, m_tree.nodes.size());
 
@@ -249,8 +249,6 @@ class SLCLightSampler {
             Float geomBound0 = ComputeGeometricBound(child0, nodeBound0, frame, isOriented, p, wo, bsdf && IsTransmissive(bsdfFlags));
             Float geomBound1 = ComputeGeometricBound(child1, nodeBound1, frame, isOriented, p, wo, bsdf && IsTransmissive(bsdfFlags));
 
-            constexpr Float minLengthSqr = 1e-6f;
-
             if (geomBound0 > MachineEpsilon && geomBound1 > MachineEpsilon) {
                 Float ub0 = geomBound0 * nodeI0;
                 Float ub1 = geomBound1 * nodeI1;
@@ -267,8 +265,8 @@ class SLCLightSampler {
                     ub0 *= matBound0;
                     ub1 *= matBound1;
 
-                    const Float diagonalLengthSqr0 = std::max(LengthSquared(nodeBound0.Diagonal()), minLengthSqr);
-                    const Float diagonalLengthSqr1 = std::max(LengthSquared(nodeBound1.Diagonal()), minLengthSqr);
+                    const Float diagonalLengthSqr0 = std::max(LengthSquared(nodeBound0.Diagonal()), MathEpsilon);
+                    const Float diagonalLengthSqr1 = std::max(LengthSquared(nodeBound1.Diagonal()), MathEpsilon);
 
                     Float dist2Min0 = DistanceSquared(p, ClosestPoint(p, nodeBound0));
                     Float dist2Min1 = DistanceSquared(p, ClosestPoint(p, nodeBound1));

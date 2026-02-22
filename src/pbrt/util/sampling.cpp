@@ -213,7 +213,7 @@ PBRT_CPU_GPU Point3f SampleSphericalRectangle(Point3f pRef, Point3f s, Vector3f 
     Float h0 = y0 / std::sqrt(Sqr(dd) + Sqr(y0));
     Float h1 = y1 / std::sqrt(Sqr(dd) + Sqr(y1));
     Float hv = h0 + u[1] * (h1 - h0), hvsq = Sqr(hv);
-    Float yv = (hvsq < 1 - 1e-6f) ? (hv * dd) / std::sqrt(1 - hvsq) : y1;
+    Float yv = (hvsq < 1 - MathEpsilon) ? (hv * dd) / std::sqrt(1 - hvsq) : y1;
 
     // Return spherical triangle sample in original coordinate system
     return pRef + R.FromLocal(Vector3f(xu, yv, z0));

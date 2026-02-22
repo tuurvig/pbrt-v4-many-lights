@@ -38,8 +38,8 @@ PBRT_CPU_GPU inline pstd::optional<SampledLight> LightSampler::Sample(const Ligh
     return Dispatch(s);
 }
 
-PBRT_CPU_GPU inline LightPMF LightSampler::PMF(const LightSampleContext &ctx, const BSDF* bsdf, Light light) const {
-    auto pdf = [&](auto ptr) { return ptr->PMF(ctx, bsdf, light); };
+PBRT_CPU_GPU inline LightPMF LightSampler::PMF(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t seed, Light light) const {
+    auto pdf = [&](auto ptr) { return ptr->PMF(ctx, bsdf, seed, light); };
     return Dispatch(pdf);
 }
 

@@ -58,10 +58,7 @@ class HSLCLightSampler {
             
             const Float nodeIntensities[2] = {children[0]->compactLightBounds.PhiOrI(),
                                               children[1]->compactLightBounds.PhiOrI()};
-
             Float errBounds[2] = {1, 1};
-            
-            constexpr Float minLengthSqr = 1e-6f;
 
             if (!ComputeErrorBounds(errBounds[0], errBounds[1], p, wo, n, shadingFrame, bsdf, children[0], children[1], m_tree.allLightBounds)) {
                 return {};
@@ -88,7 +85,7 @@ class HSLCLightSampler {
     }
 
     PBRT_CPU_GPU PBRT_NOINLINE
-    LightPMF PMF(const LightSampleContext &ctx, const BSDF* bsdf, Light light) const {
+    LightPMF PMF(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t /*seed*/, Light light) const {
         // Handle infinite _light_ PMF
         if (!m_lightToBitTrail.HasKey(light))
             return InfiniteLightSimplePMF(m_infiniteLights, m_tree.nodes.size());;
@@ -222,8 +219,6 @@ class HSLCLightSampler {
         Float geomBound0 = ComputeGeometricBound(child0, nodeBound0, frame, true, p, wo, bsdf && IsTransmissive(bsdfFlags));
         Float geomBound1 = ComputeGeometricBound(child1, nodeBound1, frame, true, p, wo, bsdf && IsTransmissive(bsdfFlags));
         
-        constexpr Float minLengthSqr = 1e-6f;
-        
         Float ub0 = geomBound0 * nodeI0;
         Float ub1 = geomBound1 * nodeI1; 
 
@@ -240,8 +235,8 @@ class HSLCLightSampler {
                     ub1 *= bsdf->Max_f(wo, nodeBound1, p);
                 }
 
-                err0 = ub0 / std::max(dist2Min0, minLengthSqr);
-                err1 = ub1 / std::max(dist2Min1, minLengthSqr);
+                err0 = ub0 / std::max(dist2Min0, MathEpsilon);
+                err1 = ub1 / std::max(dist2Min1, MathEpsilon);
             }
             else {
                 err0 = ub0;

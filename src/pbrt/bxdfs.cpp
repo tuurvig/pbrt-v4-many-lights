@@ -1254,7 +1254,7 @@ PBRT_CPU_GPU pstd::optional<BSDFSample> MeasuredBxDF::Sample_f(Vector3f wo, Floa
 
     Point2f u_wo(theta2u(theta_o), phi2u(phi_o));
     fr *= brdf->ndf.Evaluate(u_wm) / (4 * brdf->sigma.Evaluate(u_wo) * AbsCosTheta(wi));
-    pdf /= 4 * Dot(wo, wm) * std::max<Float>(2 * Sqr(Pi) * u_wm.x * sinTheta_m, 1e-6f);
+    pdf /= 4 * Dot(wo, wm) * std::max<Float>(2 * Sqr(Pi) * u_wm.x * sinTheta_m, MathEpsilon);
 
     // Handle interactions in lower hemisphere
     if (flipWi)
@@ -1294,7 +1294,7 @@ PBRT_CPU_GPU Float MeasuredBxDF::PDF(Vector3f wo, Vector3f wi, TransportMode mod
     Float pdf = brdf->luminance.Evaluate(sample, phi_o, theta_o);
     Float sinTheta_m = std::sqrt(Sqr(wm.x) + Sqr(wm.y));
     Float jacobian =
-        4.f * Dot(wo, wm) * std::max<Float>(2 * Sqr(Pi) * u_wm.x * sinTheta_m, 1e-6f);
+        4.f * Dot(wo, wm) * std::max<Float>(2 * Sqr(Pi) * u_wm.x * sinTheta_m, MathEpsilon);
     return vndfPDF * pdf / jacobian;
 }
 

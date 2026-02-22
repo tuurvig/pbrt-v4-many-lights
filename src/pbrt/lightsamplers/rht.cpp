@@ -25,8 +25,8 @@ namespace pbrt {
 
 STAT_MEMORY_COUNTER("Memory/Resampled Hierarchic Tree", RHTLightTreeBytes);
 
-RHTLightSampler::RHTLightSampler(pstd::span<const Light> lights, Allocator alloc) :
-    m_tree(alloc), m_infiniteLights(alloc), m_lightToBitTrail(alloc) {
+RHTLightSampler::RHTLightSampler(pstd::span<const Light> lights, Allocator alloc, Float gamma) :
+    m_tree(alloc), m_infiniteLights(alloc), m_lightToBitTrail(alloc), gamma(gamma) {
     std::vector<RHTBuildContainer> treeLights;
     {
         std::vector<LightBVHBuildContainer> lightsForLeaves;
@@ -154,6 +154,83 @@ bool RHTLightSampler::buildLightTreeGPU(std::vector<RHTBuildContainer> &lights) 
     return true;
 }
 #endif
+
+#define PBRT_RHT_MAX_STACK 64
+struct alignas(16) TraversalState {
+    uint32_t nodeIndex;
+    Float PsParent; // probability of splitting C_parent
+    Float T; // accumulated traversal state T(C)
+    Float uNode; // random variable for traversal
+};
+
+PBRT_CPU_GPU
+void RHTLightSampler::CollectLightCandidates(LightCandidates& candidates, const LightSampleContext& ctx, uint32_t seed, const Float u, const Float uSplit, const Float pmf) const {
+    TraversalState stack[PBRT_RHT_MAX_STACK];
+    int stackHead = 0;
+    stack[stackHead] = {0, Float(1) - MathEpsilon, Float(1), u};
+    candidates.count = 0;
+
+    Point3f p = ctx.p();
+    Normal3f n = ctx.ns;
+
+    while (stackHead >= 0) {
+        const TraversalState state = stack[stackHead];
+        --stackHead;
+
+        const ResampledTreeNode* node = &m_tree.innerNodes[state.nodeIndex];
+        if (node->isLeaf) {
+            const Float pdf = state.PsParent + (1 - state.PsParent) * state.T;
+            DCHECK_LT(candidates.count, MAX_CANDIDATE_COUNT);
+            candidates.leaves[candidates.count] = {node->childOrLightIndex, pmf * pdf};
+            ++candidates.count;
+        }
+
+        const uint32_t childrenIndices[2] = {static_cast<uint32_t>(state.nodeIndex + 1), node->childOrLightIndex};
+
+        const Float PsNode = std::min(node->bounds.SplitProbability(p, gamma), state.PsParent); // Ps(C)
+        const Float PsHatNode = 1 - PsNode; // Ps_hat(C)
+
+        // propability of splitting C_parent given that C has not been split
+        const Float Pns = (state.PsParent - PsNode) / PsHatNode; // Pns(C)
+
+        const Float T_node = Pns + (1 - Pns) * state.T;
+        
+        if (uSplit < PsNode) {
+            stackHead += 2;
+            DCHECK_LT(stackHead, PBRT_RHT_MAX_STACK);
+            Float uLeft  = state.uNode + HashFloat(seed, childrenIndices[0]);
+            Float uRight = state.uNode + HashFloat(seed, childrenIndices[1]);
+
+            if (uLeft > 1) uLeft -= 1;
+            if (uRight > 1) uRight -= 1;
+
+            stack[stackHead]     = {childrenIndices[0], PsNode, T_node, uLeft};
+            stack[stackHead - 1] = {childrenIndices[1], PsNode, T_node, uRight};
+            continue;
+        }
+        
+        const ResampledTreeNode *children[2] = {&m_tree.innerNodes[childrenIndices[0]],
+                                                &m_tree.innerNodes[childrenIndices[1]]};
+
+        const Float ci[2] = {children[0]->bounds.Importance(p, n),
+                             children[1]->bounds.Importance(p, n)};
+
+        if (ci[0] == 0 && ci[1] == 0) {
+            continue;
+        }
+
+        // Pick child to traverse
+        Float nodePMF = 0;
+        Float uWarped = 0;
+        int child = SampleDiscrete(ci, state.uNode, &nodePMF, &uWarped);
+        uWarped += HashFloat(seed, state.nodeIndex);
+        if (uWarped > 1) uWarped -= 1;
+
+        ++stackHead;
+        DCHECK_LT(stackHead, PBRT_RHT_MAX_STACK);
+        stack[stackHead] = {childrenIndices[child], PsNode, T_node * nodePMF, uWarped};
+    }
+}
 
 std::string RHTLightSampler::ToString() const {
     return StringPrintf("[ RHTLightSampler innerNodes: %s leaves: %s ]", m_tree.innerNodes, m_tree.leaves);

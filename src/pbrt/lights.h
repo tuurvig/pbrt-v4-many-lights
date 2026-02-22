@@ -199,6 +199,9 @@ class SphericalLightBounds {
 
       PBRT_CPU_GPU
       Float Importance(Point3f p, Normal3f n) const;
+      
+      PBRT_CPU_GPU
+      Float SplitProbability(Point3f p, Float gamma) const;
 
       PBRT_CPU_GPU
       inline Float SurfaceArea() const {

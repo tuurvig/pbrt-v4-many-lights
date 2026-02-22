@@ -113,7 +113,7 @@ void WavefrontPathIntegrator::SampleMediumInteraction(int wavefrontDepth) {
                                 p, w.depth, lambda, beta, r_u, ptr, -ray.d, ray.time,
                                 w.etaScale, ray.medium, w.pixelIndex});
                         };
-                        DCHECK_RARE(1e-6f, !beta);
+                        DCHECK_RARE(MathEpsilon, !beta);
                         if (beta && r_u)
                             mp.phase.Dispatch(enqueue);
 
@@ -276,7 +276,7 @@ void WavefrontPathIntegrator::SampleMediumScattering(int wavefrontDepth) {
             LightSampleContext ctx(Point3fi(w.p), Normal3f(0, 0, 0), Normal3f(0, 0, 0), w.wo);
             PhaseFunction phaseFuncPtr(w.phase);
             MediumScatterEval scatterEval(phaseFuncPtr);
-            pstd::optional<SampledLd> sLd = lightSampler.SampleLd(ctx, w.lambda, nullptr, Hash(sampleIndex, w.pixelIndex), raySamples.direct.uc, raySamples.direct.u, scatterEval);
+            pstd::optional<SampledLd> sLd = lightSampler.SampleLd(ctx, w.lambda, nullptr, Hash(sampleIndex, w.pixelIndex, (w.depth + 1)), raySamples.direct.uc, raySamples.direct.u, scatterEval);
 
             if (sLd) {
                 SampledSpectrum Ld = w.beta * sLd->Ld;

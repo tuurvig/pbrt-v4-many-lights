@@ -48,7 +48,7 @@ class PowerLightSampler {
     }
 
     PBRT_CPU_GPU
-    LightPMF PMF(const LightSampleContext &/*ctx*/, const BSDF* /*bsdf*/, Light light) const { return PMF(light); }
+    LightPMF PMF(const LightSampleContext &/*ctx*/, const BSDF* /*bsdf*/, uint32_t /*seed*/, Light light) const { return PMF(light); }
     
     template <typename ScatterEval>
     PBRT_CPU_GPU PBRT_NOINLINE pstd::optional<SampledLd> SampleLd(const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const {
