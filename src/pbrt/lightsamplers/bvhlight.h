@@ -78,7 +78,7 @@ class BVHLightSampler {
     }
 
     PBRT_CPU_GPU PBRT_NOINLINE
-    LightPMF PMF(const LightSampleContext &ctx, const BSDF* /*bsdf*/, Light light) const {
+    LightPMF PMF(const LightSampleContext &ctx, const BSDF* /*bsdf*/, uint32_t /*seed*/, Light light) const {
         // Handle infinite _light_ PMF
         if (!m_lightToBitTrail.HasKey(light))
             return InfiniteLightSimplePMF(m_infiniteLights, m_nodes.size());

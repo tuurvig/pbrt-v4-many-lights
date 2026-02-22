@@ -289,7 +289,7 @@ void RayIntegrator::EvaluatePixelSample(Point2i pPixel, int sampleIndex, Sampler
         ++nCameraRays;
         // Evaluate radiance along camera ray
         bool initializeVisibleSurface = camera.GetFilm().UsesVisibleSurface();
-        L = cameraRay->weight * Li(cameraRay->ray, sampleIndex, lambda, sampler, scratchBuffer,
+        L = cameraRay->weight * Li(cameraRay->ray, Hash(sampleIndex, pPixel), lambda, sampler, scratchBuffer,
                                    initializeVisibleSurface ? &visibleSurface : nullptr);
 
         // Issue warning if unexpected radiance value is returned
@@ -419,7 +419,7 @@ SimplePathIntegrator::SimplePathIntegrator(int maxDepth, bool sampleLights,
       sampleBSDF(sampleBSDF),
       lightSampler(lights, Allocator()) {}
 
-SampledSpectrum SimplePathIntegrator::Li(RayDifferential ray, int sampleIndex, SampledWavelengths &lambda,
+SampledSpectrum SimplePathIntegrator::Li(RayDifferential ray, uint32_t seed, SampledWavelengths &lambda,
                                          Sampler sampler, ScratchBuffer &scratchBuffer,
                                          VisibleSurface *) const {
     // Estimate radiance along ray using simple path tracing
@@ -658,7 +658,7 @@ PathIntegrator::PathIntegrator(int maxDepth, Camera camera, Sampler sampler,
       lightSampler(LightSampler::Create(lightSampleStrategy, lights, Options->discretizeAreaLights > 0, Allocator())),
       regularize(regularize) {}
 
-SampledSpectrum PathIntegrator::Li(RayDifferential ray, int sampleIndex, SampledWavelengths &lambda,
+SampledSpectrum PathIntegrator::Li(RayDifferential ray, uint32_t seed, SampledWavelengths &lambda,
                                    Sampler sampler, ScratchBuffer &scratchBuffer,
                                    VisibleSurface *visibleSurf) const {
     // Declare local variables for _PathIntegrator::Li()_
@@ -686,7 +686,7 @@ SampledSpectrum PathIntegrator::Li(RayDifferential ray, int sampleIndex, Sampled
                     L += beta * Le;
                 else {
                     // Compute MIS weight for infinite light
-                    LightPMF l_pmf = lightSampler.PMF(prevIntrCtx, nullptr, light);
+                    LightPMF l_pmf = lightSampler.PMF(prevIntrCtx, nullptr, Hash(seed, depth), light);
                     Float p_l = l_pmf.pmf *
                                 light.PDF_Li(prevIntrCtx, ray.d, true);
                     Float w_b = PowerHeuristic(1, p_b, 1, p_l);
@@ -705,7 +705,7 @@ SampledSpectrum PathIntegrator::Li(RayDifferential ray, int sampleIndex, Sampled
             else if (!discretizedAreaLights){
                 // Compute MIS weight for area light
                 Light areaLight(si->intr.areaLight);
-                LightPMF l_pmf = lightSampler.PMF(prevIntrCtx, bsdfPrev, areaLight);
+                LightPMF l_pmf = lightSampler.PMF(prevIntrCtx, bsdfPrev, Hash(seed, depth), areaLight);
                 Le *= l_pmf.scale;
                 Float p_l = l_pmf.pmf *
                             areaLight.PDF_Li(prevIntrCtx, ray.d, true);
@@ -764,7 +764,7 @@ SampledSpectrum PathIntegrator::Li(RayDifferential ray, int sampleIndex, Sampled
         // Sample direct illumination from the light sources
         if (IsNonSpecular(bsdf.Flags())) {
             ++totalPaths;
-            SampledSpectrum Ld = SampleLd(isect, sampleIndex, &bsdf, lambda, sampler);
+            SampledSpectrum Ld = SampleLd(isect, Hash(seed, depth), &bsdf, lambda, sampler);
             if (!Ld)
                 ++zeroRadiancePaths;
             L += beta * Ld;
@@ -803,7 +803,7 @@ SampledSpectrum PathIntegrator::Li(RayDifferential ray, int sampleIndex, Sampled
     return L;
 }
 
-SampledSpectrum PathIntegrator::SampleLd(const SurfaceInteraction &intr, int sampleIndex, const BSDF *bsdf,
+SampledSpectrum PathIntegrator::SampleLd(const SurfaceInteraction &intr, uint32_t seed, const BSDF *bsdf,
                                          SampledWavelengths &lambda,
                                          Sampler sampler) const {
     // Initialize _LightSampleContext_ for light sampling
@@ -819,7 +819,7 @@ SampledSpectrum PathIntegrator::SampleLd(const SurfaceInteraction &intr, int sam
     Float u = sampler.Get1D();
     Point2f uLight = sampler.Get2D();
     BSDFScatterEval scatterEval(bsdf, intr.shading.n);
-    pstd::optional<SampledLd> sLd = lightSampler.SampleLd(ctx, lambda, bsdf, sampleIndex, u, uLight, scatterEval);
+    pstd::optional<SampledLd> sLd = lightSampler.SampleLd(ctx, lambda, bsdf, seed, u, uLight, scatterEval);
     if (!sLd || !Unoccluded(intr, sLd->pLight)) {
         return {};
     }
@@ -862,7 +862,7 @@ SimpleVolPathIntegrator::SimpleVolPathIntegrator(int maxDepth, Camera camera,
     }
 }
 
-SampledSpectrum SimpleVolPathIntegrator::Li(RayDifferential ray, int sampleIndex,
+SampledSpectrum SimpleVolPathIntegrator::Li(RayDifferential ray, uint32_t seed,
                                             SampledWavelengths &lambda, Sampler sampler,
                                             ScratchBuffer &buf, VisibleSurface *) const {
     // Declare local variables for delta tracking integration
@@ -981,7 +981,7 @@ STAT_COUNTER("Integrator/Volume interactions", volumeInteractions);
 STAT_COUNTER("Integrator/Surface interactions", surfaceInteractions);
 
 // VolPathIntegrator Method Definitions
-SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, int sampleIndex, SampledWavelengths &lambda,
+SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, uint32_t seed, SampledWavelengths &lambda,
                                       Sampler sampler, ScratchBuffer &scratchBuffer,
                                       VisibleSurface *visibleSurf) const {
     // Declare state variables for volumetric path sampling
@@ -1066,7 +1066,7 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, int sampleIndex, Samp
                             // Sample direct lighting at volume-scattering event
                             MediumInteraction intr(p, -ray.d, ray.time, ray.medium,
                                                    mp.phase);
-                            L += SampleLd(intr, sampleIndex, nullptr, lambda, sampler, beta, r_u);
+                            L += SampleLd(intr, Hash(seed, depth), nullptr, lambda, sampler, beta, r_u);
 
                             // Sample new direction at real-scattering event
                             Point2f u = sampler.Get2D();
@@ -1122,7 +1122,7 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, int sampleIndex, Samp
                         L += beta * Le / r_u.Average();
                     else {
                         // Add infinite light contribution using both PDFs with MIS
-                        LightPMF l_pmf = lightSampler.PMF(prevIntrContext, bsdfPrev, light);
+                        LightPMF l_pmf = lightSampler.PMF(prevIntrContext, bsdfPrev, Hash(seed, depth), light);
                         Float p_l = l_pmf.pmf *
                                     light.PDF_Li(prevIntrContext, ray.d, true);
                         r_l *= p_l;
@@ -1143,7 +1143,7 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, int sampleIndex, Samp
             else if (!discretizedAreaLights){
                 // Add surface light contribution using both PDFs with MIS
                 Light areaLight(isect.areaLight);
-                LightPMF l_pmf = lightSampler.PMF(prevIntrContext, bsdfPrev, areaLight);
+                LightPMF l_pmf = lightSampler.PMF(prevIntrContext, bsdfPrev, Hash(seed, depth), areaLight);
                 Le *= l_pmf.scale;
                 Float p_l = l_pmf.pmf *
                             areaLight.PDF_Li(prevIntrContext, ray.d, true);
@@ -1197,7 +1197,7 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, int sampleIndex, Samp
 
         // Sample illumination from lights to find attenuated path contribution
         if (IsNonSpecular(bsdf.Flags())) {
-            L += SampleLd(isect, sampleIndex, &bsdf, lambda, sampler, beta, r_u);
+            L += SampleLd(isect, Hash(seed, depth), &bsdf, lambda, sampler, beta, r_u);
             DCHECK(IsInf(L.y(lambda)) == false);
         }
         prevIntrContext = LightSampleContext(isect);
@@ -1284,7 +1284,7 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, int sampleIndex, Samp
             bsdfPrev = &bsdf;
 
             // Account for attenuated direct illumination subsurface scattering
-            L += SampleLd(pi, sampleIndex, &Sw, lambda, sampler, beta, r_u);
+            L += SampleLd(pi, Hash(seed, depth), &Sw, lambda, sampler, beta, r_u);
 
             // Sample ray for indirect subsurface scattering
             Float u = sampler.Get1D();
@@ -1316,7 +1316,7 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, int sampleIndex, Samp
     return L;
 }
 
-SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, int sampleIndex, const BSDF *bsdf,
+SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, uint32_t seed, const BSDF *bsdf,
                                             SampledWavelengths &lambda, Sampler sampler,
                                             SampledSpectrum beta,
                                             SampledSpectrum r_p) const {
@@ -1342,7 +1342,7 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, int sampleI
     CHECK(intr.IsMediumInteraction());
     PhaseFunction phase = intr.AsMedium().phase;
     BSDFAndMediumScatterEval scatterEval(bsdf, phase, intr.AsSurface().shading.n);
-    pstd::optional<SampledLd> sLd = lightSampler.SampleLd(ctx, lambda, bsdf, sampleIndex, u, uLight, scatterEval);
+    pstd::optional<SampledLd> sLd = lightSampler.SampleLd(ctx, lambda, bsdf, seed, u, uLight, scatterEval);
     
     if (!sLd) {
         return SampledSpectrum(0);
@@ -1443,7 +1443,7 @@ AOIntegrator::AOIntegrator(bool cosSample, Float maxDist, Camera camera, Sampler
       illuminant(illuminant),
       illumScale(1.f / SpectrumToPhotometric(illuminant)) {}
 
-SampledSpectrum AOIntegrator::Li(RayDifferential ray, int sampleIndex, SampledWavelengths &lambda,
+SampledSpectrum AOIntegrator::Li(RayDifferential ray, uint32_t seed, SampledWavelengths &lambda,
                                  Sampler sampler, ScratchBuffer &scratchBuffer,
                                  VisibleSurface *visibleSurface) const {
     // Intersect _ray_ with scene and store intersection in _isect_
@@ -2282,7 +2282,7 @@ void BDPTIntegrator::Render() {
     }
 }
 
-SampledSpectrum BDPTIntegrator::Li(RayDifferential ray, int sampleIndex, SampledWavelengths &lambda,
+SampledSpectrum BDPTIntegrator::Li(RayDifferential ray, uint32_t seed, SampledWavelengths &lambda,
                                    Sampler sampler, ScratchBuffer &scratchBuffer,
                                    VisibleSurface *) const {
     // Trace the camera and light subpaths
@@ -2940,7 +2940,7 @@ void SPPMIntegrator::Render() {
                                 L += beta * Le;
                             else {
                                 // Compute MIS weight for infinite light
-                                LightPMF l_pmf = lightSampler.PMF(prevIntrCtx, nullptr, light);
+                                LightPMF l_pmf = lightSampler.PMF(prevIntrCtx, nullptr, Hash(iter, pPixel, depth), light);
                                 Float p_l = l_pmf.pmf *
                                             light.PDF_Li(prevIntrCtx, ray.d, true);
                                 Float w_b = PowerHeuristic(1, p_b, 1, p_l);
@@ -2975,7 +2975,7 @@ void SPPMIntegrator::Render() {
                         else if (!discretizedAreaLights){
                             // Compute MIS weight for area light
                             Light areaLight(si->intr.areaLight);
-                            LightPMF l_pmf = lightSampler.PMF(prevIntrCtx, bsdfPrevPtr, areaLight);
+                            LightPMF l_pmf = lightSampler.PMF(prevIntrCtx, bsdfPrevPtr, Hash(iter, pPixel, depth), areaLight);
                             Le *= l_pmf.scale;
                             Float p_l = l_pmf.pmf *
                                         areaLight.PDF_Li(prevIntrCtx, ray.d, true);
@@ -2993,7 +2993,7 @@ void SPPMIntegrator::Render() {
 
                     // Accumulate direct illumination at SPPM camera ray intersection
                     SampledSpectrum Ld =
-                        SampleLd(isect, iter, bsdf, lambda, sampler, &lightSampler);
+                        SampleLd(isect, Hash(iter, pPixel, depth), bsdf, lambda, sampler, &lightSampler);
                     if (Ld)
                         pixel.Ld += film.ToOutputRGB(beta * Ld, lambda);
 
@@ -3314,7 +3314,7 @@ void SPPMIntegrator::Render() {
     DisconnectFromDisplayServer();
 }
 
-SampledSpectrum SPPMIntegrator::SampleLd(const SurfaceInteraction &intr, int sampleIndex, const BSDF &b,
+SampledSpectrum SPPMIntegrator::SampleLd(const SurfaceInteraction &intr, uint32_t seed, const BSDF &b,
                                          SampledWavelengths &lambda, Sampler sampler,
                                          LightSampler lightSampler) const {
     const BSDF *bsdf = &b;
@@ -3331,7 +3331,7 @@ SampledSpectrum SPPMIntegrator::SampleLd(const SurfaceInteraction &intr, int sam
     Float u = sampler.Get1D();
     Point2f uLight = sampler.Get2D();
     BSDFScatterEval scatterEval(&b, intr.shading.n);
-    pstd::optional<SampledLd> sLd = lightSampler.SampleLd(ctx, lambda, bsdf, sampleIndex, u, uLight, scatterEval);
+    pstd::optional<SampledLd> sLd = lightSampler.SampleLd(ctx, lambda, bsdf, seed, u, uLight, scatterEval);
 
     if (!sLd || !Unoccluded(intr, sLd->pLight)) {
         return {};

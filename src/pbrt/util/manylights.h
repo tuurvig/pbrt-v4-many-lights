@@ -528,7 +528,7 @@ inline Float InfiniteLightSimplePMF(const pstd::vector<Light>& infiniteLights, s
 PBRT_CPU_GPU
 inline Float ComputeClusterEstimate(const BSDF* bsdf, BxDFFlags flags, Point3f lightPos, Point3f point, Normal3f n, Vector3f wo, Float I) {
     Float minDistSqr = DistanceSquared(point, lightPos);
-    Float clampedDistSqr = std::max(minDistSqr, 1e-6f);
+    Float clampedDistSqr = std::max(minDistSqr, MathEpsilon);
     Float G = 1.0f / clampedDistSqr;
 
     n = bsdf ? Normal3f(bsdf->shadingFrame.z) : n;
@@ -587,7 +587,7 @@ inline Float GeomTermBoundInFrame(Point3f point, const Frame& frame, const Bound
         boundYSqr = std::max(maxY * maxY, minY * minY);
     }
 
-    Float distSqr = std::max(boundXSqr + boundYSqr + maxZ * maxZ, 1e-6f);
+    Float distSqr = std::max(boundXSqr + boundYSqr + maxZ * maxZ, MathEpsilon);
 
     Float cosThetaBox = maxZ / std::sqrt(distSqr);
     return cosThetaBox;

@@ -196,8 +196,6 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
         };
 
         Float errBounds[2] = {1, 1};
-        
-        constexpr Float minLengthSqr = 1e-6f;
 
         if (nodeIntensities[0] != 0 && nodeIntensities[1] != 0) {
             const Bounds3f nodeBound0 = children[0]->compactLightBounds.Bounds(tree.allLightBounds);
@@ -222,8 +220,8 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
                     ub0 *= matBound0;
                     ub1 *= matBound1;
 
-                    const Float diagonalLengthSqr0 = std::max(LengthSquared(nodeBound0.Diagonal()), minLengthSqr);
-                    const Float diagonalLengthSqr1 = std::max(LengthSquared(nodeBound1.Diagonal()), minLengthSqr);
+                    const Float diagonalLengthSqr0 = std::max(LengthSquared(nodeBound0.Diagonal()), MathEpsilon);
+                    const Float diagonalLengthSqr1 = std::max(LengthSquared(nodeBound1.Diagonal()), MathEpsilon);
 
                     Float dist2Min0 = DistanceSquared(p, ClosestPoint(p, nodeBound0));
                     Float dist2Min1 = DistanceSquared(p, ClosestPoint(p, nodeBound1));

@@ -495,6 +495,8 @@ Float WavefrontPathIntegrator::Render() {
 void WavefrontPathIntegrator::HandleEscapedRays() {
     if (!escapedRayQueue)
         return;
+
+    const int sampleIndex = currentSampleIndex;
     ForAllQueued(
         "Handle escaped rays", ProfilerKernelGroup::WAVEFRONT, escapedRayQueue, maxQueueSize,
         PBRT_CPU_GPU_LAMBDA(const EscapedRayWorkItem w) {
@@ -517,7 +519,7 @@ void WavefrontPathIntegrator::HandleEscapedRays() {
                     } else {
                         // Compute MIS-weighted radiance contribution from infinite light
                         LightSampleContext ctx = w.prevIntrCtx;
-                        Float lightChoicePDF = lightSampler.PMF(ctx, nullptr, light).pmf;
+                        Float lightChoicePDF = lightSampler.PMF(ctx, nullptr, Hash(sampleIndex, w.pixelIndex, w.depth), light).pmf;
                         SampledSpectrum r_l =
                             w.r_l * lightChoicePDF * light.PDF_Li(ctx, w.rayd, true);
                         L += w.beta * Le / (w.r_u + r_l).Average();
@@ -539,6 +541,8 @@ void WavefrontPathIntegrator::HandleEscapedRays() {
 void WavefrontPathIntegrator::HandleEmissiveIntersection() {
     const bool discretizedAreaLights = Options->discretizeAreaLights > 0;
 
+    const int sampleIndex = currentSampleIndex;
+
     ForAllQueued(
         "Handle emitters hit by indirect rays", ProfilerKernelGroup::WAVEFRONT,
         hitAreaLightQueue, maxQueueSize, PBRT_CPU_GPU_LAMBDA(const HitAreaLightWorkItem w) {
@@ -558,7 +562,7 @@ void WavefrontPathIntegrator::HandleEmissiveIntersection() {
                 Vector3f wi = -w.wo;
                 LightSampleContext ctx = w.prevIntrCtx;
                 const BSDF* prevBsdfPtr = w.prevBsdf ? &w.prevBsdf : nullptr;
-                LightPMF l_pmf = lightSampler.PMF(ctx, prevBsdfPtr, w.areaLight);
+                LightPMF l_pmf = lightSampler.PMF(ctx, prevBsdfPtr, Hash(sampleIndex, w.pixelIndex, w.depth), w.areaLight);
                 Le *= l_pmf.scale;
                 Float lightChoicePDF = l_pmf.pmf;
                 Float lightPDF = lightChoicePDF * w.areaLight.PDF_Li(ctx, wi, true);

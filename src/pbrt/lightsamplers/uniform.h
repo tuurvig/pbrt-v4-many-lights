@@ -37,7 +37,7 @@ public:
         return LightPMF(m_lights.empty() ? 0 : 1.f / m_lights.size());
     }
 
-    PBRT_CPU_GPU LightPMF PMF(const LightSampleContext & /*ctx*/, const BSDF* /*bsdf*/, Light light) const { 
+    PBRT_CPU_GPU LightPMF PMF(const LightSampleContext & /*ctx*/, const BSDF* /*bsdf*/, uint32_t /*seed*/, Light light) const { 
         return PMF(light);
     }
 

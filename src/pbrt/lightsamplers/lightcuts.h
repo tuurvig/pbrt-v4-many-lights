@@ -57,7 +57,7 @@ public:
         return SampledLight{m_otherLights[index], pmf};
     }
 
-    PBRT_CPU_GPU PBRT_NOINLINE LightPMF PMF(const LightSampleContext& ctx, const BSDF* bsdf, Light light) const {
+    PBRT_CPU_GPU PBRT_NOINLINE LightPMF PMF(const LightSampleContext& ctx, const BSDF* bsdf, uint32_t /*seed*/, Light light) const {
         const size_t totalSize = m_pointTree.lights.size() + m_spotTree.lights.size() + m_otherLights.size();
 
         // Compute infinite light sampling probability _pInfinite_

@@ -24,7 +24,7 @@ namespace pbrt {
 class RHTLightSampler {
   public:
     // Resampled Hierarchic Tree Light Sampler Public Methods
-    RHTLightSampler(pstd::span<const Light> lights, Allocator alloc);
+    RHTLightSampler(pstd::span<const Light> lights, Allocator alloc, Float gamma = 0.8);
 
     PBRT_CPU_GPU PBRT_NOINLINE
     pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t seed, Float u) const {
@@ -49,8 +49,65 @@ class RHTLightSampler {
     }
 
     PBRT_CPU_GPU
-    LightPMF PMF(const LightSampleContext &ctx, const BSDF* bsdf, Light light) const {
-        return PMF(light);
+    LightPMF PMF(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t seed, Light light) const {
+        // Handle infinite _light_ PMF
+        if (!m_lightToBitTrail.HasKey(light))
+            return InfiniteLightSimplePMF(m_infiniteLights, m_tree.leaves.size());;
+
+        // Compute infinite light sampling probability _pInfinite_
+        Float pInfinite = Float(m_infiniteLights.size()) /
+                          Float(m_infiniteLights.size() + (m_tree.leaves.size() == 0 ? 0 : 1));
+        
+        if (m_tree.leaves.empty())
+            return 0;
+
+        Point3f p = ctx.p();
+        Normal3f n = ctx.ns;
+        uint32_t bitTrail = m_lightToBitTrail[light];
+
+        int nodeIndex = 0;
+        Float PsParent = 1;
+        Float T = 1;
+        
+        const Float uSplit = HashFloat(seed);
+        const ResampledTreeNode* node = &m_tree.innerNodes[nodeIndex];
+        while (!node->isLeaf) {
+            const uint32_t childrenIndices[2] = {static_cast<uint32_t>(nodeIndex + 1), node->childOrLightIndex};
+
+            const Float PsNode = std::min(node->bounds.SplitProbability(p, gamma), PsParent);
+            const Float PsNatNode = std::max(MathEpsilon, 1 - PsNode);
+
+            // Probability of splitting C_parent given that C has not been split
+            const Float Pns = (PsParent - PsNode) / PsNatNode;
+            const Float T_node = Pns + (1 - Pns) * T;
+
+            const int child = bitTrail & 1;
+            
+            T = T_node;
+            if (uSplit >= PsNode) {
+                const ResampledTreeNode *children[2] = {&m_tree.innerNodes[childrenIndices[0]],
+                                                        &m_tree.innerNodes[childrenIndices[1]]};
+                const Float ci[2] = {children[0]->bounds.Importance(p, n),
+                                     children[1]->bounds.Importance(p, n)};
+
+                const Float sumImportance = ci[0] + ci[1];
+                if (sumImportance == 0) {
+                    return 0;
+                }
+
+                Float weight[2] = {0};
+                weight[0] = ci[0] / sumImportance;
+                weight[1] = 1 - weight[0];
+
+                T = T_node * weight[child];
+            }
+
+            PsParent = PsNode;
+            nodeIndex = childrenIndices[child];
+            node = &m_tree.innerNodes[nodeIndex];
+        }
+
+        return PsParent + (1 - PsParent) * T;
     }
 
     PBRT_CPU_GPU PBRT_NOINLINE
@@ -70,39 +127,45 @@ class RHTLightSampler {
 
     PBRT_CPU_GPU PBRT_NOINLINE
     LightPMF PMF(Light light) const {
-        // Compute infinite light sampling probability _pInfinite_
-        Float pInfinite = InfiniteLightSimplePMF(m_infiniteLights, m_tree.leaves.size());
-        
         // Handle infinite _light_ PMF
         if (!m_lightToBitTrail.HasKey(light))
-            return pInfinite;
+            return InfiniteLightSimplePMF(m_infiniteLights, m_tree.leaves.size());;
 
+        // Compute infinite light sampling probability _pInfinite_
+        Float pInfinite = Float(m_infiniteLights.size()) /
+                          Float(m_infiniteLights.size() + (m_tree.leaves.size() == 0 ? 0 : 1));
+        
         if (m_tree.leaves.empty())
             return 0;
 
         Float pmf = 1 - pInfinite;
-        return pmf / m_tree.leaves.size(); 
+        return LightPMF(pmf / m_tree.leaves.size()); 
     }
     
     template <typename ScatterEval>
     PBRT_CPU_GPU PBRT_NOINLINE pstd::optional<SampledLd> SampleLd(const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const {
-        pstd::optional<SampledLight> sampledLight = Sample(ctx, bsdf, seed, u);
-        if (!sampledLight) {
-            return {};
+        Float pmf = 1;
+        {
+            pstd::optional<SampledLight> infiniteLightSample = InfiniteLightSimpleSample(m_infiniteLights, m_tree.leaves.size(), pmf, u);
+            if (infiniteLightSample) {
+                Light light = infiniteLightSample->light;
+                DCHECK(light && infiniteLightSample->p != 0);
+                pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
+                if (!ls || !ls->L || ls->pdf == 0)
+                    return {};
+
+                Float lightPDF = infiniteLightSample->p * ls->pdf;
+                ls->L *= infiniteLightSample->scale;
+                
+                Float scatterPDF = 0;
+                SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
+                return SampledLd(f_hat * ls->L, ls->pLight, lightPDF, scatterPDF);
+            }
         }
 
-        Light light = sampledLight->light;
-        DCHECK(light && sampledLight->p != 0);
-        pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
-        if (!ls || !ls->L || ls->pdf == 0)
-            return {};
-
-        Float lightPDF = sampledLight->p * ls->pdf;
-        ls->L *= sampledLight->scale;
-        
-        Float scatterPDF = 0;
-        SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
-        return SampledLd(f_hat * ls->L, ls->pLight, lightPDF, scatterPDF);
+        LightCandidates candidates;
+        CollectLightCandidates(candidates, ctx, seed, u, HashFloat(seed), pmf);
+        return SampledLd(SampledSpectrum(0), Interaction(), 0, 0);
     }
 
     std::string ToString() const;
@@ -112,10 +175,25 @@ class RHTLightSampler {
     bool buildLightTreeGPU(std::vector<RHTBuildContainer> &lights);
 #endif
 
+    #define MAX_CANDIDATE_COUNT 64
+    struct alignas(8) LightCandidate {
+        uint32_t lightIdx;
+        Float pmf;
+    };
+
+    struct LightCandidates {
+        LightCandidate leaves[MAX_CANDIDATE_COUNT];
+        int count = 0;
+    };
+
+    PBRT_CPU_GPU
+    void CollectLightCandidates(LightCandidates& candidates, const LightSampleContext& ctx, uint32_t seed, Float u, Float uSplit, Float pmf) const;
+
     // Resampled Hierarchic Tree Light Sampler Private Members
     ResampledTree m_tree;
     pstd::vector<Light> m_infiniteLights;
     HashMap<Light, uint32_t> m_lightToBitTrail;
+    Float gamma;
 };
 
 }

@@ -667,8 +667,8 @@ inline bool Quadratic(double a, double b, double c, double *t0, double *t1) {
 }
 
 template <typename Func>
-PBRT_CPU_GPU inline Float NewtonBisection(Float x0, Float x1, Func f, Float xEps = 1e-6f,
-                                          Float fEps = 1e-6f) {
+PBRT_CPU_GPU inline Float NewtonBisection(Float x0, Float x1, Func f, Float xEps = MathEpsilon,
+                                          Float fEps = MathEpsilon) {
     // Check function endpoints for roots
     DCHECK_LT(x0, x1);
     Float fx0 = f(x0).first, fx1 = f(x1).first;

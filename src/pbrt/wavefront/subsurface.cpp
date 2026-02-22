@@ -154,7 +154,7 @@ void WavefrontPathIntegrator::SampleSubsurface(int wavefrontDepth) {
 
                 BSDFScatterEval<ConcreteBxDF> scatterEval(&bsdf, intr.ns);
                 pstd::optional<SampledLd> sLd =
-                    lightSampler.SampleLd(ctx, lambda, &bsdf, Hash(sampleIndex, w.pixelIndex),
+                    lightSampler.SampleLd(ctx, lambda, &bsdf, Hash(sampleIndex, w.pixelIndex, (w.depth + 1)),
                                           raySamples.direct.uc, raySamples.direct.u, scatterEval);
                 if (!sLd) {
                     return;
