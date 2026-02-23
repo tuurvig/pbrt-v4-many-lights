@@ -196,6 +196,28 @@ class BSDF {
     Frame shadingFrame;
 };
 
+struct BSDFScatterEval {
+    PBRT_CPU_GPU
+    BSDFScatterEval(const BSDF* bsdf, Normal3f ns) : bsdf(bsdf), ns(ns) {}
+    const BSDF* bsdf;
+    Normal3f ns;
+
+    //PBRT_CPU_GPU   
+    //template <typename ConcreteBxDF>
+    //SampledSpectrum operator()(Float& scatterPDF, Vector3f wo, Vector3f wi, bool isDeltaLight) const {
+    //    SampledSpectrum f = bsdf->f<ConcreteBxDF>(wo, wi) * AbsDot(wi, ns);
+    //    scatterPDF = isDeltaLight ? 0.f : bsdf->PDF<ConcreteBxDF>(wo, wi);
+    //    return f;
+    //}
+
+    PBRT_CPU_GPU
+    SampledSpectrum operator()(Float& scatterPDF, Vector3f wo, Vector3f wi, bool isDeltaLight) const {
+        SampledSpectrum f = bsdf->f(wo, wi) * AbsDot(wi, ns);
+        scatterPDF = isDeltaLight ? 0.f : bsdf->PDF(wo, wi);
+        return f;
+    }
+};
+
 }  // namespace pbrt
 
 #endif  // PBRT_BSDF_H

@@ -190,38 +190,6 @@ class WavefrontPathIntegrator {
     std::thread *copyThread;
 };
 
-template <typename ConcreteBxDF>
-struct BSDFScatterEval {
-    PBRT_CPU_GPU
-    BSDFScatterEval(const BSDF* bsdf, Normal3f ns) : bsdf(bsdf), ns(ns) {}
-    const BSDF* bsdf;
-    Normal3f ns;
-
-    PBRT_CPU_GPU
-    SampledSpectrum operator()(Float& scatterPDF, Vector3f wo, Vector3f wi, bool isDeltaLight) const {
-        SampledSpectrum f = bsdf->f<ConcreteBxDF>(wo, wi) * AbsDot(wi, ns);
-        scatterPDF = isDeltaLight ? 0.f : bsdf->PDF<ConcreteBxDF>(wo, wi);
-        return f;
-    }
-};
-
-struct MediumScatterEval {
-    PBRT_CPU_GPU
-    MediumScatterEval(PhaseFunction phase) : phase(phase) {}
-
-    template <typename PhaseFunc>
-    PBRT_CPU_GPU explicit MediumScatterEval(const PhaseFunc *phase) : phase(PhaseFunction(phase)) {}
-
-    PhaseFunction phase;
-
-    PBRT_CPU_GPU
-    SampledSpectrum operator()(Float& scatterPDF, Vector3f wo, Vector3f wi, bool isDeltaLight) const {
-        scatterPDF = isDeltaLight ? 0.f : phase.PDF(wo, wi);
-        Float p = phase.p(wo, wi);
-        return SampledSpectrum(p);
-    }
-};
-
 }  // namespace pbrt
 
 #endif  // PBRT_WAVEFRONT_INTEGRATOR_H

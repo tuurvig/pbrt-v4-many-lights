@@ -152,7 +152,7 @@ void WavefrontPathIntegrator::SampleSubsurface(int wavefrontDepth) {
             if (IsNonSpecular(bsdf.Flags())) {
                 LightSampleContext ctx(intr.pi, intr.n, intr.ns, Vector3f(0, 0, 0));
 
-                BSDFScatterEval<ConcreteBxDF> scatterEval(&bsdf, intr.ns);
+                BSDFScatterEval scatterEval(&bsdf, intr.ns);
                 pstd::optional<SampledLd> sLd =
                     lightSampler.SampleLd(ctx, lambda, &bsdf, Hash(sampleIndex, w.pixelIndex, (w.depth + 1)),
                                           raySamples.direct.uc, raySamples.direct.u, scatterEval);
