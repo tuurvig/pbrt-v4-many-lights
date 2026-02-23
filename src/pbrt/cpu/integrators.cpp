@@ -62,39 +62,6 @@ std::string RandomWalkIntegrator::ToString() const {
 // Integrator Method Definitions
 Integrator::~Integrator() {}
 
-struct BSDFScatterEval {
-    PBRT_CPU_GPU
-    BSDFScatterEval(const BSDF* bsdf, Normal3f ns) : bsdf(bsdf), ns(ns) {}
-    const BSDF* bsdf;
-    Normal3f ns;
-
-    PBRT_CPU_GPU
-    SampledSpectrum operator()(Float& scatterPDF, Vector3f wo, Vector3f wi, bool isDeltaLight) const {
-        scatterPDF = isDeltaLight ? 0.f : bsdf->PDF(wo, wi);
-        return bsdf->f(wo, wi) * AbsDot(wi, ns);
-    }
-};
-
-struct BSDFAndMediumScatterEval {
-    PBRT_CPU_GPU
-    BSDFAndMediumScatterEval(const BSDF* bsdf, PhaseFunction phase, Normal3f ns) : bsdf(bsdf), phase(phase), ns(ns) {}
-    const BSDF* bsdf;
-    PhaseFunction phase;
-    Normal3f ns;
-
-    PBRT_CPU_GPU
-    SampledSpectrum operator()(Float& scatterPDF, Vector3f wo, Vector3f wi, bool isDeltaLight) const {
-        if (bsdf) {
-            scatterPDF = isDeltaLight ? 0.f : bsdf->PDF(wo, wi);
-            return bsdf->f(wo, wi) * AbsDot(wi, ns);
-        } else {
-            scatterPDF = isDeltaLight ? 0.f : phase.PDF(wo, wi);
-            return SampledSpectrum(phase.p(wo, wi));
-        }
-        return SampledSpectrum(0);
-    }
-};
-
 // ImageTileIntegrator Method Definitions
 void ImageTileIntegrator::Render() {
     // Handle debugStart, if set
@@ -1339,10 +1306,15 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, uint32_t se
     Float u = sampler.Get1D();
     Point2f uLight = sampler.Get2D();
 
-    CHECK(intr.IsMediumInteraction());
-    PhaseFunction phase = intr.AsMedium().phase;
-    BSDFAndMediumScatterEval scatterEval(bsdf, phase, intr.AsSurface().shading.n);
-    pstd::optional<SampledLd> sLd = lightSampler.SampleLd(ctx, lambda, bsdf, seed, u, uLight, scatterEval);
+    pstd::optional<SampledLd> sLd;
+    if (bsdf) {
+        BSDFScatterEval scatterEval(bsdf, intr.AsSurface().shading.n);
+        sLd = lightSampler.SampleLd(ctx, lambda, bsdf, seed, u, uLight, scatterEval);
+    } else {
+        CHECK(intr.IsMediumInteraction());
+        MediumScatterEval scatterEval(intr.AsMedium().phase);
+        sLd = lightSampler.SampleLd(ctx, lambda, nullptr, seed, u, uLight, scatterEval);
+    }
     
     if (!sLd) {
         return SampledSpectrum(0);
