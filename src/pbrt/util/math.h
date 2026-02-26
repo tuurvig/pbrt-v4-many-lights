@@ -373,6 +373,20 @@ inline double SafeACos(double x) {
     return std::acos(Clamp(x, -1, 1));
 }
 
+PBRT_CPU_GPU
+inline Float SafeSubtractCos(Float sinTheta_a, Float cosTheta_a, Float sinTheta_b, Float cosTheta_b) {
+    if (cosTheta_a > cosTheta_b)
+        return 1;
+    return cosTheta_a * cosTheta_b + sinTheta_a * sinTheta_b;
+}
+
+PBRT_CPU_GPU
+inline Float SafeSubtractSin(Float sinTheta_a, Float cosTheta_a, Float sinTheta_b, Float cosTheta_b) {
+    if (cosTheta_a > cosTheta_b)
+        return 0;
+    return sinTheta_a * cosTheta_b - cosTheta_a * sinTheta_b;
+}
+
 PBRT_CPU_GPU inline Float Log2(Float x) {
     const Float invLog2 = 1.442695040888963387004650940071;
     return std::log(x) * invLog2;

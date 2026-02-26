@@ -82,23 +82,8 @@ class CompactLightBounds {
         // Compute clamped squared distance to reference point
         Point3f pc = (bounds.pMin + bounds.pMax) / 2;
         Float d2 = DistanceSquared(p, pc);
-        d2 = std::max(d2, LengthSquared(bounds.Diagonal()) / 2);
-        d2 = std::max(d2, ShadowEpsilon);
-
-        // Define cosine and sine clamped subtraction lambdas
-        auto cosSubClamped = [](Float sinTheta_a, Float cosTheta_a, Float sinTheta_b,
-                                Float cosTheta_b) -> Float {
-            if (cosTheta_a > cosTheta_b)
-                return 1;
-            return cosTheta_a * cosTheta_b + sinTheta_a * sinTheta_b;
-        };
-
-        auto sinSubClamped = [](Float sinTheta_a, Float cosTheta_a, Float sinTheta_b,
-                                Float cosTheta_b) -> Float {
-            if (cosTheta_a > cosTheta_b)
-                return 0;
-            return sinTheta_a * cosTheta_b - cosTheta_a * sinTheta_b;
-        };
+        Float r2 = LengthSquared(bounds.Diagonal()) / 4;
+        d2 = std::max(d2, r2);
 
         // Compute sine and cosine of angle to vector _w_, $\theta_\roman{w}$
         Vector3f wi = Normalize(p - pc);
@@ -113,27 +98,25 @@ class CompactLightBounds {
 
         // Compute $\cos\,\theta'$ and test against $\cos\,\theta_\roman{e}$
         Float sinTheta_o = SafeSqrt(1 - Sqr(cosTheta_o));
-        Float cosTheta_x = cosSubClamped(sinTheta_w, cosTheta_w, sinTheta_o, cosTheta_o);
-        Float sinTheta_x = sinSubClamped(sinTheta_w, cosTheta_w, sinTheta_o, cosTheta_o);
-        Float cosThetap = cosSubClamped(sinTheta_x, cosTheta_x, sinTheta_b, cosTheta_b);
+        Float cosTheta_x = SafeSubtractCos(sinTheta_w, cosTheta_w, sinTheta_o, cosTheta_o);
+        Float sinTheta_x = SafeSubtractSin(sinTheta_w, cosTheta_w, sinTheta_o, cosTheta_o);
+        Float cosThetap = SafeSubtractCos(sinTheta_x, cosTheta_x, sinTheta_b, cosTheta_b);
         if (cosThetap <= cosTheta_e)
             return 0;
 
         // Return final importance at reference point
-        Float importance = phiOrI * cosThetap / d2;
+        Float importance = phiOrI * cosThetap / std::max(MathEpsilon, d2);
         DCHECK_GE(importance, -1e-3);
         // Account for $\cos\theta_\roman{i}$ in importance at surfaces
         if (n != Normal3f(0, 0, 0)) {
             Float cosTheta_i = AbsDot(wi, n);
             Float sinTheta_i = SafeSqrt(1 - Sqr(cosTheta_i));
             Float cosThetap_i =
-                cosSubClamped(sinTheta_i, cosTheta_i, sinTheta_b, cosTheta_b);
+                SafeSubtractCos(sinTheta_i, cosTheta_i, sinTheta_b, cosTheta_b);
             importance *= cosThetap_i;
         }
 
-        importance = std::min(importance, MaxImportance);
-        importance = std::max<Float>(importance, 0);
-        return importance;
+        return std::max<Float>(importance, 0);
     }
 
   private:
@@ -604,12 +587,15 @@ inline Float ComputeGeometricBound(const LightcutsTreeNode* node, const Bounds3f
         const Bounds3f refBounds(refMin, refMax);
     
         Frame coneFrame = Frame::FromZ(node->compactLightBounds.W());
-        const Float boundCos = GeomTermBoundInFrame(point, coneFrame, refBounds);
-        
-        const Float halfAngle = std::acos(node->compactLightBounds.CosTheta_o());
-        const Float maxCos = std::max(Float(0), std::cos(std::max((Float)0, std::acos(boundCos) - halfAngle)));
+        const Float cosBound = GeomTermBoundInFrame(point, coneFrame, refBounds);
+        const Float sinBound = SafeSqrt(1 - Sqr(cosBound));
+
+        const Float cosHalfAngle = node->compactLightBounds.CosTheta_o();
+        const Float sinHalfAngle = SafeSqrt(1 - Sqr(cosHalfAngle));
+
+        const Float maxCos = SafeSubtractCos(sinBound, cosBound, sinHalfAngle, cosHalfAngle);
     
-        G *= maxCos;
+        G *= std::max(Float(0), maxCos);
     }
 
     return G;
