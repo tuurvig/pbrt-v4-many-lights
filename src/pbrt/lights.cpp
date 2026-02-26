@@ -109,22 +109,8 @@ PBRT_CPU_GPU Float LightBounds::Importance(Point3f p, Normal3f n) const {
     // Compute clamped squared distance to reference point
     Point3f pc = (bounds.pMin + bounds.pMax) / 2;
     Float d2 = DistanceSquared(p, pc);
-    d2 = std::max(d2, Length(bounds.Diagonal()) / 2);
-
-    // Define cosine and sine clamped subtraction lambdas
-    auto cosSubClamped = [](Float sinTheta_a, Float cosTheta_a, Float sinTheta_b,
-                            Float cosTheta_b) -> Float {
-        if (cosTheta_a > cosTheta_b)
-            return 1;
-        return cosTheta_a * cosTheta_b + sinTheta_a * sinTheta_b;
-    };
-
-    auto sinSubClamped = [](Float sinTheta_a, Float cosTheta_a, Float sinTheta_b,
-                            Float cosTheta_b) -> Float {
-        if (cosTheta_a > cosTheta_b)
-            return 0;
-        return sinTheta_a * cosTheta_b - cosTheta_a * sinTheta_b;
-    };
+    d2 = std::max(d2, LengthSquared(bounds.Diagonal()) / 4);
+    d2 = std::max(d2, MathEpsilon);
 
     // Compute sine and cosine of angle to vector _w_, $\theta_\roman{w}$
     Vector3f wi = Normalize(p - pc);
@@ -139,9 +125,9 @@ PBRT_CPU_GPU Float LightBounds::Importance(Point3f p, Normal3f n) const {
 
     // Compute $\cos\,\theta'$ and test against $\cos\,\theta_\roman{e}$
     Float sinTheta_o = SafeSqrt(1 - Sqr(cosTheta_o));
-    Float cosTheta_x = cosSubClamped(sinTheta_w, cosTheta_w, sinTheta_o, cosTheta_o);
-    Float sinTheta_x = sinSubClamped(sinTheta_w, cosTheta_w, sinTheta_o, cosTheta_o);
-    Float cosThetap = cosSubClamped(sinTheta_x, cosTheta_x, sinTheta_b, cosTheta_b);
+    Float cosTheta_x = SafeSubtractCos(sinTheta_w, cosTheta_w, sinTheta_o, cosTheta_o);
+    Float sinTheta_x = SafeSubtractSin(sinTheta_w, cosTheta_w, sinTheta_o, cosTheta_o);
+    Float cosThetap = SafeSubtractCos(sinTheta_x, cosTheta_x, sinTheta_b, cosTheta_b);
     if (cosThetap <= cosTheta_e)
         return 0;
 
@@ -152,11 +138,10 @@ PBRT_CPU_GPU Float LightBounds::Importance(Point3f p, Normal3f n) const {
     if (n != Normal3f(0, 0, 0)) {
         Float cosTheta_i = AbsDot(wi, n);
         Float sinTheta_i = SafeSqrt(1 - Sqr(cosTheta_i));
-        Float cosThetap_i = cosSubClamped(sinTheta_i, cosTheta_i, sinTheta_b, cosTheta_b);
+        Float cosThetap_i = SafeSubtractCos(sinTheta_i, cosTheta_i, sinTheta_b, cosTheta_b);
         importance *= cosThetap_i;
     }
 
-    importance = std::min<Float>(importance, MaxImportance);
     importance = std::max<Float>(importance, 0);
     return importance;
 }
@@ -166,35 +151,34 @@ std::string SphericalLightBounds::ToString() const {
                         center, radius, phi);
 }
 
-PBRT_CPU_GPU Float SphericalLightBounds::Importance(Point3f p, Normal3f n) const
-{
-    const Float d2 = DistanceSquared(center, p);
-    const Float radius2 = radius * radius;
+PBRT_CPU_GPU Float SphericalLightBounds::Importance(Point3f p, Normal3f n) const {
+    Vector3f wi = center - p;
+    const Float d2 = LengthSquared(wi);
+    const Float r2 = radius * radius;
+
+    const Float sqrtPhi = std::sqrt(phi);
 
     //  Case where p is inside the cluster bounds to avoid singularities
-    if (d2 <= radius2) {
-        return std::sqrt(phi) / radius2;
+    if (d2 <= r2 || n == Normal3f(0, 0, 0)) {
+        return sqrtPhi / std::max(r2, MathEpsilon);
     }
+    
+    const Float d = std::max(MathEpsilon, std::sqrt(d2));
+    wi /= d;
 
-    const Float d = std::sqrt(d2);
+    // Theta_b (angle subtended by a sphere)
+    const Float sinTheta_b = radius / d;
+    const Float cosTheta_b = SafeSqrt(1 - Sqr(sinTheta_b));
 
-    // Theta_c (angle subtended by sphere)
-    const Float sinTheta_c = radius / d;
-    const Float theta_c = std::asin(std::min(sinTheta_c, Float(1)));
+    const Float cosTheta_n = AbsDot(wi, n);
+    const Float sinTheta_n = SafeSqrt(1 - Sqr(cosTheta_b));
 
-    // Theta_n (angle between normal and vector to center)
-    Vector3f w = (center - p) / d;
-    Float cosTheta_n = Dot(n, w);
-    Float theta_n = std::acos(Clamp(cosTheta_n, -1, 1));
+    const Float Icp = SafeSubtractCos(sinTheta_n, cosTheta_n, sinTheta_b, cosTheta_b);
 
-    // Conservative irradiance estimation I(center, p)
-    // I(center, p) = cos(max(0, theta_n - theta_c))
-    Float angleTerm = std::max(Float(0), theta_n - theta_c);
-    Float I_cp = std::cos(angleTerm);
+    Float importance = (Icp * sqrtPhi) / std::max(d2, MathEpsilon);
+    DCHECK_GE(importance, -1e-3);
 
-    // h(center) - heuristic
-    Float distTerm = std::max(radius, d);
-    return (I_cp * std::sqrt(phi)) / distTerm * distTerm;
+    return std::max(importance, Float(0));
 }
 
 
