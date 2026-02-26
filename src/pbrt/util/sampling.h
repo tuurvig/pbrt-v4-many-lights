@@ -600,6 +600,54 @@ class WeightedReservoirSampler {
     T reservoir{};
 };
 
+// WeightedReservoirSetSampler Definition
+template <typename T, int N>
+class WeightedReservoirSetSampler {
+    static_assert(N > 0, "The size of the set N must be positive.");
+  public:
+    // WeightedReservoirSetSampler Public Methods
+    WeightedReservoirSetSampler() = default;
+
+    PBRT_CPU_GPU
+    explicit WeightedReservoirSetSampler(uint64_t baseSeed) : hash(baseSeed), count(0) {
+        Seed(baseSeed + 1);
+    }
+
+    PBRT_CPU_GPU
+    explicit Seed(uint64_t baseSeed) {
+        for (int i = 0; i < N; ++i) {
+            reservoirs[i].Seed(MixBits(baseSeed + i));
+        }
+    }
+
+    PBRT_CPU_GPU
+    bool Add(const T& sample, Float weight) {
+        int index = PermutationElement(count, N, hash);
+        ++count;
+
+        return reservoirs[index].Add(sample, weight);
+    }
+
+    template <typename F>
+    PBRT_CPU_GPU
+    bool Add(F func, Float weight) {
+        int index = PermutationElement(count, N, hash);
+        ++count;
+
+        return reservoirs[index].Add(func, weight);
+    }
+
+    PBRT_CPU_GPU
+    inline const WeightedReservoirSampler<T>& GetReservoir(int index) const {
+        return reservoirs[index];
+    }
+
+  private:
+    pstd::array<WeightedReservoirSampler<T>, N> reservoirs;
+    uint64_t hash;
+    uint32_t count;
+};
+
 // PiecewiseConstant1D Definition
 class PiecewiseConstant1D {
   public:
