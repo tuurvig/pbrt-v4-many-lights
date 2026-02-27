@@ -164,11 +164,12 @@ struct alignas(16) TraversalState {
 };
 
 PBRT_CPU_GPU
-void RHTLightSampler::CollectLightCandidates(LightCandidates& candidates, const LightSampleContext& ctx, uint32_t seed, const Float u, const Float uSplit, const Float pmf) const {
+void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSet, const LightSampleContext& ctx, uint32_t seed, const Float u, const Float uSplit, const Float pmf) const {
     TraversalState stack[PBRT_RHT_MAX_STACK];
     int stackHead = 0;
-    stack[stackHead] = {0, Float(1) - MathEpsilon, Float(1), u};
-    candidates.count = 0;
+
+    const Float startingSplitProbability = std::max(u, Float(1) - MathEpsilon);
+    stack[stackHead] = {0, startingSplitProbability, Float(1), u};
 
     Point3f p = ctx.p();
     Normal3f n = ctx.ns;
@@ -180,9 +181,13 @@ void RHTLightSampler::CollectLightCandidates(LightCandidates& candidates, const 
         const ResampledTreeNode* node = &m_tree.innerNodes[state.nodeIndex];
         if (node->isLeaf) {
             const Float pdf = state.PsParent + (1 - state.PsParent) * state.T;
-            DCHECK_LT(candidates.count, MAX_CANDIDATE_COUNT);
-            candidates.leaves[candidates.count] = {node->childOrLightIndex, pmf * pdf};
-            ++candidates.count;
+            const LightCandidate candidate{node->childOrLightIndex, pmf * pdf};
+
+            const CompactLight& cl(m_tree.leaves[candidate.lightIdx]);
+            const Float hWeight = cl.bounds.Importance(p, n, m_tree.allLightBounds);
+
+            reservoirSet.Add(candidate, hWeight);
+            continue;
         }
 
         const uint32_t childrenIndices[2] = {static_cast<uint32_t>(state.nodeIndex + 1), node->childOrLightIndex};
@@ -195,7 +200,7 @@ void RHTLightSampler::CollectLightCandidates(LightCandidates& candidates, const 
 
         const Float T_node = Pns + (1 - Pns) * state.T;
         
-        if (uSplit < PsNode) {
+        if (uSplit <= PsNode) {
             stackHead += 2;
             DCHECK_LT(stackHead, PBRT_RHT_MAX_STACK);
             Float uLeft  = state.uNode + HashFloat(seed, childrenIndices[0]);
@@ -223,7 +228,7 @@ void RHTLightSampler::CollectLightCandidates(LightCandidates& candidates, const 
         Float nodePMF = 0;
         Float uWarped = 0;
         int child = SampleDiscrete(ci, state.uNode, &nodePMF, &uWarped);
-        uWarped += HashFloat(seed, state.nodeIndex);
+        uWarped += HashFloat(seed, childrenIndices[child]);
         if (uWarped > 1) uWarped -= 1;
 
         ++stackHead;
@@ -231,6 +236,7 @@ void RHTLightSampler::CollectLightCandidates(LightCandidates& candidates, const 
         stack[stackHead] = {childrenIndices[child], PsNode, T_node * nodePMF, uWarped};
     }
 }
+
 
 std::string RHTLightSampler::ToString() const {
     return StringPrintf("[ RHTLightSampler innerNodes: %s leaves: %s ]", m_tree.innerNodes, m_tree.leaves);

@@ -34,8 +34,11 @@ struct LightPMF {
 };
 
 struct SampledLd {
+    SampledLd() = default;
+
     PBRT_CPU_GPU SampledLd(const SampledSpectrum& s, const Interaction& intr, Float lightPDF, Float scatterPDF) :
         Ld(s), pLight(intr), lightPDF(lightPDF), scatterPDF(scatterPDF) {}
+
     SampledSpectrum Ld;
     Interaction pLight;
     Float lightPDF;
