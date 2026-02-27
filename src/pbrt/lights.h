@@ -223,7 +223,7 @@ inline PBRT_CPU_GPU SphericalLightBounds Union(const SphericalLightBounds &a, co
 
     // If one sphere is inside the other
     if (dist + b.Radius() <= a.Radius()) return SphericalLightBounds(a.Centroid(), a.Radius(), a.Phi() + b.Phi());
-    if (dist + b.Radius() <= a.Radius()) return SphericalLightBounds(b.Centroid(), b.Radius(), a.Phi() + b.Phi());
+    if (dist + a.Radius() <= b.Radius()) return SphericalLightBounds(b.Centroid(), b.Radius(), a.Phi() + b.Phi());
 
     // Compute new enclosing sphere
     const Float newRadius = (dist + a.Radius() + b.Radius()) * Float(0.5);

@@ -601,20 +601,20 @@ class WeightedReservoirSampler {
 };
 
 // WeightedReservoirSetSampler Definition
-template <typename T, int N>
+template <typename T, uint32_t N>
 class WeightedReservoirSetSampler {
-    static_assert(N > 0, "The size of the set N must be positive.");
   public:
     // WeightedReservoirSetSampler Public Methods
     WeightedReservoirSetSampler() = default;
 
     PBRT_CPU_GPU
-    explicit WeightedReservoirSetSampler(uint64_t baseSeed) : hash(baseSeed), count(0) {
-        Seed(baseSeed + 1);
+    explicit WeightedReservoirSetSampler(uint64_t baseSeed) :
+        hash(baseSeed), batchHash(baseSeed), count(0), localIndex(0), currentBatch(1) {
+        Seed(hash + 1);
     }
 
     PBRT_CPU_GPU
-    explicit Seed(uint64_t baseSeed) {
+    void Seed(uint64_t baseSeed) {
         for (int i = 0; i < N; ++i) {
             reservoirs[i].Seed(MixBits(baseSeed + i));
         }
@@ -622,7 +622,15 @@ class WeightedReservoirSetSampler {
 
     PBRT_CPU_GPU
     bool Add(const T& sample, Float weight) {
-        int index = PermutationElement(count, N, hash);
+        // It is needed to compute a new seed for a permutation every N elements
+        if (localIndex == N) {
+            localIndex = 0;
+            ++currentBatch;
+            batchHash = MixBits(hash * currentBatch);
+        }
+
+        int index = PermutationElement(localIndex, N, batchHash);
+        ++localIndex;
         ++count;
 
         return reservoirs[index].Add(sample, weight);
@@ -631,7 +639,14 @@ class WeightedReservoirSetSampler {
     template <typename F>
     PBRT_CPU_GPU
     bool Add(F func, Float weight) {
-        int index = PermutationElement(count, N, hash);
+        if (localIndex == N) {
+            localIndex = 0;
+            ++currentBatch;
+            batchHash = MixBits(hash * currentBatch);
+        }
+
+        int index = PermutationElement(localIndex, N, batchHash);
+        ++localIndex;
         ++count;
 
         return reservoirs[index].Add(func, weight);
@@ -642,10 +657,23 @@ class WeightedReservoirSetSampler {
         return reservoirs[index];
     }
 
+    PBRT_CPU_GPU
+    inline int Size() {
+        return N;
+    }
+
+    PBRT_CPU_GPU
+    inline int ProcessedSamples() {
+        return count;
+    }
+
   private:
     pstd::array<WeightedReservoirSampler<T>, N> reservoirs;
     uint64_t hash;
+    uint64_t batchHash;
     uint32_t count;
+    uint32_t localIndex;
+    uint32_t currentBatch;
 };
 
 // PiecewiseConstant1D Definition
@@ -1039,6 +1067,36 @@ Array2D<Float> Sample2DFunction(std::function<Float(Float, Float)> f, int nu, in
                                 int nSamples,
                                 Bounds2f domain = {Point2f(0, 0), Point2f(1, 1)},
                                 Allocator alloc = {});
+
+//https://extremelearning.com.au/unreasonable-effectiveness-of-quasirandom-sequences/
+// R-sequence offset using generalized golden ratio (g) for multiple dimensions.
+// Used for offseting random variable
+PBRT_CPU_GPU inline Float GetR1SequenceOffset() {
+    constexpr double g = 1.6180339887498948482;
+    constexpr double gInv = 1 / g;
+    constexpr Float gInvFloat = Float(gInv);
+    return gInvFloat;
+}
+
+PBRT_CPU_GPU inline Point2f GetR2SequenceOffset() {
+    constexpr double g = 1.32471795724474602596;
+    constexpr double gInv = 1 / g;
+    constexpr double g2Inv = 1 / (g * g);
+    constexpr Float gInvFloat = Float(gInv);
+    constexpr Float g2InvFloat = Float(g2Inv);
+    return Point2f(gInvFloat, g2InvFloat);
+}
+
+PBRT_CPU_GPU inline Point3f GetR3SequenceOffset() {
+    constexpr double g = 1.22074408460575947536;
+    constexpr double gInv = 1 / g;
+    constexpr double g2Inv = 1 / (g * g);
+    constexpr double g3Inv = 1 / (g * g * g);
+    constexpr Float gInvFloat = Float(gInv);
+    constexpr Float g2InvFloat = Float(g2Inv);
+    constexpr Float g3InvFloat = Float(g3Inv);
+    return Point3f(gInvFloat, g2InvFloat, g3InvFloat);
+}
 
 namespace detail {
 

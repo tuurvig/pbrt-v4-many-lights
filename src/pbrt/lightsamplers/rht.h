@@ -24,7 +24,7 @@ namespace pbrt {
 class RHTLightSampler {
   public:
     // Resampled Hierarchic Tree Light Sampler Public Methods
-    RHTLightSampler(pstd::span<const Light> lights, Allocator alloc, Float gamma = 0.8);
+    RHTLightSampler(pstd::span<const Light> lights, Allocator alloc, Float gamma = 0.9);
 
     PBRT_CPU_GPU PBRT_NOINLINE
     pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t seed, Float u) const {
@@ -75,10 +75,10 @@ class RHTLightSampler {
             const uint32_t childrenIndices[2] = {static_cast<uint32_t>(nodeIndex + 1), node->childOrLightIndex};
 
             const Float PsNode = std::min(node->bounds.SplitProbability(p, gamma), PsParent);
-            const Float PsNatNode = std::max(MathEpsilon, 1 - PsNode);
+            const Float PsHatNode = std::max(MathEpsilon, 1 - PsNode);
 
             // Probability of splitting C_parent given that C has not been split
-            const Float Pns = (PsParent - PsNode) / PsNatNode;
+            const Float Pns = (PsParent - PsNode) / PsHatNode;
             const Float T_node = Pns + (1 - Pns) * T;
 
             const int child = bitTrail & 1;
@@ -105,6 +105,8 @@ class RHTLightSampler {
             PsParent = PsNode;
             nodeIndex = childrenIndices[child];
             node = &m_tree.innerNodes[nodeIndex];
+
+            bitTrail >>= 1;
         }
 
         return PsParent + (1 - PsParent) * T;
@@ -142,6 +144,9 @@ class RHTLightSampler {
         return LightPMF(pmf / m_tree.leaves.size()); 
     }
     
+#define PBRT_RHT_RESERVOIR_SET_H_SIZE 16
+#define PBRT_RHT_RESAMPLED_CANDIDATES 1
+
     template <typename ScatterEval>
     PBRT_CPU_GPU PBRT_NOINLINE pstd::optional<SampledLd> SampleLd(const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const {
         Float pmf = 1;
@@ -163,9 +168,55 @@ class RHTLightSampler {
             }
         }
 
-        LightCandidates candidates;
-        CollectLightCandidates(candidates, ctx, seed, u, HashFloat(seed), pmf);
-        return SampledLd(SampledSpectrum(0), Interaction(), 0, 0);
+        const Point3f p = ctx.p();
+        const Normal3f n = ctx.ns;
+        
+        HeuristicHReservoirSet heuristicHSampler(Hash(u, seed));
+        CollectLightCandidates(heuristicHSampler, ctx, seed, u, HashFloat(seed), pmf);
+        
+        Point2f uLightOffset = GetR2SequenceOffset();
+        WeightedReservoirSampler<SampledLd> heuristicFSampler(Hash(u, MixBits(seed)));
+        for (int i = 0; i < heuristicHSampler.Size(); ++i) {
+            // advance the sample unconditionally
+            const Point2f uLightCurrent = uLight;
+            uLight += uLightOffset;
+            if (uLight.x >= 1) uLight.x -= 1;
+            if (uLight.y >= 1) uLight.y -= 1;
+
+            const WeightedReservoirSampler<LightCandidate>& reservoir(heuristicHSampler.GetReservoir(i));
+            if (!reservoir.HasSample()) {
+                continue;
+            }
+
+            const LightCandidate& sample(reservoir.GetSample());
+            const Float hWeight = reservoir.SampleProbability();
+
+            Light light = m_tree.leaves[sample.lightIdx].light;
+            DCHECK(light && sample.pmf != 0);
+            pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLightCurrent, lambda, true);
+            if (!ls || !ls->L || ls->pdf == 0)
+                continue;
+
+            Float lightPDF = sample.pmf * ls->pdf;
+            
+            Float scatterPDF = 0;
+            SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
+            SampledLd sLd(f_hat * ls->L * hWeight, ls->pLight, lightPDF, scatterPDF);
+            
+            // F(Si) = bsdf * (Li / pdfLight) * misW * hW(Li)
+            const Float fWeight = sLd.Ld.MaxComponentValue() / (lightPDF + scatterPDF);
+            if (fWeight > 0) {
+                heuristicFSampler.Add(sLd, fWeight);
+            }
+        }
+
+        if (!heuristicFSampler.HasSample()) {
+            return {};
+        }
+
+        SampledLd resultLd(heuristicFSampler.GetSample());
+        resultLd.Ld *= heuristicFSampler.SampleProbability();
+        return resultLd;
     }
 
     std::string ToString() const;
@@ -175,19 +226,11 @@ class RHTLightSampler {
     bool buildLightTreeGPU(std::vector<RHTBuildContainer> &lights);
 #endif
 
-    #define MAX_CANDIDATE_COUNT 64
-    struct alignas(8) LightCandidate {
-        uint32_t lightIdx;
-        Float pmf;
-    };
-
-    struct LightCandidates {
-        LightCandidate leaves[MAX_CANDIDATE_COUNT];
-        int count = 0;
-    };
+    using HeuristicHReservoirSet = WeightedReservoirSetSampler<LightCandidate, PBRT_RHT_RESERVOIR_SET_H_SIZE>;
 
     PBRT_CPU_GPU
-    void CollectLightCandidates(LightCandidates& candidates, const LightSampleContext& ctx, uint32_t seed, Float u, Float uSplit, Float pmf) const;
+    void CollectLightCandidates(HeuristicHReservoirSet& reservoirSet, const LightSampleContext& ctx, uint32_t seed, Float u, Float uSplit, Float pmf) const;
+
 
     // Resampled Hierarchic Tree Light Sampler Private Members
     ResampledTree m_tree;

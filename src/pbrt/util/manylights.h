@@ -18,6 +18,30 @@
 
 namespace pbrt {
 
+struct alignas(8) LightCandidate {
+    uint32_t lightIdx;
+    Float pmf;
+};
+
+template <typename T, int N>
+struct CountedArray {
+    PBRT_CPU_GPU
+    inline const T& operator[](int index) const {
+        DCHECK_LT(index, N);
+        return leaves[index];
+    }
+
+    PBRT_CPU_GPU
+    void Add(const T& elem) {
+        DCHECK_LT(count, N);
+        leaves[count] = elem;
+        ++count;
+    }
+
+    T leaves[N];
+    int count = 0;
+};
+
 /// CompactLightBounds Definition
 //////////////////////////////////////////////////////////
 class CompactLightBounds {
