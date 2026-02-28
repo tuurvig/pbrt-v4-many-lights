@@ -158,8 +158,8 @@ bool RHTLightSampler::buildLightTreeGPU(std::vector<RHTBuildContainer> &lights) 
 #define PBRT_RHT_MAX_STACK 64
 struct alignas(16) TraversalState {
     uint32_t nodeIndex;
-    Float PsParent; // probability of splitting C_parent
     Float T; // accumulated traversal state T(C)
+    Float PsParent; // probability of splitting C_parent
     Float uNode; // random variable for traversal
 };
 
@@ -168,8 +168,8 @@ void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSe
     TraversalState stack[PBRT_RHT_MAX_STACK];
     int stackHead = 0;
 
-    const Float startingSplitProbability = std::max(u, Float(1) - MathEpsilon);
-    stack[stackHead] = {0, startingSplitProbability, Float(1), u};
+    const Float startingSplitProbability = std::max(uSplit, Float(1) - MathEpsilon);
+    stack[stackHead] = {0, Float(1), startingSplitProbability, u};
 
     Point3f p = ctx.p();
     Normal3f n = ctx.ns;
@@ -181,12 +181,12 @@ void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSe
         const ResampledTreeNode* node = &m_tree.innerNodes[state.nodeIndex];
         if (node->isLeaf) {
             const Float pdf = state.PsParent + (1 - state.PsParent) * state.T;
-            const LightCandidate candidate{node->childOrLightIndex, pmf * pdf};
+            uint32_t lightIdx = node->childOrLightIndex;
+            const CompactLight& cl(m_tree.leaves[lightIdx]);
+            const Float importance = cl.bounds.Importance(p, n, m_tree.allLightBounds);
 
-            const CompactLight& cl(m_tree.leaves[candidate.lightIdx]);
-            const Float hWeight = cl.bounds.Importance(p, n, m_tree.allLightBounds);
-
-            reservoirSet.Add(candidate, hWeight);
+            const LightCandidate candidate{lightIdx, pdf};
+            reservoirSet.Add(candidate, importance / pdf);
             continue;
         }
 
@@ -200,6 +200,16 @@ void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSe
 
         const Float T_node = Pns + (1 - Pns) * state.T;
         
+        const ResampledTreeNode *children[2] = {&m_tree.innerNodes[childrenIndices[0]],
+                                                &m_tree.innerNodes[childrenIndices[1]]};
+
+        const Float ci[2] = {children[0]->bounds.Importance(p, n),
+                             children[1]->bounds.Importance(p, n)};
+
+        if (ci[0] == 0 && ci[1] == 0) {
+            continue;
+        }
+
         if (uSplit <= PsNode) {
             stackHead += 2;
             DCHECK_LT(stackHead, PBRT_RHT_MAX_STACK);
@@ -209,18 +219,12 @@ void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSe
             if (uLeft > 1) uLeft -= 1;
             if (uRight > 1) uRight -= 1;
 
-            stack[stackHead]     = {childrenIndices[0], PsNode, T_node, uLeft};
-            stack[stackHead - 1] = {childrenIndices[1], PsNode, T_node, uRight};
-            continue;
-        }
-        
-        const ResampledTreeNode *children[2] = {&m_tree.innerNodes[childrenIndices[0]],
-                                                &m_tree.innerNodes[childrenIndices[1]]};
+            Float weight[2] = {0,0};
+            weight[0] = ci[0] / (ci[0] + ci[1]);
+            weight[1] = 1 - weight[0];
 
-        const Float ci[2] = {children[0]->bounds.Importance(p, n),
-                             children[1]->bounds.Importance(p, n)};
-
-        if (ci[0] == 0 && ci[1] == 0) {
+            stack[stackHead]     = {childrenIndices[0], T_node * weight[0], PsNode, uLeft};
+            stack[stackHead - 1] = {childrenIndices[1], T_node * weight[1], PsNode, uRight};
             continue;
         }
 
@@ -233,7 +237,7 @@ void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSe
 
         ++stackHead;
         DCHECK_LT(stackHead, PBRT_RHT_MAX_STACK);
-        stack[stackHead] = {childrenIndices[child], PsNode, T_node * nodePMF, uWarped};
+        stack[stackHead] = {childrenIndices[child], T_node * nodePMF, PsNode, uWarped};
     }
 }
 

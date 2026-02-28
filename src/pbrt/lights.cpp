@@ -152,33 +152,56 @@ std::string SphericalLightBounds::ToString() const {
 }
 
 PBRT_CPU_GPU Float SphericalLightBounds::Importance(Point3f p, Normal3f n) const {
-    Vector3f wi = center - p;
-    const Float d2 = LengthSquared(wi);
-    const Float r2 = radius * radius;
+    //Vector3f wi = center - p;
+    //const Float d2 = LengthSquared(wi);
+    //const Float r2 = radius * radius;
+    //
+    //const Float sqrtPhi = std::sqrt(phi);
+    //
+    ////  Case where p is inside the cluster bounds to avoid singularities
+    //if (d2 <= r2 || n == Normal3f(0, 0, 0)) {
+    //    return sqrtPhi / std::max(r2, MathEpsilon);
+    //}
+    //
+    //const Float d = std::max(MathEpsilon, std::sqrt(d2));
+    //wi /= d;
+    //
+    //// Theta_b (angle subtended by a sphere)
+    //const Float sinTheta_b = radius / d;
+    //const Float cosTheta_b = SafeSqrt(1 - Sqr(sinTheta_b));
+    //
+    //const Float cosTheta_n = AbsDot(wi, n);
+    //const Float sinTheta_n = SafeSqrt(1 - Sqr(cosTheta_n));
+    //
+    //const Float Icp = SafeSubtractCos(sinTheta_n, cosTheta_n, sinTheta_b, cosTheta_b);
+    //
+    //Float importance = (Icp * sqrtPhi) / std::max(d2, MathEpsilon);
+    //DCHECK_GE(importance, -1e-3);
+    //
+    //return std::max(importance, Float(0));
 
-    const Float sqrtPhi = std::sqrt(phi);
-
-    //  Case where p is inside the cluster bounds to avoid singularities
-    if (d2 <= r2 || n == Normal3f(0, 0, 0)) {
-        return sqrtPhi / std::max(r2, MathEpsilon);
-    }
+    Vector3f wi = Normalize(center - p);
+    const Float d2 = std::max(DistanceSquared(center, p), radius * radius);
+    const Float d = std::sqrt(d2);
     
-    const Float d = std::max(MathEpsilon, std::sqrt(d2));
-    wi /= d;
-
     // Theta_b (angle subtended by a sphere)
-    const Float sinTheta_b = radius / d;
+    const Float sinTheta_b = radius / std::max(d, MathEpsilon);
     const Float cosTheta_b = SafeSqrt(1 - Sqr(sinTheta_b));
-
-    const Float cosTheta_n = AbsDot(wi, n);
-    const Float sinTheta_n = SafeSqrt(1 - Sqr(cosTheta_b));
-
-    const Float Icp = SafeSubtractCos(sinTheta_n, cosTheta_n, sinTheta_b, cosTheta_b);
-
-    Float importance = (Icp * sqrtPhi) / std::max(d2, MathEpsilon);
+    
+    // Return final importance at reference point
+    Float importance = std::sqrt(phi) / std::max(d2, MathEpsilon);
     DCHECK_GE(importance, -1e-3);
+    
+    if (n != Normal3f(0, 0, 0)) {
+        const Float cosTheta_n = AbsDot(wi, n);
+        const Float sinTheta_n = SafeSqrt(1 - Sqr(cosTheta_n));
+        
+        const Float Icp = SafeSubtractCos(sinTheta_n, cosTheta_n, sinTheta_b, cosTheta_b);
+        importance *= Icp;
+    }
 
-    return std::max(importance, Float(0));
+    importance = std::max<Float>(importance, 0);
+    return importance;
 }
 
 
