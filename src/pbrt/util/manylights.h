@@ -23,6 +23,11 @@ struct alignas(8) LightCandidate {
     Float pmf;
 };
 
+struct ResampledCandidate {
+    SampledLd sLd;
+    Float pmf;
+};
+
 template <typename T, int N>
 struct CountedArray {
     PBRT_CPU_GPU
