@@ -146,8 +146,8 @@ class RHTLightSampler {
 #define PBRT_RHT_RESERVOIR_SET_H_SIZE 16
 #define PBRT_RHT_RESAMPLED_CANDIDATES 1
 
-    template <typename ScatterEval>
-    PBRT_CPU_GPU PBRT_NOINLINE pstd::optional<SampledLd> SampleLd(const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const {
+    template <int NSamples, typename ScatterEval>
+    PBRT_CPU_GPU PBRT_NOINLINE void SampleLd(CountedArray<SampledLd, NSamples>& samples, const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const {
         Float pmf = 1;
         {
             pstd::optional<SampledLight> infiniteLightSample = InfiniteLightSimpleSample(m_infiniteLights, m_tree.leaves.size(), pmf, u);
@@ -156,14 +156,14 @@ class RHTLightSampler {
                 DCHECK(light && infiniteLightSample->p != 0);
                 pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
                 if (!ls || !ls->L || ls->pdf == 0)
-                    return {};
+                    return;
 
                 Float lightPDF = infiniteLightSample->p * ls->pdf;
                 ls->L *= infiniteLightSample->scale;
                 
                 Float scatterPDF = 0;
                 SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
-                return SampledLd(f_hat * ls->L, ls->pLight, lightPDF, scatterPDF);
+                samples.Add(SampledLd(f_hat * ls->L, ls->pLight, lightPDF, scatterPDF));
             }
         }
 
@@ -212,17 +212,17 @@ class RHTLightSampler {
         }
         
         if (!heuristicFSampler.HasSample()) {
-            return {};
+            return;
         }
         
         SampledLd resultLd(heuristicFSampler.GetSample());
         const Float fProb = heuristicFSampler.SampleProbability();
         if (fProb <= 0 || IsNaN(fProb) || IsInf(fProb)) {
-            return {};
+            return;
         }
         
         resultLd.Ld /= fProb;
-        return resultLd;
+        samples.Add(resultLd);
     }
 
     std::string ToString() const;

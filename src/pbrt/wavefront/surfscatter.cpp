@@ -283,33 +283,35 @@ void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQue
                     ctx.pi = OffsetRayOrigin(ctx.pi, w.n, -wo);
 
                 BSDFScatterEval scatterEval(&bsdf, ns);
-                pstd::optional<SampledLd> sLd =
-                    lightSampler.SampleLd(ctx, lambda, &bsdf, Hash(sampleIndex, w.pixelIndex, (w.depth + 1)),
-                                          raySamples.direct.uc, raySamples.direct.u, scatterEval);
-                if (!sLd) {
-                    return;
+                CountedArray<SampledLd, NShadowRays> samplesLd;
+                lightSampler.SampleLd(samplesLd, ctx, lambda, &bsdf, Hash(sampleIndex, w.pixelIndex, (w.depth + 1)),
+                                      raySamples.direct.uc, raySamples.direct.u, scatterEval);
+
+                for (int i = 0; i < samplesLd.count; ++i) {
+                    const SampledLd& sLd(samplesLd[i]);
+
+                    // Compute path throughput and path PDFs for light sample
+                    SampledSpectrum r_u = w.r_u * sLd.scatterPDF;
+                    SampledSpectrum r_l = w.r_u * sLd.lightPDF;
+
+                    SampledSpectrum Ld = w.beta * sLd.Ld;
+                    
+                    // Enqueue shadow ray with tentative radiance contribution
+                    Ray ray = SpawnRayTo(w.pi, w.n, w.time, sLd.pLight.pi, sLd.pLight.n);
+                    // Initialize _ray_ medium if media are present
+                    if (haveMedia)
+                        ray.medium = Dot(ray.d, w.n) > 0 ? w.mediumInterface.outside
+                                                         : w.mediumInterface.inside;
+
+                    shadowRayQueue->Push(ShadowRayWorkItem{ray, 1 - ShadowEpsilon, lambda, Ld,
+                                                           r_u, r_l, w.pixelIndex});
+
+                    PBRT_DBG("w.index %d spawned shadow ray depth %d Ld/uni %f %f %f %f\n",
+                             w.pixelIndex, w.depth, Ld[0], Ld[1], Ld[2], Ld[3],
+                             SafeDiv(Ld, r_u)[0], SafeDiv(Ld, r_u)[1],
+                             SafeDiv(Ld, r_u)[2], SafeDiv(Ld, r_u)[3]);
                 }
-
-                // Compute path throughput and path PDFs for light sample
-                SampledSpectrum r_u = w.r_u * sLd->scatterPDF;
-                SampledSpectrum r_l = w.r_u * sLd->lightPDF;
-
-                SampledSpectrum Ld = w.beta * sLd->Ld;
                 
-                // Enqueue shadow ray with tentative radiance contribution
-                Ray ray = SpawnRayTo(w.pi, w.n, w.time, sLd->pLight.pi, sLd->pLight.n);
-                // Initialize _ray_ medium if media are present
-                if (haveMedia)
-                    ray.medium = Dot(ray.d, w.n) > 0 ? w.mediumInterface.outside
-                                                     : w.mediumInterface.inside;
-
-                shadowRayQueue->Push(ShadowRayWorkItem{ray, 1 - ShadowEpsilon, lambda, Ld,
-                                                       r_u, r_l, w.pixelIndex});
-
-                PBRT_DBG("w.index %d spawned shadow ray depth %d Ld/uni %f %f %f %f\n",
-                         w.pixelIndex, w.depth, Ld[0], Ld[1], Ld[2], Ld[3],
-                         SafeDiv(Ld, r_u)[0], SafeDiv(Ld, r_u)[1],
-                         SafeDiv(Ld, r_u)[2], SafeDiv(Ld, r_u)[3]);
             }
         });
 }
