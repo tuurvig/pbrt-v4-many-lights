@@ -201,12 +201,12 @@ class RHTLightSampler {
 
             f_hat *= ls->L;
 
-            SampledLd sLd(f_hat / hProb, ls->pLight, lightPDF, scatterPDF);
+            //SampledLd sLd(f_hat / hProb, ls->pLight, lightPDF, scatterPDF);
         
             // F(Si) = bsdf * (Li / pdfLight) * misW * hW(Li)
             const Float fWeight = f_hat.MaxComponentValue() / (lightPDF * hProb + scatterPDF);
             if (fWeight > 0) {
-                heuristicFSampler.Add(sLd, fWeight);
+                heuristicFSampler.Add([&]{return SampledLd(f_hat / hProb, ls->pLight, lightPDF, scatterPDF);}, fWeight);
             }
         }
         

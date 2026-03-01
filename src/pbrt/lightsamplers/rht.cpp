@@ -191,8 +191,8 @@ void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSe
     PackedTraversalState stack[PBRT_RHT_MAX_STACK];
     int stackHead = -1;
 
-    const Float startingSplitProbability = std::max(uSplit, Float(1) - MathEpsilon);
-    TraversalState state(0, Float(1), startingSplitProbability);
+    //const Float startingSplitProbability = std::max(uSplit, Float(1) - MathEpsilon);
+    TraversalState state(0, Float(1), Float(1));
 
     Point3f p = ctx.p();
     Normal3f n = ctx.ns;
@@ -203,12 +203,13 @@ void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSe
         if (node->isLeaf) {
             const Float pdf = (state.PsParent + (1 - state.PsParent) * state.T) * pmf;
 
-            const uint32_t lightIdx = node->childOrLightIndex;
-            const CompactLight &cl(m_tree.leaves[lightIdx]);
-            const Float importance = cl.bounds.Importance(p, n, m_tree.allLightBounds);
-
-            const LightCandidate candidate{lightIdx, pdf};
-            reservoirSet.Add(candidate, importance / pdf);
+            if (pdf > 0) {
+                const uint32_t lightIdx = node->childOrLightIndex;
+                const CompactLight &cl(m_tree.leaves[lightIdx]);
+                const Float importance = cl.bounds.Importance(p, n, m_tree.allLightBounds);
+                const LightCandidate candidate{lightIdx, pdf};
+                reservoirSet.Add(candidate, importance / pdf);
+            }
 
             if (stackHead < 0) break;
 
@@ -224,7 +225,7 @@ void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSe
         const Float PsHatNode = 1 - PsNode; // Ps_hat(C)
 
         // propability of splitting C_parent given that C has not been split
-        const Float Pns = (state.PsParent - PsNode) / PsHatNode; // Pns(C)
+        const Float Pns = (state.PsParent - PsNode) / std::max(PsHatNode, MathEpsilon); // Pns(C)
         const Float T_node = Pns + (1 - Pns) * state.T;
 
         const ResampledTreeNode *childLeft = &m_tree.innerNodes[childIdxLeft];
@@ -247,7 +248,7 @@ void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSe
         const Float pRight = 1 - pLeft;
 
         if (uSplit <= PsNode) {
-            DCHECK_LT(stackHead, PBRT_RHT_MAX_STACK);
+            DCHECK_LT(stackHead, PBRT_RHT_MAX_STACK - 1);
 
             state = TraversalState(childIdxLeft, T_node * pLeft, PsNode);
             stackHead++;
