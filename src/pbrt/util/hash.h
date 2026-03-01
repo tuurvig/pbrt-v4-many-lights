@@ -123,6 +123,17 @@ PBRT_CPU_GPU inline uint32_t FastIntegerHash(uint32_t input) {
     return HashPCG(input);
 }
 
+PBRT_CPU_GPU inline uint16_t PackNormalizedFloat(const Float val) {
+    DCHECK_LE(val, 1);
+    DCHECK_LE(0, val);
+    return static_cast<uint16_t>(val * std::numeric_limits<uint16_t>::max());
+}
+
+template <typename IntType>
+PBRT_CPU_GPU inline Float UnpackToFloat(IntType val) {
+    return static_cast<Float>(val) / static_cast<Float>(std::numeric_limits<IntType>::max());
+}
+
 }  // namespace pbrt
 
 #endif  // PBRT_UTIL_HASH_H

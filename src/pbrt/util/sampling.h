@@ -112,9 +112,21 @@ PBRT_CPU_GPU inline int SampleDiscrete(pstd::span<const Float> weights, Float u,
     return offset;
 }
 
-//PBRT_CPU_GPU inline uint32_t ZoomSampleInteger() {
-//
-//}
+PBRT_CPU_GPU inline int SampleBinary(const Float wLeft, const Float wRight, Float& u, Float& pmf) {
+    const Float wSum = wLeft + wRight;
+    const Float pLeft = wLeft / wSum;
+
+    if (pLeft <= u){
+        u /= wLeft;
+        pmf *= pLeft;
+        return 0;
+    } else {
+        const Float pRight = 1 - pLeft;
+        u = (1 - u) / pRight;
+        pmf *= pRight;
+        return 1;
+    }
+}
 
 PBRT_CPU_GPU inline Float LinearPDF(Float x, Float a, Float b) {
     DCHECK(a >= 0 && b >= 0);
