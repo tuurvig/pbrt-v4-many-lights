@@ -203,12 +203,13 @@ void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSe
         if (node->isLeaf) {
             const Float pdf = (state.PsParent + (1 - state.PsParent) * state.T) * pmf;
 
-            if (pdf > 0) {
-                const uint32_t lightIdx = node->childOrLightIndex;
-                const CompactLight &cl(m_tree.leaves[lightIdx]);
-                const Float importance = cl.bounds.Importance(p, n, m_tree.allLightBounds);
+            const uint32_t lightIdx = node->childOrLightIndex;
+            const CompactLight &cl(m_tree.leaves[lightIdx]);
+            const Float hImportance = cl.bounds.Importance(p, n, m_tree.allLightBounds) / pdf;
+
+            if (pdf > MachineEpsilon && hImportance > MachineEpsilon) {
                 const LightCandidate candidate{lightIdx, pdf};
-                reservoirSet.Add(candidate, importance / pdf);
+                reservoirSet.Add(candidate, hImportance);
             }
 
             if (stackHead < 0) break;

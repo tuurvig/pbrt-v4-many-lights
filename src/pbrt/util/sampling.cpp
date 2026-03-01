@@ -78,7 +78,7 @@ PBRT_CPU_GPU pstd::array<Float, 3> SampleSphericalTriangle(const pstd::array<Poi
     Vector3f cp = cosBp * a + sinBp * Normalize(GramSchmidt(c, a));
 
     // Compute sampled spherical triangle direction and return barycentrics
-    Float cosTheta = 1 - u[1] * (1 - Dot(cp, b));
+    Float cosTheta = std::min(1 - u[1] * (1 - Dot(cp, b)), Float(1));
     Float sinTheta = SafeSqrt(1 - Sqr(cosTheta));
     Vector3f w = cosTheta * b + sinTheta * Normalize(GramSchmidt(cp, b));
     // Find barycentric coordinates for sampled direction _w_
