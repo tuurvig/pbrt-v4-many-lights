@@ -119,6 +119,8 @@ class RHTLightSampler {
             }
         }
 
+        if (m_tree.leaves.empty()) return {};
+
         uint32_t index = std::min<uint32_t>(u * static_cast<Float>(m_tree.leaves.size()), m_tree.leaves.size() - 1);
         pmf /= m_tree.leaves.size();
         return SampledLight{m_tree.leaves[index].light, pmf};
@@ -191,7 +193,7 @@ class RHTLightSampler {
             Light light = m_tree.leaves[sample.lightIdx].light;
             DCHECK(light && sample.pmf != 0);
             pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLightCurrent, lambda, true);
-            if (!ls || !ls->L || ls->pdf == 0)
+            if (!ls || !ls->L || ls->pdf == 0 || hProb <= 0)
                 continue;
         
             const Float lightPDF = sample.pmf * ls->pdf;
@@ -200,11 +202,10 @@ class RHTLightSampler {
             SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
 
             f_hat *= ls->L;
-
-            //SampledLd sLd(f_hat / hProb, ls->pLight, lightPDF, scatterPDF);
         
             // F(Si) = bsdf * (Li / pdfLight) * misW * hW(Li)
-            const Float fWeight = f_hat.MaxComponentValue() / (lightPDF * hProb + scatterPDF);
+            const Float denom = lightPDF * hProb + scatterPDF;
+            const Float fWeight = f_hat.MaxComponentValue() / denom;
             if (fWeight > 0) {
                 heuristicFSampler.Add([&]{return SampledLd(f_hat / hProb, ls->pLight, lightPDF, scatterPDF);}, fWeight);
             }
@@ -216,6 +217,9 @@ class RHTLightSampler {
         
         SampledLd resultLd(heuristicFSampler.GetSample());
         const Float fProb = heuristicFSampler.SampleProbability();
+        if (fProb <= 0 || IsNaN(fProb) || IsInf(fProb)) {
+            return {};
+        }
         
         resultLd.Ld /= fProb;
         return resultLd;
