@@ -183,7 +183,8 @@ WavefrontPathIntegrator::WavefrontPathIntegrator(
         scene.integrator.parameters.GetOneString("lightsampler", "bvh");
     if (allLights.size() == 1)
         lightSamplerName = "uniform";
-    lightSampler = LightSampler::Create(lightSamplerName, allLights, Options->discretizeAreaLights > 0, alloc);
+    lightSampler = LightSampler::Create(requiredShadowRays, lightSamplerName, allLights, Options->discretizeAreaLights > 0, alloc);
+    
     LOG_VERBOSE("Finished creating light sampler");
 
     if (scene.integrator.name != "path" && scene.integrator.name != "volpath")
@@ -240,7 +241,7 @@ WavefrontPathIntegrator::WavefrontPathIntegrator(
     rayQueues[0] = alloc.new_object<RayQueue>(maxQueueSize, alloc);
     rayQueues[1] = alloc.new_object<RayQueue>(maxQueueSize, alloc);
 
-    shadowRayQueue = alloc.new_object<ShadowRayQueue>(maxQueueSize, alloc);
+    shadowRayQueue = alloc.new_object<ShadowRayQueue>(maxQueueSize * static_cast<int>(requiredShadowRays), alloc);
 
     if (haveSubsurface) {
         bssrdfEvalQueue =
@@ -423,7 +424,7 @@ Float WavefrontPathIntegrator::Render() {
                     if (wavefrontDepth == maxDepth)
                         break;
 
-                    EvaluateMaterialsAndBSDFs(wavefrontDepth, cameraMotion);
+                    EvaluateMaterialsAndBSDFs<1>(wavefrontDepth, cameraMotion);
 
                     // Do immediately so that we have space for shadow rays for subsurface..
                     TraceShadowRays(wavefrontDepth);

@@ -8,16 +8,6 @@
 
 namespace pbrt {
 
-// SampleMediumScatteringCallback Definition
-struct SampleMediumScatteringCallback {
-    int wavefrontDepth;
-    WavefrontPathIntegrator *integrator;
-    template <typename PhaseFunction>
-    void operator()() {
-        integrator->SampleMediumScattering<PhaseFunction>(wavefrontDepth);
-    }
-};
-
 // WavefrontPathIntegrator Participating Media Methods
 void WavefrontPathIntegrator::SampleMediumInteraction(int wavefrontDepth) {
     if (!haveMedia)
@@ -252,11 +242,35 @@ void WavefrontPathIntegrator::SampleMediumInteraction(int wavefrontDepth) {
     if (wavefrontDepth == maxDepth)
         return;
 
-    ForEachType(SampleMediumScatteringCallback{wavefrontDepth, this},
+    SampleMediumScattering(wavefrontDepth);
+}
+
+// SampleMediumScatteringCallback Definition
+template <int NShadowRays>
+struct SampleMediumScatteringCallback {
+    int wavefrontDepth;
+    WavefrontPathIntegrator *integrator;
+    template <typename PhaseFunction>
+    void operator()() {
+        integrator->SampleMediumScattering<PhaseFunction, NShadowRays>(wavefrontDepth);
+    }
+};
+
+void WavefrontPathIntegrator::SampleMediumScattering(int wavefrontDepth) {
+    switch (requiredShadowRays) {
+        case E_TWO_SHADOW_RAYS: SampleMediumScattering<E_TWO_SHADOW_RAYS>(wavefrontDepth); break;
+        case E_LIGHTCUTS_SHADOW_RAYS: SampleMediumScattering<E_LIGHTCUTS_SHADOW_RAYS>(wavefrontDepth); break;
+        default: SampleMediumScattering<E_DEFAULT_SHADOW_RAYS>(wavefrontDepth); break;
+    }
+}
+
+template <int NShadowRays>
+void WavefrontPathIntegrator::SampleMediumScattering(int wavefrontDepth) {
+    ForEachType(SampleMediumScatteringCallback<NShadowRays>{wavefrontDepth, this},
                 PhaseFunction::Types());
 }
 
-template <typename ConcretePhaseFunction>
+template <typename ConcretePhaseFunction, int NShadowRays>
 void WavefrontPathIntegrator::SampleMediumScattering(int wavefrontDepth) {
     RayQueue *currentRayQueue = CurrentRayQueue(wavefrontDepth);
     RayQueue *nextRayQueue = NextRayQueue(wavefrontDepth);

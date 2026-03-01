@@ -621,8 +621,8 @@ PathIntegrator::PathIntegrator(int maxDepth, Camera camera, Sampler sampler,
                                Primitive aggregate, std::vector<Light> lights,
                                const std::string &lightSampleStrategy, bool regularize)
     : RayIntegrator(camera, sampler, aggregate, lights),
-      maxDepth(maxDepth),
-      lightSampler(LightSampler::Create(lightSampleStrategy, lights, Options->discretizeAreaLights > 0, Allocator())),
+      maxDepth(maxDepth), requiredShadowRays(E_DEFAULT_SHADOW_RAYS),
+      lightSampler(LightSampler::Create(requiredShadowRays, lightSampleStrategy, lights, Options->discretizeAreaLights > 0, Allocator())),
       regularize(regularize) {}
 
 SampledSpectrum PathIntegrator::Li(RayDifferential ray, uint32_t seed, SampledWavelengths &lambda,
@@ -770,6 +770,17 @@ SampledSpectrum PathIntegrator::Li(RayDifferential ray, uint32_t seed, SampledWa
     return L;
 }
 
+inline SampledSpectrum PathIntegrator::SampleLd(const SurfaceInteraction &intr, uint32_t seed, const BSDF *bsdf,
+                                         SampledWavelengths &lambda,
+                                         Sampler sampler) const {
+    switch (requiredShadowRays) {
+        case E_TWO_SHADOW_RAYS: return SampleLd<E_TWO_SHADOW_RAYS>(intr, seed, bsdf, lambda, sampler); 
+        case E_LIGHTCUTS_SHADOW_RAYS: return SampleLd<E_LIGHTCUTS_SHADOW_RAYS>(intr, seed, bsdf, lambda, sampler); 
+        default: return SampleLd<E_DEFAULT_SHADOW_RAYS>(intr, seed, bsdf, lambda, sampler); 
+    }
+}
+
+template <int NShadowRays>
 SampledSpectrum PathIntegrator::SampleLd(const SurfaceInteraction &intr, uint32_t seed, const BSDF *bsdf,
                                          SampledWavelengths &lambda,
                                          Sampler sampler) const {
@@ -1283,6 +1294,18 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, uint32_t seed, Sample
     return L;
 }
 
+inline SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, uint32_t seed, const BSDF *bsdf,
+                                            SampledWavelengths &lambda, Sampler sampler,
+                                            SampledSpectrum beta,
+                                            SampledSpectrum r_p) const {
+    switch (requiredShadowRays) {
+        case E_TWO_SHADOW_RAYS: return SampleLd<E_TWO_SHADOW_RAYS>(intr, seed, bsdf, lambda, sampler, beta, r_p); 
+        case E_LIGHTCUTS_SHADOW_RAYS: return SampleLd<E_LIGHTCUTS_SHADOW_RAYS>(intr, seed, bsdf, lambda, sampler, beta, r_p); 
+        default: return SampleLd<E_DEFAULT_SHADOW_RAYS>(intr, seed, bsdf, lambda, sampler, beta, r_p); 
+    }
+}
+
+template <int NShadowRays>
 SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, uint32_t seed, const BSDF *bsdf,
                                             SampledWavelengths &lambda, Sampler sampler,
                                             SampledSpectrum beta,
@@ -1903,8 +1926,7 @@ int GenerateCameraSubpath(const Integrator &integrator, const RayDifferential &r
     camera.PDF_We(ray, &pdfPos, &pdfDir);
     return RandomWalk(integrator, lambda, ray, sampler, camera, scratchBuffer, beta,
                       pdfDir, maxDepth - 1, TransportMode::Radiance, path + 1,
-                      regularize) +
-           1;
+                      regularize) + 1;
 }
 
 int GenerateLightSubpath(const Integrator &integrator, SampledWavelengths &lambda,

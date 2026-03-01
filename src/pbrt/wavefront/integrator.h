@@ -69,17 +69,25 @@ class WavefrontPathIntegrator {
 
     void TraceShadowRays(int wavefrontDepth);
     void SampleMediumInteraction(int wavefrontDepth);
-    template <typename PhaseFunction>
+
     void SampleMediumScattering(int wavefrontDepth);
+    template <int NShadowRays>
+    void SampleMediumScattering(int wavefrontDepth);
+    template <typename PhaseFunction, int NShadowRays>
+    void SampleMediumScattering(int wavefrontDepth);
+    void SampleSubsurface(int wavefrontDepth);
+    template <int NShadowRays>
     void SampleSubsurface(int wavefrontDepth);
 
     void HandleEscapedRays();
     void HandleEmissiveIntersection();
 
     void EvaluateMaterialsAndBSDFs(int wavefrontDepth, Transform movingFromCamera);
-    template <typename ConcreteMaterial>
+    template <int NShadowRays>
+    void EvaluateMaterialsAndBSDFs(int wavefrontDepth, Transform movingFromCamera);
+    template <typename ConcreteMaterial, int NShadowRays>
     void EvaluateMaterialAndBSDF(int wavefrontDepth, Transform movingFromCamera);
-    template <typename ConcreteMaterial, typename TextureEvaluator>
+    template <typename ConcreteMaterial, typename TextureEvaluator, int NShadowRays>
     void EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQueue, Transform movingFromCamera,
                                  int wavefrontDepth);
 
@@ -163,6 +171,7 @@ class WavefrontPathIntegrator {
     bool regularize;
 
     int scanlinesPerPass, maxQueueSize;
+    ERequiresShadowRays requiredShadowRays;
 
     SOA<PixelSampleState> pixelSampleState;
 
