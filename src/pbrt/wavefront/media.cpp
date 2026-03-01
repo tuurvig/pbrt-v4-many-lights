@@ -290,16 +290,19 @@ void WavefrontPathIntegrator::SampleMediumScattering(int wavefrontDepth) {
             LightSampleContext ctx(Point3fi(w.p), Normal3f(0, 0, 0), Normal3f(0, 0, 0), w.wo);
             PhaseFunction phaseFuncPtr(w.phase);
             MediumScatterEval scatterEval(phaseFuncPtr);
-            pstd::optional<SampledLd> sLd = lightSampler.SampleLd(ctx, w.lambda, nullptr, Hash(sampleIndex, w.pixelIndex, (w.depth + 1)), raySamples.direct.uc, raySamples.direct.u, scatterEval);
+            CountedArray<SampledLd, NShadowRays> samplesLd;
+            lightSampler.SampleLd(samplesLd, ctx, w.lambda, nullptr, Hash(sampleIndex, w.pixelIndex, (w.depth + 1)), raySamples.direct.uc, raySamples.direct.u, scatterEval);
 
-            if (sLd) {
-                SampledSpectrum Ld = w.beta * sLd->Ld;
+            for (int i = 0; i < samplesLd.count; ++i) {
+                const SampledLd& sLd(samplesLd[i]);
+
+                SampledSpectrum Ld = w.beta * sLd.Ld;
                 
                 // Compute PDFs for direct lighting MIS calculation.
-                SampledSpectrum r_u = w.r_u * sLd->scatterPDF;
-                SampledSpectrum r_l = w.r_u * sLd->lightPDF;
+                SampledSpectrum r_u = w.r_u * sLd.scatterPDF;
+                SampledSpectrum r_l = w.r_u * sLd.lightPDF;
 
-                Ray ray(w.p, sLd->pLight.p() - w.p, w.time, w.medium);
+                Ray ray(w.p, sLd.pLight.p() - w.p, w.time, w.medium);
                 
                 // Enqueue shadow ray
                 shadowRayQueue->Push(ShadowRayWorkItem{ray, 1 - ShadowEpsilon,

@@ -797,20 +797,29 @@ SampledSpectrum PathIntegrator::SampleLd(const SurfaceInteraction &intr, uint32_
     Float u = sampler.Get1D();
     Point2f uLight = sampler.Get2D();
     BSDFScatterEval scatterEval(bsdf, intr.shading.n);
-    pstd::optional<SampledLd> sLd = lightSampler.SampleLd(ctx, lambda, bsdf, seed, u, uLight, scatterEval);
-    if (!sLd || !Unoccluded(intr, sLd->pLight)) {
-        return {};
+    CountedArray<SampledLd, NShadowRays> samplesLd;
+    lightSampler.SampleLd(samplesLd, ctx, lambda, bsdf, seed, u, uLight, scatterEval);
+
+    SampledSpectrum resultLd;
+    for (int i = 0; i < samplesLd.count; ++i) {
+        const SampledLd& sLd(samplesLd[i]);
+
+        if (!Unoccluded(intr, sLd.pLight)) {
+            continue;
+        }
+        
+        Float p_b = sLd.scatterPDF;
+        Float p_l = sLd.lightPDF;
+        if (p_b == 0) {
+            resultLd += sLd.Ld / p_l;
+        }
+        else {
+            Float w_l = PowerHeuristic(1, p_l, 1, p_b);
+            resultLd += w_l * sLd.Ld / p_l;
+        }
     }
-    
-    Float p_b = sLd->scatterPDF;
-    Float p_l = sLd->lightPDF;
-    if (p_b == 0) {
-        return sLd->Ld / p_l;
-    }
-    else {
-        Float w_l = PowerHeuristic(1, p_l, 1, p_b);
-        return w_l * sLd->Ld / p_l;
-    }
+
+    return resultLd;
 }
 
 std::string PathIntegrator::ToString() const {
@@ -1329,87 +1338,97 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, uint32_t se
     Float u = sampler.Get1D();
     Point2f uLight = sampler.Get2D();
 
-    pstd::optional<SampledLd> sLd;
+    CountedArray<SampledLd, NShadowRays> samplesLd;
     if (bsdf) {
         BSDFScatterEval scatterEval(bsdf, intr.AsSurface().shading.n);
-        sLd = lightSampler.SampleLd(ctx, lambda, bsdf, seed, u, uLight, scatterEval);
+        lightSampler.SampleLd(samplesLd, ctx, lambda, bsdf, seed, u, uLight, scatterEval);
     } else {
         CHECK(intr.IsMediumInteraction());
         MediumScatterEval scatterEval(intr.AsMedium().phase);
-        sLd = lightSampler.SampleLd(ctx, lambda, nullptr, seed, u, uLight, scatterEval);
+        lightSampler.SampleLd(samplesLd, ctx, lambda, nullptr, seed, u, uLight, scatterEval);
     }
     
-    if (!sLd) {
-        return SampledSpectrum(0);
-    }
+    SampledSpectrum resultLd;
+    for (int i = 0; i < samplesLd.count; ++i) {
+        const SampledLd& sLd(samplesLd[i]);
 
-    // Declare path state variables for ray to light source
-    Ray lightRay = intr.SpawnRayTo(sLd->pLight);
-    SampledSpectrum T_ray(1.f), r_l(1.f), r_u(1.f);
-    RNG rng(Hash(lightRay.o), Hash(lightRay.d));
+        // Declare path state variables for ray to light source
+        Ray lightRay = intr.SpawnRayTo(sLd.pLight);
+        SampledSpectrum T_ray(1.f), r_l(1.f), r_u(1.f);
+        RNG rng(Hash(lightRay.o), Hash(lightRay.d));
 
-    while (lightRay.d != Vector3f(0, 0, 0)) {
-        // Trace ray through media to estimate transmittance
-        pstd::optional<ShapeIntersection> si = Intersect(lightRay, 1 - ShadowEpsilon);
-        // Handle opaque surface along ray's path
-        if (si && si->intr.material)
-            return SampledSpectrum(0.f);
+        bool shouldSkip = false;
+        while (lightRay.d != Vector3f(0, 0, 0)) {
+            // Trace ray through media to estimate transmittance
+            pstd::optional<ShapeIntersection> si = Intersect(lightRay, 1 - ShadowEpsilon);
+            // Handle opaque surface along ray's path
+            if (si && si->intr.material) {
+                shouldSkip = true;
+                break;
+            }
 
-        // Update transmittance for current ray segment
-        if (lightRay.medium) {
-            Float tMax = si ? si->tHit : (1 - ShadowEpsilon);
-            Float u = rng.Uniform<Float>();
-            SampledSpectrum T_maj =
-                SampleT_maj(lightRay, tMax, u, rng, lambda,
-                            [&](Point3f p, MediumProperties mp, SampledSpectrum sigma_maj,
-                                SampledSpectrum T_maj) {
-                                // Update ray transmittance estimate at sampled point
-                                // Update _T_ray_ and PDFs using ratio-tracking estimator
-                                SampledSpectrum sigma_n =
-                                    ClampZero(sigma_maj - mp.sigma_a - mp.sigma_s);
-                                Float pdf = T_maj[0] * sigma_maj[0];
-                                T_ray *= T_maj * sigma_n / pdf;
-                                r_l *= T_maj * sigma_maj / pdf;
-                                r_u *= T_maj * sigma_n / pdf;
+            // Update transmittance for current ray segment
+            if (lightRay.medium) {
+                Float tMax = si ? si->tHit : (1 - ShadowEpsilon);
+                Float u = rng.Uniform<Float>();
+                SampledSpectrum T_maj =
+                    SampleT_maj(lightRay, tMax, u, rng, lambda,
+                                [&](Point3f p, MediumProperties mp, SampledSpectrum sigma_maj,
+                                    SampledSpectrum T_maj) {
+                                    // Update ray transmittance estimate at sampled point
+                                    // Update _T_ray_ and PDFs using ratio-tracking estimator
+                                    SampledSpectrum sigma_n =
+                                        ClampZero(sigma_maj - mp.sigma_a - mp.sigma_s);
+                                    Float pdf = T_maj[0] * sigma_maj[0];
+                                    T_ray *= T_maj * sigma_n / pdf;
+                                    r_l *= T_maj * sigma_maj / pdf;
+                                    r_u *= T_maj * sigma_n / pdf;
 
-                                // Possibly terminate transmittance computation using
-                                // Russian roulette
-                                SampledSpectrum Tr = T_ray / (r_l + r_u).Average();
-                                if (Tr.MaxComponentValue() < 0.05f) {
-                                    Float q = 0.75f;
-                                    if (rng.Uniform<Float>() < q)
-                                        T_ray = SampledSpectrum(0.);
-                                    else
-                                        T_ray /= 1 - q;
-                                }
+                                    // Possibly terminate transmittance computation using
+                                    // Russian roulette
+                                    SampledSpectrum Tr = T_ray / (r_l + r_u).Average();
+                                    if (Tr.MaxComponentValue() < 0.05f) {
+                                        Float q = 0.75f;
+                                        if (rng.Uniform<Float>() < q)
+                                            T_ray = SampledSpectrum(0.);
+                                        else
+                                            T_ray /= 1 - q;
+                                    }
 
-                                if (!T_ray)
-                                    return false;
-                                return true;
-                            });
-            // Update transmittance estimate for final segment
-            T_ray *= T_maj / T_maj[0];
-            r_l *= T_maj / T_maj[0];
-            r_u *= T_maj / T_maj[0];
+                                    if (!T_ray)
+                                        return false;
+                                    return true;
+                                });
+                // Update transmittance estimate for final segment
+                T_ray *= T_maj / T_maj[0];
+                r_l *= T_maj / T_maj[0];
+                r_u *= T_maj / T_maj[0];
+            }
+
+            // Generate next ray segment or return final transmittance
+            if (!T_ray) {
+                shouldSkip = true;
+                break;
+            }
+            if (!si)
+                break;
+            lightRay = si->intr.SpawnRayTo(sLd.pLight);
         }
 
-        // Generate next ray segment or return final transmittance
-        if (!T_ray)
-            return SampledSpectrum(0.f);
-        if (!si)
-            break;
-        lightRay = si->intr.SpawnRayTo(sLd->pLight);
+        if (shouldSkip) continue;
+
+        // Return path contribution function estimate for direct lighting
+        r_l *= r_p * sLd.lightPDF;
+        if (sLd.scatterPDF == 0) {
+            resultLd += beta * sLd.Ld * T_ray / r_l.Average();
+        }
+        else {
+            r_u *= r_p * sLd.scatterPDF;
+            resultLd += beta * sLd.Ld * T_ray / (r_l + r_u).Average();
+        }
     }
 
-    // Return path contribution function estimate for direct lighting
-    r_l *= r_p * sLd->lightPDF;
-    if (sLd->scatterPDF == 0) {
-        return beta * sLd->Ld * T_ray / r_l.Average();
-    }
-    else {
-        r_u *= r_p * sLd->scatterPDF;
-        return beta * sLd->Ld * T_ray / (r_l + r_u).Average();
-    }
+    return resultLd;
 }
 
 std::string VolPathIntegrator::ToString() const {
@@ -3325,20 +3344,23 @@ SampledSpectrum SPPMIntegrator::SampleLd(const SurfaceInteraction &intr, uint32_
     Float u = sampler.Get1D();
     Point2f uLight = sampler.Get2D();
     BSDFScatterEval scatterEval(&b, intr.shading.n);
-    pstd::optional<SampledLd> sLd = lightSampler.SampleLd(ctx, lambda, bsdf, seed, u, uLight, scatterEval);
+    CountedArray<SampledLd, 1> sampleLd;
+    lightSampler.SampleLd(sampleLd, ctx, lambda, bsdf, seed, u, uLight, scatterEval);
 
-    if (!sLd || !Unoccluded(intr, sLd->pLight)) {
+    if (sampleLd.count != 1 || !Unoccluded(intr, sampleLd[0].pLight)) {
         return {};
     }
 
+    const SampledLd& sLd(sampleLd[0]);
+
     // Return light's contribution to reflected radiance
-    Float p_l = sLd->lightPDF;
-    Float p_b = sLd->scatterPDF;
+    Float p_l = sLd.lightPDF;
+    Float p_b = sLd.scatterPDF;
     if (p_b == 0)
-        return sLd->Ld / p_l;
+        return sLd.Ld / p_l;
     else {
         Float w_l = PowerHeuristic(1, p_l, 1, p_b);
-        return w_l * sLd->Ld / p_l;
+        return w_l * sLd.Ld / p_l;
     }
 }
 

@@ -133,6 +133,9 @@ class Bounds3;
 using Bounds3f = Bounds3<Float>;
 using Bounds3i = Bounds3<int>;
 
+template <typename T, int N>
+struct CountedArray;
+
 class AnimatedTransform;
 class BilinearPatchMesh;
 class Interaction;

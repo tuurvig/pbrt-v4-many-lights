@@ -33,17 +33,17 @@ struct CountedArray {
     PBRT_CPU_GPU
     inline const T& operator[](int index) const {
         DCHECK_LT(index, N);
-        return leaves[index];
+        return elements[index];
     }
 
     PBRT_CPU_GPU
     void Add(const T& elem) {
         DCHECK_LT(count, N);
-        leaves[count] = elem;
+        elements[count] = elem;
         ++count;
     }
 
-    T leaves[N];
+    T elements[N];
     int count = 0;
 };
 
