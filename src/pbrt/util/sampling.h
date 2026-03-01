@@ -112,22 +112,6 @@ PBRT_CPU_GPU inline int SampleDiscrete(pstd::span<const Float> weights, Float u,
     return offset;
 }
 
-PBRT_CPU_GPU inline int SampleBinary(const Float wLeft, const Float wRight, Float& u, Float& pmf) {
-    const Float wSum = wLeft + wRight;
-    const Float pLeft = wLeft / wSum;
-
-    if (pLeft <= u){
-        u /= wLeft;
-        pmf *= pLeft;
-        return 0;
-    } else {
-        const Float pRight = 1 - pLeft;
-        u = (1 - u) / pRight;
-        pmf *= pRight;
-        return 1;
-    }
-}
-
 PBRT_CPU_GPU inline Float LinearPDF(Float x, Float a, Float b) {
     DCHECK(a >= 0 && b >= 0);
     if (x < 0 || x > 1)
@@ -492,6 +476,36 @@ inline Vector3f SampleUniformHemisphereConcentric(Point2f u) {
                     std::sin(theta) * r * std::sqrt(2 - r * r), 1 - r * r);
 }
 
+//https://extremelearning.com.au/unreasonable-effectiveness-of-quasirandom-sequences/
+// R-sequence offset using generalized golden ratio (g) for multiple dimensions.
+// Used for offseting random variable
+PBRT_CPU_GPU inline Float GetR1SequenceOffset() {
+    constexpr double g = 1.6180339887498948482;
+    constexpr double gInv = 1 / g;
+    constexpr Float gInvFloat = Float(gInv);
+    return gInvFloat;
+}
+
+PBRT_CPU_GPU inline Point2f GetR2SequenceOffset() {
+    constexpr double g = 1.32471795724474602596;
+    constexpr double gInv = 1 / g;
+    constexpr double g2Inv = 1 / (g * g);
+    constexpr Float gInvFloat = Float(gInv);
+    constexpr Float g2InvFloat = Float(g2Inv);
+    return Point2f(gInvFloat, g2InvFloat);
+}
+
+PBRT_CPU_GPU inline Point3f GetR3SequenceOffset() {
+    constexpr double g = 1.22074408460575947536;
+    constexpr double gInv = 1 / g;
+    constexpr double g2Inv = 1 / (g * g);
+    constexpr double g3Inv = 1 / (g * g * g);
+    constexpr Float gInvFloat = Float(gInv);
+    constexpr Float g2InvFloat = Float(g2Inv);
+    constexpr Float g3InvFloat = Float(g3Inv);
+    return Point3f(gInvFloat, g2InvFloat, g3InvFloat);
+}
+
 // VarianceEstimator Definition
 template <typename Float = Float>
 class VarianceEstimator {
@@ -695,8 +709,7 @@ class WeightedReservoirSetSampler {
 
     PBRT_CPU_GPU
     explicit WeightedReservoirSetSampler(uint64_t baseSeed) :
-        rng(baseSeed), hash(0), batchHash(0), count(0), localIndex(0), currentBatch(1) {
-        hash = batchHash = MixBits(baseSeed);
+        u(HashFloat(baseSeed)), batchHash(MixBits(baseSeed)), count(0), localIndex(0), currentBatch(1) {
     }
 
     PBRT_CPU_GPU
@@ -705,14 +718,18 @@ class WeightedReservoirSetSampler {
         if (localIndex == N) {
             localIndex = 0;
             ++currentBatch;
-            batchHash = MixBits(hash * currentBatch);
+            batchHash = MixBits(batchHash * currentBatch);
         }
 
-        int index = PermutationElement(localIndex, N, batchHash);
+        const int index = PermutationElement(localIndex, N, batchHash);
         ++localIndex;
         ++count;
 
-        return reservoirs[index].Add(sample, weight, rng.Uniform<Float>());
+        const Float currentU = u;
+        u += GetR1SequenceOffset();
+        if (u >= 1) u -= 1;
+
+        return reservoirs[index].Add(sample, weight, currentU);
     }
 
     template <typename F>
@@ -721,14 +738,18 @@ class WeightedReservoirSetSampler {
         if (localIndex == N) {
             localIndex = 0;
             ++currentBatch;
-            batchHash = MixBits(hash * currentBatch);
+            batchHash = MixBits(batchHash * currentBatch);
         }
 
         int index = PermutationElement(localIndex, N, batchHash);
         ++localIndex;
         ++count;
 
-        return reservoirs[index].Add(func, weight, rng.Uniform<Float>());
+        const Float currentU = u;
+        u += GetR1SequenceOffset();
+        if (u >= 1) u -= 1;
+
+        return reservoirs[index].Add(func, weight, currentU);
     }
 
     PBRT_CPU_GPU
@@ -748,9 +769,8 @@ class WeightedReservoirSetSampler {
 
   private:
     // WeightedReservoirSetSampler Private Members
-    RNG rng;
     pstd::array<StatelessWeightedReservoirSampler<T>, N> reservoirs;
-    uint64_t hash;
+    Float u;
     uint64_t batchHash;
     uint32_t count;
     uint32_t localIndex;
@@ -1148,36 +1168,6 @@ Array2D<Float> Sample2DFunction(std::function<Float(Float, Float)> f, int nu, in
                                 int nSamples,
                                 Bounds2f domain = {Point2f(0, 0), Point2f(1, 1)},
                                 Allocator alloc = {});
-
-//https://extremelearning.com.au/unreasonable-effectiveness-of-quasirandom-sequences/
-// R-sequence offset using generalized golden ratio (g) for multiple dimensions.
-// Used for offseting random variable
-PBRT_CPU_GPU inline Float GetR1SequenceOffset() {
-    constexpr double g = 1.6180339887498948482;
-    constexpr double gInv = 1 / g;
-    constexpr Float gInvFloat = Float(gInv);
-    return gInvFloat;
-}
-
-PBRT_CPU_GPU inline Point2f GetR2SequenceOffset() {
-    constexpr double g = 1.32471795724474602596;
-    constexpr double gInv = 1 / g;
-    constexpr double g2Inv = 1 / (g * g);
-    constexpr Float gInvFloat = Float(gInv);
-    constexpr Float g2InvFloat = Float(g2Inv);
-    return Point2f(gInvFloat, g2InvFloat);
-}
-
-PBRT_CPU_GPU inline Point3f GetR3SequenceOffset() {
-    constexpr double g = 1.22074408460575947536;
-    constexpr double gInv = 1 / g;
-    constexpr double g2Inv = 1 / (g * g);
-    constexpr double g3Inv = 1 / (g * g * g);
-    constexpr Float gInvFloat = Float(gInv);
-    constexpr Float g2InvFloat = Float(g2Inv);
-    constexpr Float g3InvFloat = Float(g3Inv);
-    return Point3f(gInvFloat, g2InvFloat, g3InvFloat);
-}
 
 namespace detail {
 
