@@ -224,11 +224,16 @@ class PathIntegrator : public RayIntegrator {
 
   private:
     // PathIntegrator Private Methods
+    template <int NShadowRays>
     SampledSpectrum SampleLd(const SurfaceInteraction &intr, uint32_t seed, const BSDF *bsdf,
+                             SampledWavelengths &lambda, Sampler sampler) const;
+
+    inline SampledSpectrum SampleLd(const SurfaceInteraction &intr, uint32_t seed, const BSDF *bsdf,
                              SampledWavelengths &lambda, Sampler sampler) const;
 
     // PathIntegrator Private Members
     int maxDepth;
+    ERequiresShadowRays requiredShadowRays;
     LightSampler lightSampler;
     bool regularize;
 };
@@ -264,8 +269,8 @@ class VolPathIntegrator : public RayIntegrator {
                       const std::string &lightSampleStrategy = "bvh",
                       bool regularize = false)
         : RayIntegrator(camera, sampler, aggregate, lights),
-          maxDepth(maxDepth),
-          lightSampler(LightSampler::Create(lightSampleStrategy, lights, Options->discretizeAreaLights > 0, Allocator())),
+          maxDepth(maxDepth), requiredShadowRays(E_DEFAULT_SHADOW_RAYS),
+          lightSampler(LightSampler::Create(requiredShadowRays, lightSampleStrategy, lights, Options->discretizeAreaLights > 0, Allocator())),
           regularize(regularize) {}
 
     SampledSpectrum Li(RayDifferential ray, uint32_t seed, SampledWavelengths &lambda, Sampler sampler,
@@ -279,12 +284,18 @@ class VolPathIntegrator : public RayIntegrator {
 
   private:
     // VolPathIntegrator Private Methods
+    inline SampledSpectrum SampleLd(const Interaction &intr, uint32_t seed, const BSDF *bsdf,
+                             SampledWavelengths &lambda, Sampler sampler,
+                             SampledSpectrum beta, SampledSpectrum inv_w_u) const;
+
+    template <int NShadowRays>
     SampledSpectrum SampleLd(const Interaction &intr, uint32_t seed, const BSDF *bsdf,
                              SampledWavelengths &lambda, Sampler sampler,
                              SampledSpectrum beta, SampledSpectrum inv_w_u) const;
 
     // VolPathIntegrator Private Members
     int maxDepth;
+    ERequiresShadowRays requiredShadowRays;
     LightSampler lightSampler;
     bool regularize;
 };

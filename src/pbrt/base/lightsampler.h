@@ -46,6 +46,12 @@ struct SampledLd {
     
 };
 
+enum ERequiresShadowRays : int {
+    E_DEFAULT_SHADOW_RAYS = 1,
+    E_TWO_SHADOW_RAYS = 2,
+    E_LIGHTCUTS_SHADOW_RAYS = 32
+};
+
 class UniformLightSampler;
 class PowerLightSampler;
 class ExhaustiveLightSampler;
@@ -69,7 +75,7 @@ class LightSampler : public TaggedPointer<UniformLightSampler,
     // LightSampler Interface
     using TaggedPointer::TaggedPointer;
 
-    static LightSampler Create(const std::string &name, pstd::span<const Light> lights, bool discretizedLights,
+    static LightSampler Create(ERequiresShadowRays& nShadowRays, const std::string &name, pstd::span<const Light> lights, bool discretizedLights,
                                Allocator alloc);
 
     std::string ToString() const;

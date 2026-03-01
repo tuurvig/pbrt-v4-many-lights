@@ -22,6 +22,7 @@
 namespace pbrt {
 
 // EvaluateMaterialCallback Definition
+template <int NShadowRays>
 struct EvaluateMaterialCallback {
     int wavefrontDepth;
     WavefrontPathIntegrator *integrator;
@@ -30,7 +31,7 @@ struct EvaluateMaterialCallback {
     template <typename ConcreteMaterial>
     void operator()() {
         if constexpr (!std::is_same_v<ConcreteMaterial, MixMaterial>)
-            integrator->EvaluateMaterialAndBSDF<ConcreteMaterial>(wavefrontDepth,
+            integrator->EvaluateMaterialAndBSDF<ConcreteMaterial, NShadowRays>(wavefrontDepth,
                                                                   movingFromCamera);
     }
 };
@@ -38,23 +39,33 @@ struct EvaluateMaterialCallback {
 // WavefrontPathIntegrator Surface Scattering Methods
 void WavefrontPathIntegrator::EvaluateMaterialsAndBSDFs(int wavefrontDepth,
                                                         Transform movingFromCamera) {
-    ForEachType(EvaluateMaterialCallback{wavefrontDepth, this, movingFromCamera},
+    switch (requiredShadowRays) {
+        case E_TWO_SHADOW_RAYS: EvaluateMaterialsAndBSDFs<E_TWO_SHADOW_RAYS>(wavefrontDepth, movingFromCamera); break;
+        case E_LIGHTCUTS_SHADOW_RAYS: EvaluateMaterialsAndBSDFs<E_LIGHTCUTS_SHADOW_RAYS>(wavefrontDepth, movingFromCamera); break;
+        default: EvaluateMaterialsAndBSDFs<E_DEFAULT_SHADOW_RAYS>(wavefrontDepth, movingFromCamera); break;
+    }
+}
+
+template <int NShadowRays>
+void WavefrontPathIntegrator::EvaluateMaterialsAndBSDFs(int wavefrontDepth,
+                                                        Transform movingFromCamera) {
+    ForEachType(EvaluateMaterialCallback<NShadowRays>{wavefrontDepth, this, movingFromCamera},
                 Material::Types());
 }
 
-template <typename ConcreteMaterial>
+template <typename ConcreteMaterial, int NShadowRays>
 void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(int wavefrontDepth,
                                                       Transform movingFromCamera) {
     int index = Material::TypeIndex<ConcreteMaterial>();
     if (haveBasicEvalMaterial[index])
-        EvaluateMaterialAndBSDF<ConcreteMaterial, BasicTextureEvaluator>(
+        EvaluateMaterialAndBSDF<ConcreteMaterial, BasicTextureEvaluator, NShadowRays>(
             basicEvalMaterialQueue, movingFromCamera, wavefrontDepth);
     if (haveUniversalEvalMaterial[index])
-        EvaluateMaterialAndBSDF<ConcreteMaterial, UniversalTextureEvaluator>(
+        EvaluateMaterialAndBSDF<ConcreteMaterial, UniversalTextureEvaluator, NShadowRays>(
             universalEvalMaterialQueue, movingFromCamera, wavefrontDepth);
 }
 
-template <typename ConcreteMaterial, typename TextureEvaluator>
+template <typename ConcreteMaterial, typename TextureEvaluator, int NShadowRays>
 void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQueue,
                                                       Transform movingFromCamera,
                                                       int wavefrontDepth) {

@@ -29,8 +29,9 @@ std::string SampledLight::ToString() const {
                         light ? light.ToString().c_str() : "(nullptr)", p);
 }
 
-LightSampler LightSampler::Create(const std::string &name, pstd::span<const Light> lights, bool discretizedLights,
+LightSampler LightSampler::Create(ERequiresShadowRays& nShadowRays, const std::string &name, pstd::span<const Light> lights, bool discretizedLights,
                                   Allocator alloc) {
+    nShadowRays = E_DEFAULT_SHADOW_RAYS;
     if (name == "uniform")
         return alloc.new_object<UniformLightSampler>(lights, alloc);
     if (name == "power")
@@ -38,6 +39,7 @@ LightSampler LightSampler::Create(const std::string &name, pstd::span<const Ligh
     else if (name == "bvh")
         return alloc.new_object<BVHLightSampler>(lights, alloc);
     else if (name == "lightcuts") {
+        //nShadowRays = E_LIGHTCUTS_SHADOW_RAYS;
         if (discretizedLights) {
             return alloc.new_object<LightcutsLightSampler>(lights, alloc);
         }
@@ -50,6 +52,7 @@ LightSampler LightSampler::Create(const std::string &name, pstd::span<const Ligh
         return alloc.new_object<HSLCLightSampler>(lights, alloc);
     }
     else if (name == "rht") {
+        nShadowRays = E_TWO_SHADOW_RAYS;
         return alloc.new_object<RHTLightSampler>(lights, alloc);
     }
     else if (name == "exhaustive")
