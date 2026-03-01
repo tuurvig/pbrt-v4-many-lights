@@ -194,14 +194,20 @@ class RHTLightSampler {
             if (!ls || !ls->L || ls->pdf == 0)
                 continue;
         
-            Float lightPDF = sample.pmf * ls->pdf;
+            const Float lightPDF = sample.pmf * ls->pdf;
             
             Float scatterPDF = 0;
             SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
-            SampledLd sLd(f_hat * ls->L / hProb, ls->pLight, lightPDF, scatterPDF);
+
+            f_hat *= ls->L;
+
+            SampledLd sLd(f_hat / hProb, ls->pLight, lightPDF, scatterPDF);
         
             // F(Si) = bsdf * (Li / pdfLight) * misW * hW(Li)
-            heuristicFSampler.Add(sLd, (f_hat * ls->L).MaxComponentValue() / (lightPDF * hProb + scatterPDF));
+            const Float fWeight = f_hat.MaxComponentValue() / (lightPDF * hProb + scatterPDF);
+            if (fWeight > 0) {
+                heuristicFSampler.Add(sLd, fWeight);
+            }
         }
         
         if (!heuristicFSampler.HasSample()) {
@@ -209,7 +215,6 @@ class RHTLightSampler {
         }
         
         SampledLd resultLd(heuristicFSampler.GetSample());
-        
         const Float fProb = heuristicFSampler.SampleProbability();
         
         resultLd.Ld /= fProb;
@@ -226,7 +231,7 @@ class RHTLightSampler {
     using HeuristicHReservoirSet = WeightedReservoirSetSampler<LightCandidate, PBRT_RHT_RESERVOIR_SET_H_SIZE>;
     //using HeuristicHReservoirSet = RestirSampler<LightCandidate>;
 
-    PBRT_CPU_GPU
+    PBRT_CPU_GPU PBRT_NOINLINE
     void CollectLightCandidates(HeuristicHReservoirSet& reservoirSet, const LightSampleContext& ctx, uint32_t seed, Float u, Float uSplit, Float pmf) const;
 
 

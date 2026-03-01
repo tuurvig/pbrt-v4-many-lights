@@ -155,89 +155,116 @@ bool RHTLightSampler::buildLightTreeGPU(std::vector<RHTBuildContainer> &lights) 
 }
 #endif
 
-#define PBRT_RHT_MAX_STACK 64
+#define PBRT_RHT_MAX_STACK 16
+
+struct alignas(8) PackedTraversalState {
+    PackedTraversalState() = default;
+
+    PBRT_CPU_GPU
+    PackedTraversalState(uint32_t nodeIndex, Float T, Float PsParent) :
+        nodeIndex(nodeIndex), T(PackNormalizedFloat(T)), PsParent(PackNormalizedFloat(PsParent)) {}
+
+    uint32_t nodeIndex;
+    uint16_t T;
+    uint16_t PsParent;
+};
+
 struct alignas(16) TraversalState {
+    PBRT_CPU_GPU
+    TraversalState(uint32_t nodeIndex, Float T, Float PsParent) :
+        nodeIndex(nodeIndex), T(T), PsParent(PsParent) {}
+
+    PBRT_CPU_GPU
+    void operator=(PackedTraversalState state) {
+        nodeIndex = state.nodeIndex;
+        T = UnpackToFloat(state.T);
+        PsParent = UnpackToFloat(state.PsParent);
+    }
+
     uint32_t nodeIndex;
     Float T; // accumulated traversal state T(C)
     Float PsParent; // probability of splitting C_parent
-    Float uNode; // random variable for traversal
 };
 
-PBRT_CPU_GPU
-void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSet, const LightSampleContext& ctx, uint32_t seed, const Float u, const Float uSplit, const Float pmf) const {
-    TraversalState stack[PBRT_RHT_MAX_STACK];
-    int stackHead = 0;
+PBRT_CPU_GPU 
+void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSet, const LightSampleContext& ctx, uint32_t seed, Float u, const Float uSplit, const Float pmf) const {
+    PackedTraversalState stack[PBRT_RHT_MAX_STACK];
+    int stackHead = -1;
 
     const Float startingSplitProbability = std::max(uSplit, Float(1) - MathEpsilon);
-    stack[stackHead] = {0, Float(1), startingSplitProbability, u};
+    TraversalState state(0, Float(1), startingSplitProbability);
 
     Point3f p = ctx.p();
     Normal3f n = ctx.ns;
 
-    while (stackHead >= 0) {
-        const TraversalState state = stack[stackHead];
-        --stackHead;
-
+    while (true) {
         const ResampledTreeNode* node = &m_tree.innerNodes[state.nodeIndex];
+
         if (node->isLeaf) {
-            const Float pdf = state.PsParent + (1 - state.PsParent) * state.T;
-            uint32_t lightIdx = node->childOrLightIndex;
-            const CompactLight& cl(m_tree.leaves[lightIdx]);
+            const Float pdf = (state.PsParent + (1 - state.PsParent) * state.T) * pmf;
+
+            const uint32_t lightIdx = node->childOrLightIndex;
+            const CompactLight &cl(m_tree.leaves[lightIdx]);
             const Float importance = cl.bounds.Importance(p, n, m_tree.allLightBounds);
 
             const LightCandidate candidate{lightIdx, pdf};
             reservoirSet.Add(candidate, importance / pdf);
+
+            if (stackHead < 0) break;
+
+            state = stack[stackHead];
+            --stackHead;
             continue;
         }
 
-        const uint32_t childrenIndices[2] = {static_cast<uint32_t>(state.nodeIndex + 1), node->childOrLightIndex};
+        const uint32_t childIdxLeft = static_cast<uint32_t>(state.nodeIndex + 1);
+        const uint32_t childIdxRight = node->childOrLightIndex;
 
         const Float PsNode = std::min(node->bounds.SplitProbability(p, gamma), state.PsParent); // Ps(C)
         const Float PsHatNode = 1 - PsNode; // Ps_hat(C)
 
         // propability of splitting C_parent given that C has not been split
         const Float Pns = (state.PsParent - PsNode) / PsHatNode; // Pns(C)
-
         const Float T_node = Pns + (1 - Pns) * state.T;
-        
-        const ResampledTreeNode *children[2] = {&m_tree.innerNodes[childrenIndices[0]],
-                                                &m_tree.innerNodes[childrenIndices[1]]};
 
-        const Float ci[2] = {children[0]->bounds.Importance(p, n),
-                             children[1]->bounds.Importance(p, n)};
+        const ResampledTreeNode *childLeft = &m_tree.innerNodes[childIdxLeft];
+        const ResampledTreeNode *childRight = &m_tree.innerNodes[childIdxRight];
 
-        if (ci[0] == 0 && ci[1] == 0) {
+        const Float importanceLeft = childLeft->bounds.Importance(p, n);
+        const Float importanceRight = childRight->bounds.Importance(p, n);
+
+        const Float wSum = importanceLeft + importanceRight;
+
+        if (wSum == 0) {
+            if (stackHead < 0) break;
+            
+            state = stack[stackHead];
+            --stackHead;
             continue;
         }
+
+        const Float pLeft = importanceLeft / wSum;
+        const Float pRight = 1 - pLeft;
 
         if (uSplit <= PsNode) {
-            stackHead += 2;
             DCHECK_LT(stackHead, PBRT_RHT_MAX_STACK);
-            Float uLeft  = state.uNode + HashFloat(seed, childrenIndices[0]);
-            Float uRight = state.uNode + HashFloat(seed, childrenIndices[1]);
 
-            if (uLeft > 1) uLeft -= 1;
-            if (uRight > 1) uRight -= 1;
-
-            Float weight[2] = {0,0};
-            weight[0] = ci[0] / (ci[0] + ci[1]);
-            weight[1] = 1 - weight[0];
-
-            stack[stackHead]     = {childrenIndices[0], T_node * weight[0], PsNode, uLeft};
-            stack[stackHead - 1] = {childrenIndices[1], T_node * weight[1], PsNode, uRight};
+            state = TraversalState(childIdxLeft, T_node * pLeft, PsNode);
+            stackHead++;
+            stack[stackHead] = PackedTraversalState(childIdxRight, T_node * pRight, PsNode);
             continue;
         }
 
-        // Pick child to traverse
-        Float nodePMF = 0;
-        Float uWarped = 0;
-        int child = SampleDiscrete(ci, state.uNode, &nodePMF, &uWarped);
-        uWarped += HashFloat(seed, childrenIndices[child]);
-        if (uWarped > 1) uWarped -= 1;
+        if (u <= pLeft) {
+            u /= pLeft;
+            state = TraversalState(childIdxLeft, T_node * pLeft, PsNode);
+        } else {
+            u = (u - pLeft) / pRight;
+            state = TraversalState(childIdxRight, T_node * pRight, PsNode);
+        }
 
-        ++stackHead;
-        DCHECK_LT(stackHead, PBRT_RHT_MAX_STACK);
-        stack[stackHead] = {childrenIndices[child], T_node * nodePMF, PsNode, uWarped};
+        u += HashFloat(seed, state.nodeIndex);
+        if (u >= 1) u -= 1;
     }
 }
 
