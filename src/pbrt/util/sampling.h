@@ -522,6 +522,80 @@ class VarianceEstimator {
 
 // WeightedReservoirSampler Definition
 template <typename T>
+class StatelessWeightedReservoirSampler {
+  public:
+    // WeightedReservoirSampler Public Methods
+    StatelessWeightedReservoirSampler() = default;
+
+    PBRT_CPU_GPU
+    inline bool Add(const T &sample, Float weight, const Float u) {
+        weightSum += weight;
+        // Randomly add _sample_ to reservoir
+        Float p = weight / weightSum;
+        if (u < p) {
+            reservoir = sample;
+            reservoirWeight = weight;
+            return true;
+        }
+        DCHECK_LT(weightSum, 1e80);
+        return false;
+    }
+
+    template <typename F>
+    PBRT_CPU_GPU bool Add(F func, Float weight, const Float u) {
+        // Process weighted reservoir sample via callback
+        weightSum += weight;
+        Float p = weight / weightSum;
+        if (u < p) {
+            reservoir = func();
+            reservoirWeight = weight;
+            return true;
+        }
+        DCHECK_LT(weightSum, 1e80);
+        return false;
+    }
+
+    PBRT_CPU_GPU
+    void Copy(const StatelessWeightedReservoirSampler &wrs) {
+        weightSum = wrs.weightSum;
+        reservoir = wrs.reservoir;
+        reservoirWeight = wrs.reservoirWeight;
+    }
+
+    PBRT_CPU_GPU
+    int HasSample() const { return weightSum > 0; }
+    PBRT_CPU_GPU
+    const T &GetSample() const { return reservoir; }
+    PBRT_CPU_GPU
+    Float SampleProbability() const { return reservoirWeight / weightSum; }
+    PBRT_CPU_GPU
+    Float WeightSum() const { return weightSum; }
+
+    PBRT_CPU_GPU
+    void Reset() { reservoirWeight = weightSum = 0; }
+
+    PBRT_CPU_GPU
+    void Merge(const StatelessWeightedReservoirSampler &wrs) {
+        DCHECK_LE(weightSum + wrs.WeightSum(), 1e80);
+        if (wrs.HasSample() && Add(wrs.reservoir, wrs.weightSum))
+            reservoirWeight = wrs.reservoirWeight;
+    }
+
+    std::string ToString() const {
+        return StringPrintf("[ WeightedReservoirSampler "
+                            "weightSum: %f reservoir: %s reservoirWeight: %f ]",
+                            weightSum, reservoir, reservoirWeight);
+    }
+
+  private:
+    // StrippedWeightedReservoirSampler Private Members
+    Float weightSum = 0;
+    Float reservoirWeight = 0;
+    T reservoir{};
+};
+
+// WeightedReservoirSampler Definition
+template <typename T>
 class WeightedReservoirSampler {
   public:
     // WeightedReservoirSampler Public Methods
@@ -600,116 +674,17 @@ class WeightedReservoirSampler {
     T reservoir{};
 };
 
-// RestirSampler Definition
-template <typename T>
-class RestirSampler {
-  public:
-    // RestirSampler Public Methods
-    RestirSampler() = default;
-    PBRT_CPU_GPU
-    RestirSampler(uint64_t rngSeed) : rng(rngSeed) {}
-
-    PBRT_CPU_GPU
-    void Seed(uint64_t seed) { rng.SetSequence(seed); }
-
-    PBRT_CPU_GPU
-    bool Add(const T &sample, Float weight) {
-        weightSum += weight;
-        ++count;
-        // Randomly add _sample_ to reservoir
-        Float p = weight / weightSum;
-        if (rng.Uniform<Float>() < p) {
-            reservoir = sample;
-            reservoirWeight = weight;
-            return true;
-        }
-        DCHECK_LT(weightSum, 1e80);
-        return false;
-    }
-
-    template <typename F>
-    PBRT_CPU_GPU bool Add(F func, Float weight) {
-        // Process weighted reservoir sample via callback
-        weightSum += weight;
-        ++count;
-        Float p = weight / weightSum;
-        if (rng.Uniform<Float>() < p) {
-            reservoir = func();
-            reservoirWeight = weight;
-            return true;
-        }
-        DCHECK_LT(weightSum, 1e80);
-        return false;
-    }
-
-    PBRT_CPU_GPU
-    void Copy(const RestirSampler &wrs) {
-        weightSum = wrs.weightSum;
-        count = wrs.count;
-        reservoir = wrs.reservoir;
-        reservoirWeight = wrs.reservoirWeight;
-    }
-
-    PBRT_CPU_GPU
-    int HasSample() const { return weightSum > 0; }
-    PBRT_CPU_GPU
-    const T &GetSample() const { return reservoir; }
-    PBRT_CPU_GPU
-    Float SampleProbability() const { return reservoirWeight / weightSum; }
-    PBRT_CPU_GPU
-    Float WeightSum() const { return weightSum; }
-    PBRT_CPU_GPU
-    Float Count() const { return count; }
-    PBRT_CPU_GPU
-    Float SampleWeight() const { return reservoirWeight; }
-    PBRT_CPU_GPU
-    Float Weight() const { return weightSum / count; }
-
-    PBRT_CPU_GPU
-    void Reset() { reservoirWeight = weightSum = 0; }
-
-    PBRT_CPU_GPU
-    void Merge(const RestirSampler &wrs) {
-        DCHECK_LE(weightSum + wrs.WeightSum(), 1e80);
-        uint32_t newCount = count + wrs.count;
-        if (wrs.HasSample() && Add(wrs.reservoir, wrs.weightSum))
-            reservoirWeight = wrs.reservoirWeight;
-        count = newCount;
-    }
-
-    std::string ToString() const {
-        return StringPrintf("[ RestirSampler rng: %s "
-                            "weightSum: %f count %f reservoir: %s reservoirWeight: %f ]",
-                            rng, weightSum, count, reservoir, reservoirWeight);
-    }
-
-  private:
-    // RestirSampler Private Members
-    RNG rng;
-    uint32_t count = 0;
-    Float weightSum = 0;
-    Float reservoirWeight = 0;
-    T reservoir{};
-};
-
 // RestirSetSampler Definition
 template <typename T, uint32_t N>
-class RestirSetSampler {
+class WeightedReservoirSetSampler {
   public:
     // restirSetSampler Public Methods
-    RestirSetSampler() = default;
+    WeightedReservoirSetSampler() = default;
 
     PBRT_CPU_GPU
-    explicit RestirSetSampler(uint64_t baseSeed) :
-        hash(baseSeed), batchHash(baseSeed), count(0), localIndex(0), currentBatch(1) {
-        Seed(hash + 1);
-    }
-
-    PBRT_CPU_GPU
-    void Seed(uint64_t baseSeed) {
-        for (int i = 0; i < N; ++i) {
-            reservoirs[i].Seed(MixBits(baseSeed + i));
-        }
+    explicit WeightedReservoirSetSampler(uint64_t baseSeed) :
+        rng(baseSeed), hash(0), batchHash(0), count(0), localIndex(0), currentBatch(1) {
+        hash = batchHash = MixBits(baseSeed);
     }
 
     PBRT_CPU_GPU
@@ -725,7 +700,7 @@ class RestirSetSampler {
         ++localIndex;
         ++count;
 
-        return reservoirs[index].Add(sample, weight);
+        return reservoirs[index].Add(sample, weight, rng.Uniform<Float>());
     }
 
     template <typename F>
@@ -741,11 +716,11 @@ class RestirSetSampler {
         ++localIndex;
         ++count;
 
-        return reservoirs[index].Add(func, weight);
+        return reservoirs[index].Add(func, weight, rng.Uniform<Float>());
     }
 
     PBRT_CPU_GPU
-    inline const RestirSampler<T>& GetReservoir(int index) const {
+    inline const StatelessWeightedReservoirSampler<T>& GetReservoir(int index) const {
         return reservoirs[index];
     }
 
@@ -760,7 +735,9 @@ class RestirSetSampler {
     }
 
   private:
-    pstd::array<RestirSampler<T>, N> reservoirs;
+    // WeightedReservoirSetSampler Private Members
+    RNG rng;
+    pstd::array<StatelessWeightedReservoirSampler<T>, N> reservoirs;
     uint64_t hash;
     uint64_t batchHash;
     uint32_t count;

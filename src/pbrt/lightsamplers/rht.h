@@ -24,7 +24,7 @@ namespace pbrt {
 class RHTLightSampler {
   public:
     // Resampled Hierarchic Tree Light Sampler Public Methods
-    RHTLightSampler(pstd::span<const Light> lights, Allocator alloc, Float gamma = 0.6);
+    RHTLightSampler(pstd::span<const Light> lights, Allocator alloc, Float gamma = 0.2);
 
     PBRT_CPU_GPU PBRT_NOINLINE
     pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t seed, Float u) const {
@@ -171,26 +171,8 @@ class RHTLightSampler {
         HeuristicHReservoirSet heuristicHSampler(Hash(u, seed));
         CollectLightCandidates(heuristicHSampler, ctx, seed, u, HashFloat(seed), pmf);
 
-        //const LightCandidate& sample(heuristicHSampler.GetSample());
-        ////const Float weightSum = heuristicHSampler.WeightSum();
-        ////const Float count = heuristicHSampler.Count();
-        ////Float Wh = weightSum / count;
-        //const Float hProb = heuristicHSampler.SampleProbability();
-        //
-        //Light light = m_tree.leaves[sample.lightIdx].light;
-        //DCHECK(light && sample.pmf != 0);
-        //pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
-        //if (!ls || !ls->L || ls->pdf == 0)
-        //    return {};
-        //
-        //Float lightPDF = sample.pmf * ls->pdf;
-        //
-        //Float scatterPDF = 0;
-        //SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
-        //return SampledLd(f_hat * ls->L / hProb, ls->pLight, lightPDF * pmf, scatterPDF);
-
         Point2f uLightOffset = GetR2SequenceOffset();
-        RestirSampler<SampledLd> heuristicFSampler(Hash(u, MixBits(seed)));
+        WeightedReservoirSampler<SampledLd> heuristicFSampler(Hash(u, MixBits(seed)));
         for (int i = 0; i < heuristicHSampler.Size(); ++i) {
             // advance the sample unconditionally
             const Point2f uLightCurrent = uLight;
@@ -198,7 +180,7 @@ class RHTLightSampler {
             if (uLight.x >= 1) uLight.x -= 1;
             if (uLight.y >= 1) uLight.y -= 1;
         
-            const RestirSampler<LightCandidate>& reservoir(heuristicHSampler.GetReservoir(i));
+            const StatelessWeightedReservoirSampler<LightCandidate>& reservoir(heuristicHSampler.GetReservoir(i));
             if (!reservoir.HasSample()) {
                 continue;
             }
@@ -219,7 +201,7 @@ class RHTLightSampler {
             SampledLd sLd(f_hat * ls->L / hProb, ls->pLight, lightPDF, scatterPDF);
         
             // F(Si) = bsdf * (Li / pdfLight) * misW * hW(Li)
-            heuristicFSampler.Add(sLd, sLd.Ld.MaxComponentValue() / (lightPDF + scatterPDF));
+            heuristicFSampler.Add(sLd, (f_hat * ls->L).MaxComponentValue() / (lightPDF * hProb + scatterPDF));
         }
         
         if (!heuristicFSampler.HasSample()) {
@@ -241,7 +223,7 @@ class RHTLightSampler {
     bool buildLightTreeGPU(std::vector<RHTBuildContainer> &lights);
 #endif
 
-    using HeuristicHReservoirSet = RestirSetSampler<LightCandidate, PBRT_RHT_RESERVOIR_SET_H_SIZE>;
+    using HeuristicHReservoirSet = WeightedReservoirSetSampler<LightCandidate, PBRT_RHT_RESERVOIR_SET_H_SIZE>;
     //using HeuristicHReservoirSet = RestirSampler<LightCandidate>;
 
     PBRT_CPU_GPU
