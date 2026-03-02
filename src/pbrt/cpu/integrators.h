@@ -53,6 +53,10 @@ class Integrator {
         return !IntersectP(p0.SpawnRayTo(p1), 1 - ShadowEpsilon);
     }
 
+    bool Unoccluded(const Interaction &p0, const Point3fi& pi, const Normal3f& n) const {
+        return !IntersectP(p0.SpawnRayTo(pi, n), 1 - ShadowEpsilon);
+    }
+
     SampledSpectrum Tr(const Interaction &p0, const Interaction &p1,
                        const SampledWavelengths &lambda) const;
 

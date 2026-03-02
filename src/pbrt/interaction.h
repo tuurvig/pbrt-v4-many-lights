@@ -114,6 +114,13 @@ class Interaction {
     }
 
     PBRT_CPU_GPU
+    Ray SpawnRayTo(const Point3fi& pi, const Normal3f& n) const {
+        Ray r = pbrt::SpawnRayTo(pi, n, time, pi, n);
+        r.medium = GetMedium(r.d);
+        return r;
+    }
+
+    PBRT_CPU_GPU
     Medium GetMedium(Vector3f w) const {
         if (mediumInterface)
             return Dot(w, n) > 0 ? mediumInterface->outside : mediumInterface->inside;

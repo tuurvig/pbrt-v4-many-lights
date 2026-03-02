@@ -804,7 +804,7 @@ SampledSpectrum PathIntegrator::SampleLd(const SurfaceInteraction &intr, uint32_
     for (int i = 0; i < samplesLd.count; ++i) {
         const SampledLd& sLd(samplesLd[i]);
 
-        if (!Unoccluded(intr, sLd.pLight)) {
+        if (!Unoccluded(intr, sLd.pLight, sLd.nLight)) {
             continue;
         }
         
@@ -1353,7 +1353,7 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, uint32_t se
         const SampledLd& sLd(samplesLd[i]);
 
         // Declare path state variables for ray to light source
-        Ray lightRay = intr.SpawnRayTo(sLd.pLight);
+        Ray lightRay = sLd.SpawnShadowRay(intr);
         SampledSpectrum T_ray(1.f), r_l(1.f), r_u(1.f);
         RNG rng(Hash(lightRay.o), Hash(lightRay.d));
 
@@ -1412,7 +1412,7 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, uint32_t se
             }
             if (!si)
                 break;
-            lightRay = si->intr.SpawnRayTo(sLd.pLight);
+            lightRay = sLd.SpawnShadowRay(si->intr);
         }
 
         if (shouldSkip) continue;
@@ -3347,7 +3347,7 @@ SampledSpectrum SPPMIntegrator::SampleLd(const SurfaceInteraction &intr, uint32_
     CountedArray<SampledLd, 1> sampleLd;
     lightSampler.SampleLd(sampleLd, ctx, lambda, bsdf, seed, u, uLight, scatterEval);
 
-    if (sampleLd.count != 1 || !Unoccluded(intr, sampleLd[0].pLight)) {
+    if (sampleLd.count != 1 || !Unoccluded(intr, sampleLd[0].pLight, sampleLd[0].nLight)) {
         return {};
     }
 
