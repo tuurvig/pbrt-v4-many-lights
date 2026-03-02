@@ -182,7 +182,7 @@ void WavefrontPathIntegrator::SampleSubsurface(int wavefrontDepth) {
                              SafeDiv(Ld, r_u)[0], SafeDiv(Ld, r_u)[1],
                              SafeDiv(Ld, r_u)[2], SafeDiv(Ld, r_u)[3]);
 
-                    Ray ray = SpawnRayTo(intr.pi, intr.n, time, sLd.pLight.pi, sLd.pLight.n);
+                    Ray ray = sLd.SpawnShadowRay(intr.pi, intr.n, time);
                     if (haveMedia)
                         // TODO: as above, always take outside here?
                         ray.medium = Dot(ray.d, intr.n) > 0 ? w.mediumInterface.outside

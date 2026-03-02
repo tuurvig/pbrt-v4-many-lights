@@ -302,7 +302,8 @@ void WavefrontPathIntegrator::SampleMediumScattering(int wavefrontDepth) {
                 SampledSpectrum r_u = w.r_u * sLd.scatterPDF;
                 SampledSpectrum r_l = w.r_u * sLd.lightPDF;
 
-                Ray ray(w.p, sLd.pLight.p() - w.p, w.time, w.medium);
+                //Ray ray(w.p, sLd.LightWi(w.p), w.time, w.medium);
+                Ray ray(w.p, Point3f(sLd.pLight) - w.p, w.time, w.medium);
                 
                 // Enqueue shadow ray
                 shadowRayQueue->Push(ShadowRayWorkItem{ray, 1 - ShadowEpsilon,

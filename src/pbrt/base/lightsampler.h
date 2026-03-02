@@ -37,13 +37,25 @@ struct SampledLd {
     SampledLd() = default;
 
     PBRT_CPU_GPU SampledLd(const SampledSpectrum& s, const Interaction& intr, Float lightPDF, Float scatterPDF) :
-        Ld(s), pLight(intr), lightPDF(lightPDF), scatterPDF(scatterPDF) {}
+        Ld(s), pLight(intr.pi), nLight(intr.n), lightPDF(lightPDF), scatterPDF(scatterPDF) {}
+
+    PBRT_CPU_GPU
+    Ray SpawnShadowRay(const Interaction &from) const {
+        Ray r = pbrt::SpawnRayTo(from.pi, from.n, from.time, pLight, nLight);
+        r.medium = from.GetMedium(r.d);
+        return r;
+    }
+
+    PBRT_CPU_GPU
+    Ray SpawnShadowRay(Point3fi pFrom, Normal3f nFrom, Float time) const {
+        return pbrt::SpawnRayTo(pFrom, nFrom, time, pLight, nLight);
+    }
 
     SampledSpectrum Ld;
-    Interaction pLight;
+    Point3fi pLight;
+    Normal3f nLight;
     Float lightPDF;
     Float scatterPDF;
-    
 };
 
 enum ERequiresShadowRays : int {

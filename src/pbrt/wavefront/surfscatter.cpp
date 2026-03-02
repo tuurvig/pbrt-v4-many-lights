@@ -297,7 +297,7 @@ void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQue
                     SampledSpectrum Ld = w.beta * sLd.Ld;
                     
                     // Enqueue shadow ray with tentative radiance contribution
-                    Ray ray = SpawnRayTo(w.pi, w.n, w.time, sLd.pLight.pi, sLd.pLight.n);
+                    Ray ray = sLd.SpawnShadowRay(w.pi, w.n, w.time);
                     // Initialize _ray_ medium if media are present
                     if (haveMedia)
                         ray.medium = Dot(ray.d, w.n) > 0 ? w.mediumInterface.outside
