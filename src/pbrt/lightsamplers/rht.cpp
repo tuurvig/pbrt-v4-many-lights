@@ -155,7 +155,7 @@ bool RHTLightSampler::buildLightTreeGPU(std::vector<RHTBuildContainer> &lights) 
 }
 #endif
 
-#define PBRT_RHT_MAX_STACK 16
+#define PBRT_RHT_MAX_STACK 32
 
 struct alignas(8) PackedTraversalState {
     PackedTraversalState() = default;
@@ -245,7 +245,7 @@ void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSe
             continue;
         }
 
-        const Float pLeft = importanceLeft / wSum;
+        const Float pLeft = std::min(importanceLeft / wSum, OneMinusEpsilon);
         const Float pRight = 1 - pLeft;
 
         if (uSplit <= PsNode) {
