@@ -94,7 +94,7 @@ class RHTLightSampler {
             }
 
             Float weight[2] = {0};
-            weight[0] = ci[0] / sumImportance;
+            weight[0] = std::min(ci[0] / sumImportance, OneMinusEpsilon);
             weight[1] = 1 - weight[0];
 
             T = Pns * weight[child];
@@ -204,7 +204,7 @@ class RHTLightSampler {
             f_hat *= ls->L;
         
             // F(Si) = bsdf * (Li / pdfLight) * misW * hW(Li)
-            const Float denom = lightPDF * hProb + scatterPDF;
+            const Float denom = std::max(lightPDF * hProb + scatterPDF, MathEpsilon);
             const Float fWeight = f_hat.MaxComponentValue() / denom;
             if (fWeight > 0) {
                 heuristicFSampler.Add([&]{return SampledLd(f_hat / hProb, ls->pLight, lightPDF, scatterPDF);}, fWeight);
@@ -217,11 +217,11 @@ class RHTLightSampler {
         
         SampledLd resultLd(heuristicFSampler.GetSample());
         const Float fProb = heuristicFSampler.SampleProbability();
-        if (fProb <= 0 || IsNaN(fProb) || IsInf(fProb)) {
+        if (fProb <= 0) {
             return;
         }
         
-        resultLd.Ld /= fProb;
+        resultLd.Ld /= std::max(fProb, MathEpsilon);
         samples.Add(resultLd);
     }
 

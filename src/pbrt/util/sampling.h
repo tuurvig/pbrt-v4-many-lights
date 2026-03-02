@@ -672,7 +672,7 @@ class WeightedReservoirSampler {
     PBRT_CPU_GPU
     const T &GetSample() const { return reservoir; }
     PBRT_CPU_GPU
-    Float SampleProbability() const { return reservoirWeight / weightSum; }
+    Float SampleProbability() const { return reservoirWeight / std::max(weightSum, MathEpsilon); }
     PBRT_CPU_GPU
     Float WeightSum() const { return weightSum; }
 
