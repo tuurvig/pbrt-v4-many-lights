@@ -52,7 +52,7 @@ LightSampler LightSampler::Create(ERequiresShadowRays& nShadowRays, const std::s
         return alloc.new_object<HSLCLightSampler>(lights, alloc);
     }
     else if (name == "rht") {
-        //nShadowRays = E_TWO_SHADOW_RAYS;
+        nShadowRays = E_TWO_SHADOW_RAYS;
         return alloc.new_object<RHTLightSampler>(lights, alloc);
     }
     else if (name == "exhaustive")

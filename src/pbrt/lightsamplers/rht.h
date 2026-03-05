@@ -164,65 +164,75 @@ class RHTLightSampler {
                 Float scatterPDF = 0;
                 SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
                 samples.Add(SampledLd(f_hat * ls->L, ls->pLight, lightPDF, scatterPDF));
+                return;
             }
         }
 
         const Point3f p = ctx.p();
         const Normal3f n = ctx.ns;
-        
-        HeuristicHReservoirSet heuristicHSampler(Hash(u, seed));
-        CollectLightCandidates(heuristicHSampler, ctx, seed, u, HashFloat(seed), pmf);
 
-        Point2f uLightOffset = GetR2SequenceOffset();
-        WeightedReservoirSampler<SampledLd> heuristicFSampler(Hash(u, MixBits(seed)));
-        for (int i = 0; i < heuristicHSampler.Size(); ++i) {
-            // advance the sample unconditionally
-            const Point2f uLightCurrent = uLight;
-            uLight += uLightOffset;
-            if (uLight.x >= 1) uLight.x -= 1;
-            if (uLight.y >= 1) uLight.y -= 1;
-        
-            const StatelessWeightedReservoirSampler<LightCandidate>& reservoir(heuristicHSampler.GetReservoir(i));
-            if (!reservoir.HasSample()) {
-                continue;
-            }
-        
-            const LightCandidate& sample(reservoir.GetSample());
-            const Float hProb = reservoir.SampleProbability();
-        
-            Light light = m_tree.leaves[sample.lightIdx].light;
-            DCHECK(light && sample.pmf != 0);
-            pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLightCurrent, lambda, true);
-            if (!ls || !ls->L || ls->pdf == 0 || hProb <= 0)
-                continue;
-        
-            const Float lightPDF = sample.pmf * ls->pdf;
+        InPlaceWeightedReservoirSetSampler<SampledLd, NSamples> heuristicFSampler(samples.elements, Hash(u, MixBits(seed)));
+        {
+            HeuristicHReservoirSet heuristicHSampler(Hash(u, seed));
+            CollectLightCandidates(heuristicHSampler, ctx, seed, u, HashFloat(seed), pmf);
+            {
+                Point2f uLightOffset = GetR2SequenceOffset();
             
-            Float scatterPDF = 0;
-            SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
-
-            f_hat *= ls->L;
-        
-            // F(Si) = bsdf * (Li / pdfLight) * misW * hW(Li)
-            const Float denom = std::max(lightPDF * hProb + scatterPDF, MathEpsilon);
-            const Float fWeight = f_hat.MaxComponentValue() / denom;
-            if (fWeight > 0) {
-                heuristicFSampler.Add([&]{return SampledLd(f_hat / hProb, ls->pLight, lightPDF, scatterPDF);}, fWeight);
+                for (int i = 0; i < heuristicHSampler.Size(); ++i) {
+                    // advance the sample unconditionally
+                    const Point2f uLightCurrent = uLight;
+                    uLight += uLightOffset;
+                    if (uLight.x >= 1) uLight.x -= 1;
+                    if (uLight.y >= 1) uLight.y -= 1;
+                
+                    const StatelessWeightedReservoirSampler<LightCandidate>& reservoir(heuristicHSampler.GetReservoir(i));
+                    if (!reservoir.HasSample()) {
+                        continue;
+                    }
+                
+                    const LightCandidate& sample(reservoir.GetSample());
+                    const Float hProb = reservoir.SampleProbability();
+                
+                    Light light = m_tree.leaves[sample.lightIdx].light;
+                    DCHECK(light && sample.pmf != 0);
+                    pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLightCurrent, lambda, true);
+                    if (!ls || !ls->L || ls->pdf == 0 || hProb <= 0)
+                        continue;
+                
+                    const Float lightPDF = sample.pmf * ls->pdf;
+                    
+                    Float scatterPDF = 0;
+                    SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
+                    f_hat *= ls->L;
+                
+                    // F(Si) = bsdf * (Li / pdfLight) * misW * hW(Li)
+                    const Float denom = std::max(lightPDF * hProb + scatterPDF, MathEpsilon);
+                    const Float fWeight = f_hat.MaxComponentValue() / denom;
+                    if (fWeight > 0) {
+                        heuristicFSampler.Add([&]{
+                            return SampledLd(f_hat / hProb, ls->pLight, lightPDF, scatterPDF);
+                        }, fWeight);
+                    }
+                }
             }
         }
         
-        if (!heuristicFSampler.HasSample()) {
+        const int addedSamples = heuristicFSampler.Count();
+        if (addedSamples < NSamples) {
+            samples.count = addedSamples;
+            if constexpr (NSamples > 1) {
+                if (addedSamples == 1 && heuristicFSampler.HasSample(1)) {
+                    samples.elements[0] = samples.elements[1];
+                }
+            }
             return;
         }
-        
-        SampledLd resultLd(heuristicFSampler.GetSample());
-        const Float fProb = heuristicFSampler.SampleProbability();
-        if (fProb <= 0) {
-            return;
+
+        samples.count = NSamples;
+        for (int i = 0; i < samples.count; ++i) {
+            const Float fProb = heuristicFSampler.SampleProbability(i);
+            samples.elements[i].Ld /= std::max(fProb, MathEpsilon);
         }
-        
-        resultLd.Ld /= std::max(fProb, MathEpsilon);
-        samples.Add(resultLd);
     }
 
     std::string ToString() const;

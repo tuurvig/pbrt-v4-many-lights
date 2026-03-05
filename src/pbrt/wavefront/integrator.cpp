@@ -424,7 +424,7 @@ Float WavefrontPathIntegrator::Render() {
                     if (wavefrontDepth == maxDepth)
                         break;
 
-                    EvaluateMaterialsAndBSDFs<1>(wavefrontDepth, cameraMotion);
+                    EvaluateMaterialsAndBSDFs(wavefrontDepth, cameraMotion);
 
                     // Do immediately so that we have space for shadow rays for subsurface..
                     TraceShadowRays(wavefrontDepth);
@@ -583,10 +583,11 @@ void WavefrontPathIntegrator::HandleEmissiveIntersection() {
 }
 
 void WavefrontPathIntegrator::TraceShadowRays(int wavefrontDepth) {
+    int maxShadowRays = maxQueueSize * static_cast<int>(requiredShadowRays);
     if (haveMedia)
-        aggregate->IntersectShadowTr(maxQueueSize, shadowRayQueue, &pixelSampleState);
+        aggregate->IntersectShadowTr(maxShadowRays, shadowRayQueue, &pixelSampleState);
     else
-        aggregate->IntersectShadow(maxQueueSize, shadowRayQueue, &pixelSampleState);
+        aggregate->IntersectShadow(maxShadowRays, shadowRayQueue, &pixelSampleState);
     // Reset shadow ray queue
     Do(
         "Reset shadowRayQueue", PBRT_CPU_GPU_LAMBDA() {

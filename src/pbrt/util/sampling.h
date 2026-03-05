@@ -777,6 +777,111 @@ class WeightedReservoirSetSampler {
     uint32_t currentBatch;
 };
 
+struct ReservoirSetElem {
+    Float weightSum = 0;
+    Float weight = 0;
+};
+
+template <typename T, int N>
+class InPlaceWeightedReservoirSetSampler {
+  public:
+     // restirSetSampler Public Methods
+    InPlaceWeightedReservoirSetSampler() = default;
+
+    PBRT_CPU_GPU
+    explicit InPlaceWeightedReservoirSetSampler(T* reservoirArray, uint64_t baseSeed) :
+        inPlaceReservoirs(reservoirArray), u(HashFloat(baseSeed)), batchHash(MixBits(baseSeed)),
+        localIndex(0), count(0), currentBatch(1) {}
+
+    PBRT_CPU_GPU
+    bool Add(const T& sample, Float weight) {
+        // It is needed to compute a new seed for a permutation every N elements
+        if (localIndex == N) {
+            localIndex = 0;
+            ++currentBatch;
+            batchHash = MixBits(batchHash * currentBatch);
+        }
+
+        const int index = PermutationElement(localIndex, N, batchHash);
+        ++localIndex;
+        ++count;
+
+        const Float currentU = u;
+        u += GetR1SequenceOffset();
+        if (u >= 1) u -= 1;
+
+        ReservoirSetElem& elem(weights[index]);
+        elem.weightSum += weight;
+        // Randomly add _sample_ to reservoir
+        const Float p = weight / elem.weightSum;
+        if (currentU < p) {
+            inPlaceReservoirs[index] = sample;
+            elem.weight = weight;
+            return true;
+        }
+        DCHECK_LT(elem.weightSum, 1e80);
+        return false;
+    }
+
+    template <typename F>
+    PBRT_CPU_GPU
+    bool Add(F func, Float weight) {
+        if (localIndex == N) {
+            localIndex = 0;
+            ++currentBatch;
+            batchHash = MixBits(batchHash * currentBatch);
+        }
+
+        int index = PermutationElement(localIndex, N, batchHash);
+        ++localIndex;
+        ++count;
+
+        const Float currentU = u;
+        u += GetR1SequenceOffset();
+        if (u >= 1) u -= 1;
+
+        ReservoirSetElem& elem(weights[index]);
+        elem.weightSum += weight;
+        // Randomly add _sample_ to reservoir
+        const Float p = weight / elem.weightSum;
+        if (currentU < p) {
+            inPlaceReservoirs[index] = func();
+            elem.weight = weight;
+            return true;
+        }
+        DCHECK_LT(elem.weightSum, 1e80);
+        return false;
+    }
+
+    PBRT_CPU_GPU
+    int HasSample(int index) const { return weights[index].weightSum > 0; }
+
+    PBRT_CPU_GPU
+    Float SampleProbability(int index) const {
+        const ReservoirSetElem& elem(weights[index]);
+        return elem.weight / std::max(elem.weightSum, MathEpsilon);
+    }
+
+    PBRT_CPU_GPU
+    inline int Size() const {
+        return N;
+    }
+
+    PBRT_CPU_GPU
+    inline int Count() const {
+        return count;
+    }
+  private:
+    // InPlaceWeightedReservoirSetSample
+    T* inPlaceReservoirs = nullptr;
+    pstd::array<ReservoirSetElem, N> weights;
+    Float u = 0;
+    uint64_t batchHash;
+    uint32_t localIndex;
+    uint32_t count;
+    uint32_t currentBatch;
+};
+
 // PiecewiseConstant1D Definition
 class PiecewiseConstant1D {
   public:

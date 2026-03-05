@@ -293,6 +293,7 @@ void WavefrontPathIntegrator::SampleMediumScattering(int wavefrontDepth) {
             CountedArray<SampledLd, NShadowRays> samplesLd;
             lightSampler.SampleLd(samplesLd, ctx, w.lambda, nullptr, Hash(sampleIndex, w.pixelIndex, (w.depth + 1)), raySamples.direct.uc, raySamples.direct.u, scatterEval);
 
+            int reserveStartIdx = shadowRayQueue->ReserveEntries(samplesLd.count);
             for (int i = 0; i < samplesLd.count; ++i) {
                 const SampledLd& sLd(samplesLd[i]);
 
@@ -306,9 +307,8 @@ void WavefrontPathIntegrator::SampleMediumScattering(int wavefrontDepth) {
                 Ray ray(w.p, Point3f(sLd.pLight) - w.p, w.time, w.medium);
                 
                 // Enqueue shadow ray
-                shadowRayQueue->Push(ShadowRayWorkItem{ray, 1 - ShadowEpsilon,
-                                                       w.lambda, Ld, r_u, r_l,
-                                                       w.pixelIndex});
+                (*shadowRayQueue)[reserveStartIdx + i] =
+                        ShadowRayWorkItem{ray, 1 - ShadowEpsilon, w.lambda, Ld, r_u, r_l, w.pixelIndex};
 
                 PBRT_DBG("Enqueued medium shadow ray depth %d "
                          "Ld %f %f %f %f r_u %f %f %f %f "

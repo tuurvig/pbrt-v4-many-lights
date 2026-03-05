@@ -287,6 +287,7 @@ void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQue
                 lightSampler.SampleLd(samplesLd, ctx, lambda, &bsdf, Hash(sampleIndex, w.pixelIndex, (w.depth + 1)),
                                       raySamples.direct.uc, raySamples.direct.u, scatterEval);
 
+                int reserveStartIdx = shadowRayQueue->ReserveEntries(samplesLd.count);
                 for (int i = 0; i < samplesLd.count; ++i) {
                     const SampledLd& sLd(samplesLd[i]);
 
@@ -303,8 +304,8 @@ void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQue
                         ray.medium = Dot(ray.d, w.n) > 0 ? w.mediumInterface.outside
                                                          : w.mediumInterface.inside;
 
-                    shadowRayQueue->Push(ShadowRayWorkItem{ray, 1 - ShadowEpsilon, lambda, Ld,
-                                                           r_u, r_l, w.pixelIndex});
+                    (*shadowRayQueue)[reserveStartIdx + i] =
+                        ShadowRayWorkItem{ray, 1 - ShadowEpsilon, lambda, Ld, r_u, r_l, w.pixelIndex};
 
                     PBRT_DBG("w.index %d spawned shadow ray depth %d Ld/uni %f %f %f %f\n",
                              w.pixelIndex, w.depth, Ld[0], Ld[1], Ld[2], Ld[3],

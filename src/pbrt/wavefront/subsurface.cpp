@@ -166,30 +166,31 @@ void WavefrontPathIntegrator::SampleSubsurface(int wavefrontDepth) {
                 lightSampler.SampleLd(samplesLd, ctx, lambda, &bsdf, Hash(sampleIndex, w.pixelIndex, (w.depth + 1)),
                                       raySamples.direct.uc, raySamples.direct.u, scatterEval);
                 
+                int reserveStartIdx = shadowRayQueue->ReserveEntries(samplesLd.count);
                 for (int i = 0; i < samplesLd.count; ++i) {
                     const SampledLd& sLd(samplesLd[i]);
 
-                    SampledSpectrum r_l = r_u * sLd.lightPDF;
-                    r_u *= sLd.scatterPDF;
+                    SampledSpectrum sample_r_u = r_u * sLd.scatterPDF;
+                    SampledSpectrum sample_r_l = r_u * sLd.lightPDF;
 
                     SampledSpectrum Ld = betap * sLd.Ld;
 
                     PBRT_DBG("depth %d Ld %f %f %f %f "
                              "new beta %f %f %f %f beta/uni %f %f %f %f Ld/uni %f %f %f %f\n",
                              w.depth, Ld[0], Ld[1], Ld[2], Ld[3], beta[0], beta[1], beta[2],
-                             beta[3], SafeDiv(beta, r_u)[0], SafeDiv(beta, r_u)[1],
-                             SafeDiv(beta, r_u)[2], SafeDiv(beta, r_u)[3],
-                             SafeDiv(Ld, r_u)[0], SafeDiv(Ld, r_u)[1],
-                             SafeDiv(Ld, r_u)[2], SafeDiv(Ld, r_u)[3]);
+                             beta[3], SafeDiv(beta, sample_r_u)[0], SafeDiv(beta, sample_r_u)[1],
+                             SafeDiv(beta, sample_r_u)[2], SafeDiv(beta, sample_r_u)[3],
+                             SafeDiv(Ld, sample_r_u)[0], SafeDiv(Ld, sample_r_u)[1],
+                             SafeDiv(Ld, sample_r_u)[2], SafeDiv(Ld, sample_r_u)[3]);
 
                     Ray ray = sLd.SpawnShadowRay(intr.pi, intr.n, time);
                     if (haveMedia)
                         // TODO: as above, always take outside here?
                         ray.medium = Dot(ray.d, intr.n) > 0 ? w.mediumInterface.outside
                                                             : w.mediumInterface.inside;
-
-                    shadowRayQueue->Push(ShadowRayWorkItem{ray, 1 - ShadowEpsilon, lambda, Ld,
-                                                           r_u, r_l, w.pixelIndex});
+                    (*shadowRayQueue)[reserveStartIdx + i] =
+                        ShadowRayWorkItem{ray, 1 - ShadowEpsilon, lambda, Ld, sample_r_u,
+                                          sample_r_l, w.pixelIndex};
                 }
             }
         });

@@ -19,6 +19,8 @@
 #include <pbrt/util/spectrum.h>
 #include <pbrt/util/vecmath.h>
 
+#include <atomic>
+
 namespace pbrt {
 
 struct alignas(16) Float4 {
@@ -116,6 +118,32 @@ struct SOA<SampledSpectrum> {
     SampledSpectrum Load(int i) const { return (*this)[i]; }
     PBRT_CPU_GPU
     void Store(int i, const SampledSpectrum &s) { (*this)[i] = s; }
+
+    PBRT_CPU_GPU
+    void AtomicAdd(int index, const SampledSpectrum &s) {
+#ifdef PBRT_IS_GPU_CODE
+        if constexpr ((NSpectrumSamples % 4) == 0) {
+            int offset = n4 * index;
+            DCHECK_LT(offset, nAlloc);
+            for (int i = 0; i < n4; ++i, ++offset) {
+                atomicAdd(&ptr4[offset].v[0], s[4 * i]);
+                atomicAdd(&ptr4[offset].v[1], s[4 * i + 1]);
+                atomicAdd(&ptr4[offset].v[2], s[4 * i + 2]);
+                atomicAdd(&ptr4[offset].v[3], s[4 * i + 3]);
+            }
+        } else {
+            int offset = index * NSpectrumSamples;
+            DCHECK_LT(offset, nAlloc);
+            for (int i = 0; i < NSpectrumSamples; ++i)
+                atomicAdd(&ptr1[offset + i], s[i]);
+        }
+#else
+        constexpr int kLocks = 1024;
+        static std::mutex locks[kLocks];
+        std::lock_guard<std::mutex> g(locks[index % kLocks]);
+        Store(index, Load(index) + s);
+#endif
+    }
 
   private:
     // number of float4s needed per SampledSpectrum
