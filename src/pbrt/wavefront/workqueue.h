@@ -86,6 +86,23 @@ class WorkQueue : public SOA<WorkItem> {
         return index;
     }
 
+    PBRT_CPU_GPU
+    int ReserveEntries(int count) {
+        if (count < 1) {
+            return -1;
+        }
+
+#ifdef PBRT_IS_GPU_CODE
+#ifdef PBRT_USE_LEGACY_CUDA_ATOMICS
+        return atomicAdd(&size, count);
+#else
+        return size.fetch_add(count, cuda::std::memory_order_relaxed);
+#endif
+#else
+        return size.fetch_add(count, std::memory_order_relaxed);
+#endif
+    }
+
   protected:
     // WorkQueue Protected Methods
     PBRT_CPU_GPU

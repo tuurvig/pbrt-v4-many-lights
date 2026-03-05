@@ -41,8 +41,7 @@ inline PBRT_CPU_GPU void RecordShadowRayResult(const ShadowRayWorkItem w,
              Ld[0], Ld[1], Ld[2], Ld[3], w.Ld[0], w.Ld[1], w.Ld[2], w.Ld[3], w.r_u[0],
              w.r_u[1], w.r_u[2], w.r_u[3], w.r_l[0], w.r_l[1], w.r_l[2], w.r_l[3]);
 
-    SampledSpectrum Lpixel = pixelSampleState->L[w.pixelIndex];
-    pixelSampleState->L[w.pixelIndex] = Lpixel + Ld;
+    pixelSampleState->L.AtomicAdd(w.pixelIndex, Ld);
 }
 
 inline PBRT_CPU_GPU void EnqueueWorkAfterIntersection(
@@ -268,8 +267,7 @@ inline PBRT_CPU_GPU void TraceTransmittance(ShadowRayWorkItem sr,
         PBRT_DBG("Setting final Ld for shadow ray pixel index %d = as %f %f %f %f\n",
                  sr.pixelIndex, Ld[0], Ld[1], Ld[2], Ld[3]);
 
-        SampledSpectrum Lpixel = pixelSampleState->L[sr.pixelIndex];
-        pixelSampleState->L[sr.pixelIndex] = Lpixel + Ld;
+        pixelSampleState->L.AtomicAdd(sr.pixelIndex, Ld);
     }
 }
 
