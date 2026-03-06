@@ -17,6 +17,7 @@
 #include <pbrt/util/math.h>
 #include <pbrt/util/sampling.h>
 #include <pbrt/util/containers.h>
+#include <pbrt/util/heap.h>
 
 namespace pbrt {
 

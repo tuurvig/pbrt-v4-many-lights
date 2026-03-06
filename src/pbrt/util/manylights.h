@@ -537,8 +537,8 @@ inline Float InfiniteLightSimplePMF(const pstd::vector<Light>& infiniteLights, s
 /// Cluster Estimate function
 //////////////////////////////////////////////////////////
 
-PBRT_CPU_GPU
-inline Float ComputeClusterEstimate(const BSDF* bsdf, BxDFFlags flags, Point3f lightPos, Point3f point, Normal3f n, Vector3f wo, Float I) {
+PBRT_CPU_GPU PBRT_NOINLINE
+static Float ComputeClusterEstimate(const BSDF* bsdf, BxDFFlags flags, Point3f lightPos, Point3f point, Normal3f n, Vector3f wo, Float I) {
     Float minDistSqr = DistanceSquared(point, lightPos);
     Float clampedDistSqr = std::max(minDistSqr, MathEpsilon);
     Float G = 1.0f / clampedDistSqr;
@@ -606,7 +606,7 @@ inline Float GeomTermBoundInFrame(Point3f point, const Frame& frame, const Bound
 }
 
 PBRT_CPU_GPU
-inline Float ComputeGeometricBound(const LightcutsTreeNode* node, const Bounds3f& nodeBounds, const Frame& frame, bool isOriented, Point3f point, Vector3f wo, bool isTransmissive) {
+inline Float ComputeGeometricBound(const LightcutsTreeNode* node, const Bounds3f& nodeBounds, const Frame& frame, bool isOriented, Point3f point, Vector3f wo) {
     Float G = GeomTermBoundInFrame(point, frame, nodeBounds);
     G = std::abs(G);
 
@@ -630,7 +630,57 @@ inline Float ComputeGeometricBound(const LightcutsTreeNode* node, const Bounds3f
     return G;
 }
 
+/// Compute Error function
+//////////////////////////////////////////////////////////
+
+PBRT_CPU_GPU PBRT_NOINLINE
+static bool ComputeErrorBounds(Float &err0, Float &err1, Point3f p, Vector3f wo, Normal3f n, const Frame& frame, const BSDF* bsdf, const LightcutsTreeNode * child0, const LightcutsTreeNode * child1, const Bounds3f& allLightBounds, const bool isOriented = true) {
+    const Float nodeI0 = child0->compactLightBounds.PhiOrI();
+    const Float nodeI1 = child1->compactLightBounds.PhiOrI();
+
+    BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
+    
+    const Bounds3f nodeBound0 = child0->compactLightBounds.Bounds(allLightBounds);
+    const Bounds3f nodeBound1 = child1->compactLightBounds.Bounds(allLightBounds);
+
+    Float geomBound0 = ComputeGeometricBound(child0, nodeBound0, frame, isOriented, p, wo);
+    Float geomBound1 = ComputeGeometricBound(child1, nodeBound1, frame, isOriented, p, wo);
+    
+    Float ub0 = geomBound0 * nodeI0;
+    Float ub1 = geomBound1 * nodeI1; 
+
+    if (ub0 > MachineEpsilon && ub1 > MachineEpsilon) {   
+        Float dist2Min0 = DistanceSquared(p, ClosestPoint(p, nodeBound0));
+        Float dist2Min1 = DistanceSquared(p, ClosestPoint(p, nodeBound1));
+
+        const Float diagonalLengthSqr0 = LengthSquared(nodeBound0.Diagonal());
+        const Float diagonalLengthSqr1 = LengthSquared(nodeBound1.Diagonal());
+
+        if (dist2Min0 >= diagonalLengthSqr0 && dist2Min1 >= diagonalLengthSqr1) {
+            if (bsdf) {
+                ub0 *= bsdf->Max_f(wo, nodeBound0, p);
+                ub1 *= bsdf->Max_f(wo, nodeBound1, p);
+            }
+
+            err0 = ub0 / std::max(dist2Min0, MathEpsilon);
+            err1 = ub1 / std::max(dist2Min1, MathEpsilon);
+        }
+        else {
+            err0 = ub0;
+            err1 = ub1;
+        }
+    } else {
+        if (ub0 <= MachineEpsilon && ub1 <= MachineEpsilon) {
+            return false;
+        }
+
+        err0 = ub0 <= MachineEpsilon ? 0 : ub0;
+        err1 = ub1 <= MachineEpsilon ? 0 : ub1;
+    }
+    
+    return ub0 != 0 || ub1 != 0;
+}
+
 }
 
 #endif //PBRT_UTIL_MANYLIGHTS_H
-

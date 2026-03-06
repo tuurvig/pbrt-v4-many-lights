@@ -68,7 +68,7 @@ class SLCLightSampler {
 
             Float errBounds[2] = {1, 1};
 
-            if (!ComputeErrorBounds(errBounds[0], errBounds[1], p, wo, n, shadingFrame, bsdf, children[0], children[1], m_tree.allLightBounds, true)) {
+            if (!ComputeErrorBounds(errBounds[0], errBounds[1], p, wo, n, shadingFrame, bsdf, children[0], children[1], m_tree.allLightBounds)) {
                 return {};
             }
 
@@ -236,82 +236,82 @@ class SLCLightSampler {
     bool buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights, Float& u);
 #endif
 
-    PBRT_CPU_GPU
-    bool ComputeErrorBounds(Float &err0, Float &err1, Point3f p, Vector3f wo, Normal3f n, const Frame& frame, const BSDF* bsdf, const LightcutsTreeNode * child0, const LightcutsTreeNode * child1, const Bounds3f& allLightBounds, bool isOriented) const {
-        const Float nodeI0 = child0->compactLightBounds.PhiOrI();
-        const Float nodeI1 = child1->compactLightBounds.PhiOrI();
-
-        BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
-        
-        if (nodeI0 != 0 && nodeI1 != 0) {
-            const Bounds3f nodeBound0 = child0->compactLightBounds.Bounds(allLightBounds);
-            const Bounds3f nodeBound1 = child1->compactLightBounds.Bounds(allLightBounds);
-
-            Float geomBound0 = ComputeGeometricBound(child0, nodeBound0, frame, isOriented, p, wo, bsdf && IsTransmissive(bsdfFlags));
-            Float geomBound1 = ComputeGeometricBound(child1, nodeBound1, frame, isOriented, p, wo, bsdf && IsTransmissive(bsdfFlags));
-
-            if (geomBound0 > MachineEpsilon && geomBound1 > MachineEpsilon) {
-                Float ub0 = geomBound0 * nodeI0;
-                Float ub1 = geomBound1 * nodeI1;
-
-                Float matBound0 = 1;
-                Float matBound1 = 1;
-
-                if (bsdf) {
-                    matBound0 = bsdf->Max_f(wo, nodeBound0, p);
-                    matBound1 = bsdf->Max_f(wo, nodeBound1, p);
-                }
-                
-                if ((matBound0 > MachineEpsilon && matBound1 > MachineEpsilon)) {
-                    ub0 *= matBound0;
-                    ub1 *= matBound1;
-
-                    const Float diagonalLengthSqr0 = std::max(LengthSquared(nodeBound0.Diagonal()), MathEpsilon);
-                    const Float diagonalLengthSqr1 = std::max(LengthSquared(nodeBound1.Diagonal()), MathEpsilon);
-
-                    Float dist2Min0 = DistanceSquared(p, ClosestPoint(p, nodeBound0));
-                    Float dist2Min1 = DistanceSquared(p, ClosestPoint(p, nodeBound1));
-
-                    if (dist2Min0 > diagonalLengthSqr0 && dist2Min1 > diagonalLengthSqr1) {
-                        Float dBoundMin0 = 1 / dist2Min0;
-                        Float dBoundMin1 = 1 / dist2Min1;
-                    
-                        err0 = dBoundMin0 * ub0;
-                        err1 = dBoundMin1 * ub1;
-                    }
-                    else {
-                        err0 = ub0;
-                        err1 = ub1;
-                    }
-                } else {
-                    if (matBound0 < MachineEpsilon && matBound1 < MachineEpsilon) {
-                        return false;
-                    }
-
-                    // weight of the first child will be 1 or 0 based on whether the other child is 0.
-                    err0 = static_cast<Float>(matBound1 < MachineEpsilon);
-                    err1 = 1 - err0;
-                }
-            } else {
-                if (geomBound0 < MachineEpsilon && geomBound1 < MachineEpsilon) {
-                    return false;
-                }
-                // weight of the first child will be 1 or 0 based on whether the other child is 0.
-                err0 = static_cast<Float>(geomBound1 < MachineEpsilon);
-                err1 = 1 - err0;
-            }
-        }    
-        else {
-            if (nodeI0 == 0 && nodeI1 == 0) {
-                return false;
-            }
-            // weight of the first child will be 1 or 0 based on whether the other child is 0.
-            err0 = static_cast<Float>(nodeI0 == 0);
-            err1 = 1 - err0;
-        }
-        
-        return true;
-    }
+    //PBRT_CPU_GPU
+    //bool ComputeErrorBounds(Float &err0, Float &err1, Point3f p, Vector3f wo, Normal3f n, const Frame& frame, const BSDF* bsdf, const LightcutsTreeNode * child0, const LightcutsTreeNode * child1, const Bounds3f& allLightBounds, bool isOriented) const {
+    //    const Float nodeI0 = child0->compactLightBounds.PhiOrI();
+    //    const Float nodeI1 = child1->compactLightBounds.PhiOrI();
+    //
+    //    BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
+    //    
+    //    if (nodeI0 != 0 && nodeI1 != 0) {
+    //        const Bounds3f nodeBound0 = child0->compactLightBounds.Bounds(allLightBounds);
+    //        const Bounds3f nodeBound1 = child1->compactLightBounds.Bounds(allLightBounds);
+    //
+    //        Float geomBound0 = ComputeGeometricBound(child0, nodeBound0, frame, isOriented, p, wo);
+    //        Float geomBound1 = ComputeGeometricBound(child1, nodeBound1, frame, isOriented, p, wo);
+    //
+    //        if (geomBound0 > MachineEpsilon && geomBound1 > MachineEpsilon) {
+    //            Float ub0 = geomBound0 * nodeI0;
+    //            Float ub1 = geomBound1 * nodeI1;
+    //
+    //            Float matBound0 = 1;
+    //            Float matBound1 = 1;
+    //
+    //            if (bsdf) {
+    //                matBound0 = bsdf->Max_f(wo, nodeBound0, p);
+    //                matBound1 = bsdf->Max_f(wo, nodeBound1, p);
+    //            }
+    //            
+    //            if ((matBound0 > MachineEpsilon && matBound1 > MachineEpsilon)) {
+    //                ub0 *= matBound0;
+    //                ub1 *= matBound1;
+    //
+    //                const Float diagonalLengthSqr0 = std::max(LengthSquared(nodeBound0.Diagonal()), MathEpsilon);
+    //                const Float diagonalLengthSqr1 = std::max(LengthSquared(nodeBound1.Diagonal()), MathEpsilon);
+    //
+    //                Float dist2Min0 = DistanceSquared(p, ClosestPoint(p, nodeBound0));
+    //                Float dist2Min1 = DistanceSquared(p, ClosestPoint(p, nodeBound1));
+    //
+    //                if (dist2Min0 > diagonalLengthSqr0 && dist2Min1 > diagonalLengthSqr1) {
+    //                    Float dBoundMin0 = 1 / dist2Min0;
+    //                    Float dBoundMin1 = 1 / dist2Min1;
+    //                
+    //                    err0 = dBoundMin0 * ub0;
+    //                    err1 = dBoundMin1 * ub1;
+    //                }
+    //                else {
+    //                    err0 = ub0;
+    //                    err1 = ub1;
+    //                }
+    //            } else {
+    //                if (matBound0 < MachineEpsilon && matBound1 < MachineEpsilon) {
+    //                    return false;
+    //                }
+    //
+    //                // weight of the first child will be 1 or 0 based on whether the other child is 0.
+    //                err0 = static_cast<Float>(matBound1 < MachineEpsilon);
+    //                err1 = 1 - err0;
+    //            }
+    //        } else {
+    //            if (geomBound0 < MachineEpsilon && geomBound1 < MachineEpsilon) {
+    //                return false;
+    //            }
+    //            // weight of the first child will be 1 or 0 based on whether the other child is 0.
+    //            err0 = static_cast<Float>(geomBound1 < MachineEpsilon);
+    //            err1 = 1 - err0;
+    //        }
+    //    }    
+    //    else {
+    //        if (nodeI0 == 0 && nodeI1 == 0) {
+    //            return false;
+    //        }
+    //        // weight of the first child will be 1 or 0 based on whether the other child is 0.
+    //        err0 = static_cast<Float>(nodeI0 == 0);
+    //        err1 = 1 - err0;
+    //    }
+    //    
+    //    return true;
+    //}
 
     // LightcutsLightSampler Private Members
     LightcutsTree m_tree;
