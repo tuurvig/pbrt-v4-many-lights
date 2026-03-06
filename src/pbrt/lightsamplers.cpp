@@ -39,7 +39,7 @@ LightSampler LightSampler::Create(ERequiresShadowRays& nShadowRays, const std::s
     else if (name == "bvh")
         return alloc.new_object<BVHLightSampler>(lights, alloc);
     else if (name == "lightcuts") {
-        //nShadowRays = E_LIGHTCUTS_SHADOW_RAYS;
+        nShadowRays = E_LIGHTCUTS_SHADOW_RAYS;
         if (discretizedLights) {
             return alloc.new_object<LightcutsLightSampler>(lights, alloc);
         }
