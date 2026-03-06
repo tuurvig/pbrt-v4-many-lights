@@ -116,7 +116,7 @@ LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, All
                 pointLights.emplace_back(*lightBounds, light);
                 m_pointTree.allLightBounds = Union(m_pointTree.allLightBounds, lightBounds->bounds);
 
-            } else if (light.Is<SpotLight>()) {
+            } else if (light.Is<SpotLight>() || light.Is<CosineSpotLight>()) {
                 spotLights.emplace_back(*lightBounds, light);
                 m_spotTree.allLightBounds = Union(m_spotTree.allLightBounds, lightBounds->bounds);
 
@@ -158,154 +158,133 @@ LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, All
                                m_lightToLocation.capacity() * (sizeof(Light) + sizeof(LightLocation));
 }
 
+struct alignas(8) CutData {
+    uint32_t nodeIndex;
+    Float estimate;
+};
+
+#define PBRT_LIGHTCUTS_CUT_SIZE 32
 
 PBRT_CPU_GPU
 pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightSampleContext& ctx, const LightcutsTree& tree, bool isPoint, const BSDF* bsdf, Float pmf, Float u) const {
-    Point3f p = ctx.p();
-    Vector3f wo = ctx.wo;
-    Normal3f n = ctx.n;
+    const Point3f p = ctx.p();
+    const Vector3f wo = ctx.wo;
+    const Normal3f n = ctx.ns;
 
-    BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
-    Frame shadingFrame(bsdf ? bsdf->shadingFrame : Frame::FromZ(ctx.n));
-
-    Float estL = 0;
-    Float estParent = 0;
-    Float clusterEst[2] = {};
-
-    constexpr Float floatUintMax = 0x1p32f;
-    uint32_t currentU = static_cast<uint32_t>(u * floatUintMax);
+    const BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
+    const Frame shadingFrame(bsdf ? bsdf->shadingFrame : Frame::FromZ(ctx.ns));
 
     int nodeIndex = 0;
-    const LightcutsTreeNode* node = &tree.nodes[nodeIndex];
 
-    while (!node->isLeaf) {
-        uint32_t childrenIndices[2] = {static_cast<uint32_t>(nodeIndex + 1), node->childOrLightIndex};
+    Float errBounds[PBRT_LIGHTCUTS_CUT_SIZE] = {0};
+    CutData data[PBRT_LIGHTCUTS_CUT_SIZE];
 
-        const LightcutsTreeNode *children[2] = {&tree.nodes[childrenIndices[0]],
-                                                &tree.nodes[childrenIndices[1]]};
-        
-        const Float nodeIntensities[2] = {children[0]->compactLightBounds.PhiOrI(),
-                                          children[1]->compactLightBounds.PhiOrI()};
+    int lastCutIndex = 0;
+    int cutSize = 1;
+    int maxAvailablePositions = PBRT_LIGHTCUTS_CUT_SIZE;
+    Float sumEstimate = 0, sumErrBound = std::numeric_limits<Float>::max();
+    errBounds[0] = std::numeric_limits<Float>::max();
+    data[0] = {0, 0};
 
-        const LightcutsTreeNode *representants[2] = {&tree.nodes[children[0]->representantIdx],
-                                                     &tree.nodes[children[1]->representantIdx]};
+    while (lastCutIndex < (maxAvailablePositions - 1) && lastCutIndex >= 0) {
+        CutData dataLeft, dataRight;
+        {
+            const Float errBound = errBounds[0];
+            const CutData nodeData = data[0];
 
-        const Float clusterEst[2] = {
-            ComputeClusterEstimate(bsdf, bsdfFlags, representants[0]->compactLightBounds.Bound(tree.allLightBounds, false), p, n, wo, nodeIntensities[0]),
-            ComputeClusterEstimate(bsdf, bsdfFlags, representants[1]->compactLightBounds.Bound(tree.allLightBounds, false), p, n, wo, nodeIntensities[1])
-        };
-
-        Float errBounds[2] = {1, 1};
-
-        if (nodeIntensities[0] != 0 && nodeIntensities[1] != 0) {
-            const Bounds3f nodeBound0 = children[0]->compactLightBounds.Bounds(tree.allLightBounds);
-            const Bounds3f nodeBound1 = children[1]->compactLightBounds.Bounds(tree.allLightBounds);
-
-            Float geomBound0 = ComputeGeometricBound(children[0], nodeBound0, shadingFrame, !isPoint, p, wo, bsdf && IsTransmissive(bsdfFlags));
-            Float geomBound1 = ComputeGeometricBound(children[1], nodeBound1, shadingFrame, !isPoint, p, wo, bsdf && IsTransmissive(bsdfFlags));
-
-            if (geomBound0 > MachineEpsilon && geomBound1 > MachineEpsilon) {
-                Float ub0 = geomBound0 * nodeIntensities[0];
-                Float ub1 = geomBound1 * nodeIntensities[1];
-
-                Float matBound0 = 1;
-                Float matBound1 = 1;
-
-                if (bsdf) {
-                    matBound0 = bsdf->Max_f(wo, nodeBound0, p);
-                    matBound1 = bsdf->Max_f(wo, nodeBound1, p);
-                }
-
-                if ((matBound0 > MachineEpsilon && matBound1 > MachineEpsilon)) {
-                    ub0 *= matBound0;
-                    ub1 *= matBound1;
-
-                    const Float diagonalLengthSqr0 = std::max(LengthSquared(nodeBound0.Diagonal()), MathEpsilon);
-                    const Float diagonalLengthSqr1 = std::max(LengthSquared(nodeBound1.Diagonal()), MathEpsilon);
-
-                    Float dist2Min0 = DistanceSquared(p, ClosestPoint(p, nodeBound0));
-                    Float dist2Min1 = DistanceSquared(p, ClosestPoint(p, nodeBound1));
-
-                    if (dist2Min0 > diagonalLengthSqr0 && dist2Min1 > diagonalLengthSqr1) {
-                        Float dBoundMin0 = 1 / dist2Min0;
-                        Float dBoundMin1 = 1 / dist2Min1;
-                    
-                        errBounds[0] = dBoundMin0 * ub0;
-                        errBounds[1] = dBoundMin1 * ub1;
-                    }
-                    else {
-                        errBounds[0] = ub0;
-                        errBounds[1] = ub1;
-                    }
-                } else {
-                    if (matBound0 < MachineEpsilon && matBound1 < MachineEpsilon) {
-                        return {};
-                    }
-
-                    // weight of the first child will be 1 or 0 based on whether the other child is 0.
-                    errBounds[0] = static_cast<Float>(matBound1 < MachineEpsilon);
-                    errBounds[1] = 1 - errBounds[0];
-                }
-            } else {
-                if (geomBound0 < MachineEpsilon && geomBound1 < MachineEpsilon) {
-                    return {};
-                }
-                // weight of the first child will be 1 or 0 based on whether the other child is 0.
-                errBounds[0] = static_cast<Float>(geomBound1 < MachineEpsilon);
-                errBounds[1] = 1 - errBounds[0];
-            }
-        } else {
-            if (nodeIntensities[0] == 0 && nodeIntensities[1] == 0) {
-                return {};
-            }
-            // weight of the first child will be 1 or 0 based on whether the other child is 0.
-            errBounds[0] = static_cast<Float>(nodeIntensities[1] == 0);
-            errBounds[1] = 1 - errBounds[0];
-        }
-
-        if (errBounds[0] < MachineEpsilon) {
+            errBounds[0] = errBounds[lastCutIndex];
+            data[0] = data[lastCutIndex];
+            HeapBubbleDown(errBounds, data, lastCutIndex);
+            errBounds[lastCutIndex] = 0;
+            data[lastCutIndex] = {std::numeric_limits<uint32_t>::max(), 0};
+            --lastCutIndex;
             
-            if (errBounds[1] < MachineEpsilon) {
-                return {};
+            const LightcutsTreeNode* node = &tree.nodes[nodeData.nodeIndex];
+            if (node->isLeaf || errBound < m_threshold * sumEstimate) {
+                errBounds[maxAvailablePositions - 1] = errBound;
+                data[maxAvailablePositions - 1] = nodeData;
+                --maxAvailablePositions;
+                
+                continue;
             }
-            errBounds[0] = MachineEpsilon;
-        } else if (errBounds[1] < MachineEpsilon){
-            errBounds[1] = MachineEpsilon;
+            
+            --cutSize;
+            sumErrBound -= errBound;
+            sumEstimate -= nodeData.estimate;
+
+            dataLeft.nodeIndex = static_cast<uint32_t>(nodeData.nodeIndex + 1);
+            dataRight.nodeIndex = node->childOrLightIndex;
         }
 
-        Float weights[2] = {0};
-        weights[0] = std::min(OneMinusEpsilon, errBounds[0] / (errBounds[0] + errBounds[1]));
-        weights[1] = 1 - weights[0];
-        
-        uint32_t threshold = static_cast<uint32_t>(weights[0] * floatUintMax);
+        Float errBoundLeft, errBoundRight;
 
-        // Randomly sample a children node
-        int child = 0;
-        if (currentU < threshold) {
-            currentU = static_cast<uint32_t>((static_cast<float>(currentU) / weights[0]));
-        } else {
-            child = 1;
+        const LightcutsTreeNode* leftChild = &tree.nodes[dataLeft.nodeIndex];
+        const LightcutsTreeNode* rightChild = &tree.nodes[dataRight.nodeIndex];
 
-            currentU -= threshold;
-            currentU = static_cast<uint32_t>((static_cast<float>(currentU) / weights[1]));
+        if (!ComputeErrorBounds(errBoundLeft, errBoundRight, p, wo, n, shadingFrame, bsdf, leftChild, rightChild, tree.allLightBounds)) {
+            continue;
+        }
+
+        if (errBoundLeft > 0) {
+            const LightcutsTreeNode* leftRepr = &tree.nodes[leftChild->representantIdx];
+            const Float nodeILeft = leftChild->compactLightBounds.PhiOrI();
+            dataLeft.estimate = ComputeClusterEstimate(bsdf, bsdfFlags, leftRepr->compactLightBounds.Bound(tree.allLightBounds, false), p, n, wo, nodeILeft);
+            sumEstimate += dataLeft.estimate;
+            sumErrBound += errBoundLeft;
+
+            ++cutSize;
+            ++lastCutIndex;
+            errBounds[lastCutIndex] = errBoundLeft;
+            data[lastCutIndex] = dataLeft;
+            HeapBubbleUp(errBounds, data, lastCutIndex + 1);
         }
         
-        currentU ^= FastIntegerHash(nodeIndex);
-        pmf *= weights[child];
-        nodeIndex = childrenIndices[child];
-        node = &tree.nodes[nodeIndex];
+        if (errBoundRight > 0) {
+            const LightcutsTreeNode* rightRepr = &tree.nodes[rightChild->representantIdx];
+            const Float nodeIRight = rightChild->compactLightBounds.PhiOrI();
+            dataRight.estimate = ComputeClusterEstimate(bsdf, bsdfFlags, rightRepr->compactLightBounds.Bound(tree.allLightBounds, false), p, n, wo, nodeIRight);
+            sumEstimate += dataRight.estimate;
+            sumErrBound += errBoundRight;
 
-        estL = estL - estParent + clusterEst[0] + clusterEst[1];
-        estParent = clusterEst[child];
-
-        if (errBounds[child] < m_threshold * estL) {
-            int representantLightIndex = representants[child]->childOrLightIndex;
-            Float repIntensity = representants[child]->compactLightBounds.PhiOrI();
-            return SampledLight(tree.lights[representantLightIndex], pmf, nodeIntensities[child] / repIntensity);
+            ++cutSize;
+            ++lastCutIndex;
+            errBounds[lastCutIndex] = errBoundRight;
+            data[lastCutIndex] = dataRight;
+            HeapBubbleUp(errBounds, data, lastCutIndex + 1);
         }
     }
 
-    return SampledLight(tree.lights[node->childOrLightIndex], pmf);
+    if (sumErrBound <= MachineEpsilon || cutSize == 0) {
+        return {};
+    }
+
+    Float upperBound = u * sumErrBound;
+    if (upperBound >= sumErrBound)
+        upperBound = NextFloatDown(sumErrBound);
+
+    int offset = 0;
+    Float sum = 0;
+    Float errBound = errBounds[0];
+    while (sum + errBound <= upperBound && offset < PBRT_LIGHTCUTS_CUT_SIZE - 1) {
+        sum += errBound;
+        ++offset;
+        errBound = errBounds[offset];
+    }
+
+    //Float pdf = errBound / sumErrBound;
+    //if (pdf == 0 || IsNaN(pdf)) {
+    //    return {};
+    //}
+
+    pmf *= errBound / sumErrBound;
+    const LightcutsTreeNode* node = &tree.nodes[data[offset].nodeIndex];
+    const LightcutsTreeNode* representant = &tree.nodes[node->representantIdx];
+    
+    const Float nodeIntensity = node->compactLightBounds.PhiOrI();
+    const Float repIntensity = representant->compactLightBounds.PhiOrI();
+
+    int representantLightIndex = representant->childOrLightIndex;
+    return SampledLight(tree.lights[representantLightIndex], pmf, nodeIntensity / repIntensity);
 }
 
 #ifdef PBRT_BUILD_GPU_RENDERER
