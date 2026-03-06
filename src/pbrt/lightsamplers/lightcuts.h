@@ -17,7 +17,6 @@
 #include <pbrt/util/math.h>
 #include <pbrt/util/sampling.h>
 #include <pbrt/util/containers.h>
-#include <pbrt/util/heap.h>
 
 namespace pbrt {
 
@@ -141,24 +140,106 @@ public:
     
     template <int NSamples, typename ScatterEval>
     PBRT_CPU_GPU PBRT_NOINLINE void SampleLd(CountedArray<SampledLd, NSamples>& samples, const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const {
-        pstd::optional<SampledLight> sampledLight = Sample(ctx, bsdf, seed, u);
-        if (!sampledLight) {
+        const size_t totalSize = m_pointTree.lights.size() + m_spotTree.lights.size() + m_otherLights.size();
+        
+        Float pmf = 1;
+        if (!m_infiniteLights.empty()) {
+            pstd::optional<SampledLight> infiniteLightSample = InfiniteLightSimpleSample(m_infiniteLights, totalSize, pmf, u);
+            if (infiniteLightSample) {
+                Light light = infiniteLightSample->light;
+                DCHECK(light && infiniteLightSample->p != 0);
+                pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
+                if (!ls || !ls->L || ls->pdf == 0)
+                    return;
+
+                Float lightPDF = infiniteLightSample->p * ls->pdf;
+                ls->L *= infiniteLightSample->scale;
+                
+                Float scatterPDF = 0;
+                SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
+                samples.Add(SampledLd(f_hat * ls->L, ls->pLight, lightPDF, scatterPDF));
+                return;
+            }
+        }
+
+        Float weights[3] = {
+            m_spotTree.lights.empty() ? 0 : m_spotTree.nodes[0].compactLightBounds.PhiOrI(),
+            m_pointTree.lights.empty() ? 0 : m_pointTree.nodes[0].compactLightBounds.PhiOrI(),
+            m_otherLightIntensities}; 
+
+        Float groupPMF;
+        const int groupIdx = SampleDiscrete(weights, u, &groupPMF, &u);
+        const LightcutsTree* selectedTree = groupIdx == 0 ? &m_spotTree : groupIdx == 1 ? &m_pointTree : nullptr;
+
+        pmf *= groupPMF;
+
+        if (!selectedTree) {
+            int index = std::min<int>(u * m_otherLights.size(), m_otherLights.size() - 1);
+            pmf /= m_otherLights.size();
+
+            Light light = m_otherLights[index];
+            DCHECK(light && pmf != 0);
+            pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
+            if (!ls || !ls->L || ls->pdf == 0)
+                return;
+
+            Float lightPDF = pmf * ls->pdf;
+            
+            Float scatterPDF = 0;
+            SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
+            samples.Add(SampledLd(f_hat * ls->L, ls->pLight, lightPDF, scatterPDF));
             return;
         }
 
-        Light light = sampledLight->light;
-        DCHECK(light && sampledLight->p != 0);
-        pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
-        if (!ls || !ls->L || ls->pdf == 0)
+        const Frame shadingFrame(bsdf ? bsdf->shadingFrame : Frame::FromZ(ctx.ns));
+
+        Float errBounds[NSamples] = {0};
+        CutData data[NSamples];
+
+        Float sumErrBound = 0;
+        int cutSize = ComputeLightcutsTreeCut<NSamples>(errBounds, data, sumErrBound, ctx, selectedTree->nodes, selectedTree->allLightBounds, shadingFrame, bsdf, m_threshold, selectedTree == &m_spotTree);
+
+        if (sumErrBound <= MachineEpsilon || cutSize <= 0) {
             return;
+        }
 
-        Float lightPDF = sampledLight->p * ls->pdf;
-        ls->L *= sampledLight->scale;
-        
-        Float scatterPDF = 0;
-        SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
+        Point2f uOffset = GetR2SequenceOffset();
+        for (int i = 0; i < NSamples; ++i) {
+            Float errBound = errBounds[i];
+            if (errBound <= 0) continue;
 
-        samples.Add(SampledLd(f_hat * ls->L, ls->pLight, lightPDF, scatterPDF));
+            uLight += uOffset;
+            if (uLight.x >= 1) uLight.x -= 1;
+            if (uLight.y >= 1) uLight.y -= 1;
+
+            CutData clusterData = data[i];
+
+            Float pmfLight = pmf * errBound / sumErrBound;
+
+            const LightcutsTreeNode& innerNode(selectedTree->nodes[clusterData.nodeIndex]);
+            const LightcutsTreeNode& representant(selectedTree->nodes[innerNode.representantIdx]);
+
+            const Float nodeIntensity = innerNode.compactLightBounds.PhiOrI();
+            const Float repIntensity = representant.compactLightBounds.PhiOrI();
+
+            const int representantLightIndex = representant.childOrLightIndex;
+            const Float scale = nodeIntensity / repIntensity;
+
+            Light light = selectedTree->lights[representantLightIndex];
+            DCHECK(light && pmf != 0);
+            pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
+            if (!ls || !ls->L || ls->pdf == 0)
+                return;
+
+            Float lightPDF = pmf * ls->pdf;
+            ls->L *= scale;
+
+            Float scatterPDF = 0;
+            SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
+            samples.Add(SampledLd(f_hat * ls->L, ls->pLight, lightPDF, scatterPDF));
+        }
+
+        return;
     }
 
     std::string ToString() const;

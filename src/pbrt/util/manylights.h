@@ -14,7 +14,10 @@
 #include <pbrt/base/lightsampler.h>
 
 #include <pbrt/util/vecmath.h>
+#include <pbrt/util/heap.h>
 #include <pbrt/util/lighttree_generic.h>
+
+#include <limits>
 
 namespace pbrt {
 
@@ -681,6 +684,104 @@ static bool ComputeErrorBounds(Float &err0, Float &err1, Point3f p, Vector3f wo,
     return ub0 != 0 || ub1 != 0;
 }
 
+/// Lightcuts tree cut function
+//////////////////////////////////////////////////////////
+
+#define PBRT_LIGHTCUTS_CUT_SIZE 32
+
+struct alignas(8) CutData {
+    uint32_t nodeIndex;
+    Float estimate;
+};
+
+template <int CutSize>
+PBRT_CPU_GPU PBRT_NOINLINE
+static int ComputeLightcutsTreeCut(Float* errBounds, CutData* data, Float& outSum, const LightSampleContext& ctx, const pstd::vector<LightcutsTreeNode>& treeNodes, const Bounds3f& allLightBounds, const Frame& frame, const BSDF* bsdf, const Float threshold, const bool isOriented = true) {
+    const Point3f p = ctx.p();
+    const Vector3f wo = ctx.wo;
+    const Normal3f n = ctx.ns;
+
+    const BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
+
+    int lastCutIndex = 0;
+    int cutSize = 1;
+    int maxAvailablePositions = CutSize;
+    Float sumEstimate = 0, sumErrBound = std::numeric_limits<Float>::max();
+    errBounds[0] = std::numeric_limits<Float>::max();
+    data[0] = {0, 0};
+
+    while (lastCutIndex < (maxAvailablePositions - 1) && lastCutIndex >= 0) {
+        CutData dataLeft, dataRight;
+        {
+            const Float errBound = errBounds[0];
+            const CutData nodeData = data[0];
+
+            errBounds[0] = errBounds[lastCutIndex];
+            data[0] = data[lastCutIndex];
+            HeapBubbleDown(errBounds, data, lastCutIndex);
+            errBounds[lastCutIndex] = 0;
+            data[lastCutIndex] = {std::numeric_limits<uint32_t>::max(), 0};
+            --lastCutIndex;
+            
+            const LightcutsTreeNode* node = &treeNodes[nodeData.nodeIndex];
+            if (node->isLeaf || errBound < threshold * sumEstimate) {
+                errBounds[maxAvailablePositions - 1] = errBound;
+                data[maxAvailablePositions - 1] = nodeData;
+                --maxAvailablePositions;
+                
+                continue;
+            }
+            
+            --cutSize;
+            sumErrBound -= errBound;
+            sumEstimate -= nodeData.estimate;
+
+            dataLeft.nodeIndex = static_cast<uint32_t>(nodeData.nodeIndex + 1);
+            dataRight.nodeIndex = node->childOrLightIndex;
+        }
+
+        Float errBoundLeft, errBoundRight;
+
+        const LightcutsTreeNode* leftChild = &treeNodes[dataLeft.nodeIndex];
+        const LightcutsTreeNode* rightChild = &treeNodes[dataRight.nodeIndex];
+
+        if (!ComputeErrorBounds(errBoundLeft, errBoundRight, p, wo, n, frame, bsdf, leftChild, rightChild, allLightBounds)) {
+            continue;
+        }
+
+        if (errBoundLeft > 0) {
+            const LightcutsTreeNode* leftRepr = &treeNodes[leftChild->representantIdx];
+            const Float nodeILeft = leftChild->compactLightBounds.PhiOrI();
+            dataLeft.estimate = ComputeClusterEstimate(bsdf, bsdfFlags, leftRepr->compactLightBounds.Bound(allLightBounds, false), p, n, wo, nodeILeft);
+            sumEstimate += dataLeft.estimate;
+            sumErrBound += errBoundLeft;
+
+            ++cutSize;
+            ++lastCutIndex;
+            errBounds[lastCutIndex] = errBoundLeft;
+            data[lastCutIndex] = dataLeft;
+            HeapBubbleUp(errBounds, data, lastCutIndex + 1);
+        }
+        
+        if (errBoundRight > 0) {
+            const LightcutsTreeNode* rightRepr = &treeNodes[rightChild->representantIdx];
+            const Float nodeIRight = rightChild->compactLightBounds.PhiOrI();
+            dataRight.estimate = ComputeClusterEstimate(bsdf, bsdfFlags, rightRepr->compactLightBounds.Bound(allLightBounds, false), p, n, wo, nodeIRight);
+            sumEstimate += dataRight.estimate;
+            sumErrBound += errBoundRight;
+
+            ++cutSize;
+            ++lastCutIndex;
+            errBounds[lastCutIndex] = errBoundRight;
+            data[lastCutIndex] = dataRight;
+            HeapBubbleUp(errBounds, data, lastCutIndex + 1);
+        }
+    }
+
+    outSum = sumErrBound;
+    return cutSize;
 }
+
+} 
 
 #endif //PBRT_UTIL_MANYLIGHTS_H

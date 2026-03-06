@@ -14,9 +14,9 @@
 #include <array>
 
 #include <cub/device/device_radix_sort.cuh>
-#endif //PBRT_BUILD_GPU_RENDERER
+#endif // PBRT_BUILD_GPU_RENDERER
 
-namespace pbrt{
+namespace pbrt {
 #ifdef PBRT_BUILD_GPU_RENDERER
 
 class LightcutsTreeBuilderGPU final : public LightTreeBuilderGPU<LightBounds, uint32_t, LightcutsCostEvaluator> {
@@ -158,101 +158,14 @@ LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, All
                                m_lightToLocation.capacity() * (sizeof(Light) + sizeof(LightLocation));
 }
 
-struct alignas(8) CutData {
-    uint32_t nodeIndex;
-    Float estimate;
-};
-
-#define PBRT_LIGHTCUTS_CUT_SIZE 32
-
 PBRT_CPU_GPU
 pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightSampleContext& ctx, const LightcutsTree& tree, bool isPoint, const BSDF* bsdf, Float pmf, Float u) const {
-    const Point3f p = ctx.p();
-    const Vector3f wo = ctx.wo;
-    const Normal3f n = ctx.ns;
-
-    const BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
     const Frame shadingFrame(bsdf ? bsdf->shadingFrame : Frame::FromZ(ctx.ns));
-
-    int nodeIndex = 0;
-
     Float errBounds[PBRT_LIGHTCUTS_CUT_SIZE] = {0};
     CutData data[PBRT_LIGHTCUTS_CUT_SIZE];
-
-    int lastCutIndex = 0;
-    int cutSize = 1;
-    int maxAvailablePositions = PBRT_LIGHTCUTS_CUT_SIZE;
-    Float sumEstimate = 0, sumErrBound = std::numeric_limits<Float>::max();
-    errBounds[0] = std::numeric_limits<Float>::max();
-    data[0] = {0, 0};
-
-    while (lastCutIndex < (maxAvailablePositions - 1) && lastCutIndex >= 0) {
-        CutData dataLeft, dataRight;
-        {
-            const Float errBound = errBounds[0];
-            const CutData nodeData = data[0];
-
-            errBounds[0] = errBounds[lastCutIndex];
-            data[0] = data[lastCutIndex];
-            HeapBubbleDown(errBounds, data, lastCutIndex);
-            errBounds[lastCutIndex] = 0;
-            data[lastCutIndex] = {std::numeric_limits<uint32_t>::max(), 0};
-            --lastCutIndex;
-            
-            const LightcutsTreeNode* node = &tree.nodes[nodeData.nodeIndex];
-            if (node->isLeaf || errBound < m_threshold * sumEstimate) {
-                errBounds[maxAvailablePositions - 1] = errBound;
-                data[maxAvailablePositions - 1] = nodeData;
-                --maxAvailablePositions;
-                
-                continue;
-            }
-            
-            --cutSize;
-            sumErrBound -= errBound;
-            sumEstimate -= nodeData.estimate;
-
-            dataLeft.nodeIndex = static_cast<uint32_t>(nodeData.nodeIndex + 1);
-            dataRight.nodeIndex = node->childOrLightIndex;
-        }
-
-        Float errBoundLeft, errBoundRight;
-
-        const LightcutsTreeNode* leftChild = &tree.nodes[dataLeft.nodeIndex];
-        const LightcutsTreeNode* rightChild = &tree.nodes[dataRight.nodeIndex];
-
-        if (!ComputeErrorBounds(errBoundLeft, errBoundRight, p, wo, n, shadingFrame, bsdf, leftChild, rightChild, tree.allLightBounds)) {
-            continue;
-        }
-
-        if (errBoundLeft > 0) {
-            const LightcutsTreeNode* leftRepr = &tree.nodes[leftChild->representantIdx];
-            const Float nodeILeft = leftChild->compactLightBounds.PhiOrI();
-            dataLeft.estimate = ComputeClusterEstimate(bsdf, bsdfFlags, leftRepr->compactLightBounds.Bound(tree.allLightBounds, false), p, n, wo, nodeILeft);
-            sumEstimate += dataLeft.estimate;
-            sumErrBound += errBoundLeft;
-
-            ++cutSize;
-            ++lastCutIndex;
-            errBounds[lastCutIndex] = errBoundLeft;
-            data[lastCutIndex] = dataLeft;
-            HeapBubbleUp(errBounds, data, lastCutIndex + 1);
-        }
-        
-        if (errBoundRight > 0) {
-            const LightcutsTreeNode* rightRepr = &tree.nodes[rightChild->representantIdx];
-            const Float nodeIRight = rightChild->compactLightBounds.PhiOrI();
-            dataRight.estimate = ComputeClusterEstimate(bsdf, bsdfFlags, rightRepr->compactLightBounds.Bound(tree.allLightBounds, false), p, n, wo, nodeIRight);
-            sumEstimate += dataRight.estimate;
-            sumErrBound += errBoundRight;
-
-            ++cutSize;
-            ++lastCutIndex;
-            errBounds[lastCutIndex] = errBoundRight;
-            data[lastCutIndex] = dataRight;
-            HeapBubbleUp(errBounds, data, lastCutIndex + 1);
-        }
-    }
+    
+    Float sumErrBound = 0;
+    int cutSize = ComputeLightcutsTreeCut<PBRT_LIGHTCUTS_CUT_SIZE>(errBounds, data, sumErrBound, ctx, tree.nodes, tree.allLightBounds, shadingFrame, bsdf, m_threshold, !isPoint);
 
     if (sumErrBound <= MachineEpsilon || cutSize == 0) {
         return {};
@@ -270,11 +183,6 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
         ++offset;
         errBound = errBounds[offset];
     }
-
-    //Float pdf = errBound / sumErrBound;
-    //if (pdf == 0 || IsNaN(pdf)) {
-    //    return {};
-    //}
 
     pmf *= errBound / sumErrBound;
     const LightcutsTreeNode* node = &tree.nodes[data[offset].nodeIndex];

@@ -694,6 +694,7 @@ SET (PBRT_UTIL_SOURCE_HEADERS
   src/pbrt/util/float.h
   src/pbrt/util/gui.h
   src/pbrt/util/hash.h
+  src/pbrt/util/heap.h
   src/pbrt/util/image.h
   src/pbrt/util/lighttree_generic.h
   src/pbrt/util/log.h
