@@ -50,8 +50,8 @@ class SLCLightSampler {
         Float errBounds[PBRT_LIGHTCUTS_CUT_SIZE] = {0};
         CutData data[PBRT_LIGHTCUTS_CUT_SIZE];
         
-        Float sumErrBound = 0;
-        int cutSize = ComputeLightcutsTreeCut<PBRT_LIGHTCUTS_CUT_SIZE>(errBounds, data, sumErrBound, ctx, m_tree.nodes, m_tree.allLightBounds, shadingFrame, bsdf, m_threshold);
+        uint32_t bitTrail = 0; //dummy
+        int cutSize = ComputeLightcutsTreeCut<PBRT_LIGHTCUTS_CUT_SIZE>(errBounds, data, bitTrail, ctx, m_tree.nodes, m_tree.allLightBounds, shadingFrame, bsdf, m_threshold);
 
         if (cutSize == 0) {
             return {};
@@ -106,22 +106,79 @@ class SLCLightSampler {
 
     PBRT_CPU_GPU PBRT_NOINLINE
     LightPMF PMF(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t /*seed*/, Light light) const {
-        // Compute infinite light sampling probability _pInfinite_
-        Float pInfinite = InfiniteLightSimplePMF(m_infiniteLights, m_tree.nodes.size());
-
         // Handle infinite _light_ PMF
         if (!m_lightToBitTrail.HasKey(light))
-            return pInfinite;
+            return InfiniteLightSimplePMF(m_infiniteLights, m_tree.lights.size());;
 
-        // Initialize local variables for BVH traversal for PMF computation
+        // Compute infinite light sampling probability _pInfinite_
+        Float pInfinite = Float(m_infiniteLights.size()) /
+                          Float(m_infiniteLights.size() + (m_tree.lights.size() == 0 ? 0 : 1));
+
+        if (m_tree.lights.empty())
+            return 0;
+
+        // Compute cut exactly as in Sample().
+        const Frame shadingFrame(bsdf ? bsdf->shadingFrame : Frame::FromZ(ctx.ns));
+        Float cutErrBounds[PBRT_LIGHTCUTS_CUT_SIZE] = {0};
+        CutData cutData[PBRT_LIGHTCUTS_CUT_SIZE];
+
         uint32_t bitTrail = m_lightToBitTrail[light];
-        Point3f p = ctx.p();
-        Normal3f n = ctx.ns;
+        int cutSize = ComputeLightcutsTreeCut<PBRT_LIGHTCUTS_CUT_SIZE>(cutErrBounds, cutData, bitTrail, ctx, m_tree.nodes, m_tree.allLightBounds, shadingFrame, bsdf, m_threshold);
         
-        Float pmf = 1 - pInfinite;
+        if (cutSize <= 0)
+            return 0;
+
+        Float cutWeightSum = 0;
+        uint32_t foundIndex = std::numeric_limits<uint32_t>::max();
+        for (int i = 0; i < PBRT_LIGHTCUTS_CUT_SIZE; ++i) {
+            Float errBound = cutErrBounds[i];
+            if (errBound <= 0) continue;
+
+            cutWeightSum += errBound;
+            const CutData& nodeData(cutData[i]);
+            if (nodeData.onTrail) {
+                foundIndex = i;
+            }
+        }
         
-        // Compute light's PMF by walking down tree nodes to the light
-        return pmf / m_tree.lights.size();
+        if (foundIndex == std::numeric_limits<uint32_t>::max())
+            return 0;
+
+        Float cutNodeProbability = cutErrBounds[foundIndex] / cutWeightSum;
+        Float pmf = (1 - pInfinite) * cutNodeProbability;
+
+        // Continue exactly with the same heuristic split probabilities as in Sample().
+        const Point3f p = ctx.p();
+        const Vector3f wo = ctx.wo;
+        const Normal3f n = ctx.ns;
+
+        uint32_t nodeIndex = cutData[foundIndex].nodeIndex;
+        const LightcutsTreeNode* node = &m_tree.nodes[nodeIndex];
+        
+        while (!node->isLeaf) {
+            const uint32_t childrenIndices[2] = {static_cast<uint32_t>(nodeIndex + 1),
+                                                 node->childOrLightIndex};
+            const LightcutsTreeNode* children[2] = {&m_tree.nodes[childrenIndices[0]],
+                                                    &m_tree.nodes[childrenIndices[1]]};
+            Float errBounds[2] = {1, 1};
+            if (!ComputeErrorBounds(errBounds[0], errBounds[1], p, wo, n, shadingFrame, bsdf, children[0], children[1], m_tree.allLightBounds, true)) {
+                return 0;
+            }
+
+            Float weights[2] = {0};
+            weights[0] = std::min(OneMinusEpsilon, errBounds[0] / (errBounds[0] + errBounds[1]));
+            weights[1] = 1 - weights[0];
+
+            const uint32_t child = bitTrail & 1;
+            pmf *= weights[child];
+
+            nodeIndex = childrenIndices[child];
+            node = &m_tree.nodes[nodeIndex];
+            bitTrail >>= 1;
+        }
+
+        DCHECK_EQ(light, m_tree.lights[node->childOrLightIndex]);
+        return LightPMF(pmf);
     }
 
     PBRT_CPU_GPU
@@ -182,8 +239,8 @@ class SLCLightSampler {
         Float errBounds[NSamples] = {0};
         CutData data[NSamples];
 
-        Float sumErrBound = 0;
-        int cutSize = ComputeLightcutsTreeCut<NSamples>(errBounds, data, sumErrBound, ctx, m_tree.nodes, m_tree.allLightBounds, shadingFrame, bsdf, m_threshold, true);
+        uint32_t bitTrail = 0; // dummy
+        int cutSize = ComputeLightcutsTreeCut<NSamples>(errBounds, data, bitTrail, ctx, m_tree.nodes, m_tree.allLightBounds, shadingFrame, bsdf, m_threshold, true);
         if (cutSize <= 0) {
             return;
         }

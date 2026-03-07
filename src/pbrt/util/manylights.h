@@ -690,13 +690,16 @@ static bool ComputeErrorBounds(Float &err0, Float &err1, Point3f p, Vector3f wo,
 #define PBRT_LIGHTCUTS_CUT_SIZE 32
 
 struct alignas(8) CutData {
-    uint32_t nodeIndex;
     Float estimate;
+    struct {
+        uint32_t nodeIndex : 31;
+        uint32_t onTrail : 1;
+    };
 };
 
 template <int CutSize>
 PBRT_CPU_GPU PBRT_NOINLINE
-static int ComputeLightcutsTreeCut(Float* errBounds, CutData* data, Float& outSum, const LightSampleContext& ctx, const pstd::vector<LightcutsTreeNode>& treeNodes, const Bounds3f& allLightBounds, const Frame& frame, const BSDF* bsdf, const Float threshold, const bool isOriented = true) {
+static int ComputeLightcutsTreeCut(Float* errBounds, CutData* data, uint32_t& bitTrail, const LightSampleContext& ctx, const pstd::vector<LightcutsTreeNode>& treeNodes, const Bounds3f& allLightBounds, const Frame& frame, const BSDF* bsdf, const Float threshold, const bool isOriented = true) {
     const Point3f p = ctx.p();
     const Vector3f wo = ctx.wo;
     const Normal3f n = ctx.ns;
@@ -708,10 +711,11 @@ static int ComputeLightcutsTreeCut(Float* errBounds, CutData* data, Float& outSu
     int maxAvailablePositions = CutSize;
     Float sumEstimate = 0, sumErrBound = std::numeric_limits<Float>::max();
     errBounds[0] = std::numeric_limits<Float>::max();
-    data[0] = {0, 0};
+    data[0] = {0, {0, 1}};
 
     while (lastCutIndex < (maxAvailablePositions - 1) && lastCutIndex >= 0) {
         CutData dataLeft, dataRight;
+        int childBit = -1;
         {
             const Float errBound = errBounds[0];
             const CutData nodeData = data[0];
@@ -720,12 +724,11 @@ static int ComputeLightcutsTreeCut(Float* errBounds, CutData* data, Float& outSu
             data[0] = data[lastCutIndex];
             HeapBubbleDown(errBounds, data, lastCutIndex);
             errBounds[lastCutIndex] = 0;
-            data[lastCutIndex] = {std::numeric_limits<uint32_t>::max(), 0};
+            data[lastCutIndex] = {0, {std::numeric_limits<uint32_t>::max(), 0}};
             --lastCutIndex;
             
             const LightcutsTreeNode* node = &treeNodes[nodeData.nodeIndex];
-            //if (node->isLeaf || errBound < threshold * sumEstimate) {
-            if (node->isLeaf) {
+            if (node->isLeaf || errBound < threshold * sumEstimate) {
                 errBounds[maxAvailablePositions - 1] = errBound;
                 data[maxAvailablePositions - 1] = nodeData;
                 --maxAvailablePositions;
@@ -739,6 +742,11 @@ static int ComputeLightcutsTreeCut(Float* errBounds, CutData* data, Float& outSu
 
             dataLeft.nodeIndex = static_cast<uint32_t>(nodeData.nodeIndex + 1);
             dataRight.nodeIndex = node->childOrLightIndex;
+
+            if (nodeData.onTrail) {
+                childBit = bitTrail & 1;
+                bitTrail >>= 1;
+            }
         }
 
         Float errBoundLeft, errBoundRight;
@@ -754,6 +762,7 @@ static int ComputeLightcutsTreeCut(Float* errBounds, CutData* data, Float& outSu
             const LightcutsTreeNode* leftRepr = &treeNodes[leftChild->representantIdx];
             const Float nodeILeft = leftChild->compactLightBounds.PhiOrI();
             dataLeft.estimate = ComputeClusterEstimate(bsdf, bsdfFlags, leftRepr->compactLightBounds.Bound(allLightBounds, false), p, n, wo, nodeILeft);
+            dataLeft.onTrail = childBit == 0;
             sumEstimate += dataLeft.estimate;
             sumErrBound += errBoundLeft;
 
@@ -768,6 +777,7 @@ static int ComputeLightcutsTreeCut(Float* errBounds, CutData* data, Float& outSu
             const LightcutsTreeNode* rightRepr = &treeNodes[rightChild->representantIdx];
             const Float nodeIRight = rightChild->compactLightBounds.PhiOrI();
             dataRight.estimate = ComputeClusterEstimate(bsdf, bsdfFlags, rightRepr->compactLightBounds.Bound(allLightBounds, false), p, n, wo, nodeIRight);
+            dataRight.onTrail = childBit == 1;
             sumEstimate += dataRight.estimate;
             sumErrBound += errBoundRight;
 
@@ -779,7 +789,6 @@ static int ComputeLightcutsTreeCut(Float* errBounds, CutData* data, Float& outSu
         }
     }
 
-    outSum = sumErrBound;
     return cutSize;
 }
 
