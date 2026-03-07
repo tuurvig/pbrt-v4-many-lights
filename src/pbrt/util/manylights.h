@@ -554,12 +554,13 @@ static Float ComputeClusterEstimate(const BSDF* bsdf, BxDFFlags flags, Point3f l
 
     Float M = 1.f;
     if (bsdf) {
-        SampledSpectrum sp = bsdf->f(wo, wi);
-        M = sp.MaxComponentValue();
         if ((!IsTransmissive(flags) && cosTheta < 0) ||
             (!IsReflective(flags) && cosTheta >= 0)) {
-            cosTheta = 0;
+            return 0.f;
         }
+
+        SampledSpectrum sp = bsdf->f(wo, wi);
+        M = sp.MaxComponentValue();
     }
 
     return I * G * M * std::abs(cosTheta);
@@ -691,10 +692,7 @@ static bool ComputeErrorBounds(Float &err0, Float &err1, Point3f p, Vector3f wo,
 
 struct alignas(8) CutData {
     Float estimate;
-    struct {
-        uint32_t nodeIndex : 31;
-        uint32_t onTrail : 1;
-    };
+    uint32_t nodeIndex;
 };
 
 template <int CutSize>
@@ -711,7 +709,9 @@ static int ComputeLightcutsTreeCut(Float* errBounds, CutData* data, uint32_t& bi
     int maxAvailablePositions = CutSize;
     Float sumEstimate = 0, sumErrBound = std::numeric_limits<Float>::max();
     errBounds[0] = std::numeric_limits<Float>::max();
-    data[0] = {0, {0, 1}};
+    data[0] = {0, static_cast<uint32_t>(1) << 31};
+
+    constexpr uint32_t indexMask = std::numeric_limits<uint32_t>::max() >> 1;
 
     while (lastCutIndex < (maxAvailablePositions - 1) && lastCutIndex >= 0) {
         CutData dataLeft, dataRight;
@@ -720,14 +720,18 @@ static int ComputeLightcutsTreeCut(Float* errBounds, CutData* data, uint32_t& bi
             const Float errBound = errBounds[0];
             const CutData nodeData = data[0];
 
+            // extract the position on the trail from the index
+            const bool onTrail = nodeData.nodeIndex >> 31;
+            const uint32_t nodeIndex = nodeData.nodeIndex & indexMask;
+
             errBounds[0] = errBounds[lastCutIndex];
             data[0] = data[lastCutIndex];
             HeapBubbleDown(errBounds, data, lastCutIndex);
             errBounds[lastCutIndex] = 0;
-            data[lastCutIndex] = {0, {std::numeric_limits<uint32_t>::max(), 0}};
+            data[lastCutIndex] = {0, std::numeric_limits<uint32_t>::max()};
             --lastCutIndex;
             
-            const LightcutsTreeNode* node = &treeNodes[nodeData.nodeIndex];
+            const LightcutsTreeNode* node = &treeNodes[nodeIndex];
             if (node->isLeaf || errBound < threshold * sumEstimate) {
                 errBounds[maxAvailablePositions - 1] = errBound;
                 data[maxAvailablePositions - 1] = nodeData;
@@ -740,10 +744,10 @@ static int ComputeLightcutsTreeCut(Float* errBounds, CutData* data, uint32_t& bi
             sumErrBound -= errBound;
             sumEstimate -= nodeData.estimate;
 
-            dataLeft.nodeIndex = static_cast<uint32_t>(nodeData.nodeIndex + 1);
+            dataLeft.nodeIndex = static_cast<uint32_t>(nodeIndex + 1);
             dataRight.nodeIndex = node->childOrLightIndex;
 
-            if (nodeData.onTrail) {
+            if (onTrail) {
                 childBit = bitTrail & 1;
                 bitTrail >>= 1;
             }
@@ -762,7 +766,7 @@ static int ComputeLightcutsTreeCut(Float* errBounds, CutData* data, uint32_t& bi
             const LightcutsTreeNode* leftRepr = &treeNodes[leftChild->representantIdx];
             const Float nodeILeft = leftChild->compactLightBounds.PhiOrI();
             dataLeft.estimate = ComputeClusterEstimate(bsdf, bsdfFlags, leftRepr->compactLightBounds.Bound(allLightBounds, false), p, n, wo, nodeILeft);
-            dataLeft.onTrail = childBit == 0;
+            dataLeft.nodeIndex |= (static_cast<uint32_t>(childBit == 0) << 31); // write to the most significant bit on whether it belong to the bit trail
             sumEstimate += dataLeft.estimate;
             sumErrBound += errBoundLeft;
 
@@ -777,7 +781,7 @@ static int ComputeLightcutsTreeCut(Float* errBounds, CutData* data, uint32_t& bi
             const LightcutsTreeNode* rightRepr = &treeNodes[rightChild->representantIdx];
             const Float nodeIRight = rightChild->compactLightBounds.PhiOrI();
             dataRight.estimate = ComputeClusterEstimate(bsdf, bsdfFlags, rightRepr->compactLightBounds.Bound(allLightBounds, false), p, n, wo, nodeIRight);
-            dataRight.onTrail = childBit == 1;
+            dataRight.nodeIndex |= (static_cast<uint32_t>(childBit == 1) << 31); // write to the most significant bit on whether it belong to the bit trail
             sumEstimate += dataRight.estimate;
             sumErrBound += errBoundRight;
 
