@@ -163,16 +163,12 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
     Float errBounds[PBRT_LIGHTCUTS_CUT_SIZE] = {0};
     CutData data[PBRT_LIGHTCUTS_CUT_SIZE];
     
-    Float sumErrBound = 0;
-    int cutSize = ComputeLightcutsTreeCut<PBRT_LIGHTCUTS_CUT_SIZE>(errBounds, data, sumErrBound, ctx, tree.nodes, tree.allLightBounds, shadingFrame, bsdf, m_threshold, !isPoint);
+    uint32_t bitTrail = 0; // dummy
+    int cutSize = ComputeLightcutsTreeCut<PBRT_LIGHTCUTS_CUT_SIZE>(errBounds, data, bitTrail, ctx, tree.nodes, tree.allLightBounds, shadingFrame, bsdf, m_threshold, !isPoint);
 
     if (cutSize == 0) {
         return {};
     }
-
-    Float upperBound = u * sumErrBound;
-    if (upperBound >= sumErrBound)
-        upperBound = NextFloatDown(sumErrBound);
     
     WeightedReservoirSampler<CutData> reservoir(Hash(u));
     for (int i = 0, max = PBRT_LIGHTCUTS_CUT_SIZE; i < max; ++i) {

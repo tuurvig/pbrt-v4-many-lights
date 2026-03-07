@@ -196,22 +196,12 @@ public:
         Float errBounds[NSamples] = {0};
         CutData data[NSamples];
 
-        Float sumErrBound = 0;
-        int cutSize = ComputeLightcutsTreeCut<NSamples>(errBounds, data, sumErrBound, ctx, selectedTree->nodes, selectedTree->allLightBounds, shadingFrame, bsdf, m_threshold, selectedTree == &m_spotTree);
+        uint32_t bitTrail = 0;
+        int cutSize = ComputeLightcutsTreeCut<NSamples>(errBounds, data, bitTrail, ctx, selectedTree->nodes, selectedTree->allLightBounds, shadingFrame, bsdf, m_threshold, selectedTree == &m_spotTree);
 
-        if (sumErrBound <= MachineEpsilon || cutSize <= 0) {
+        if (cutSize <= 0) {
             return;
         }
-
-        //sumErrBound = 0;
-        //uint32_t validSamples = 0;
-        //for (int i = 0; i < NSamples; ++i) {
-        //    Float errBound = errBounds[i];
-        //    if (errBound <= 0) continue;
-        //
-        //    sumErrBound += errBound;
-        //    validSamples++;
-        //}
 
         Point2f uOffset = GetR2SequenceOffset();
         for (int i = 0; i < NSamples; ++i) {
