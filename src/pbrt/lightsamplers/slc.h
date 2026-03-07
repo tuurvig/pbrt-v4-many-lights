@@ -67,8 +67,10 @@ class SLCLightSampler {
 
         pmf *= reservoir.SampleProbability();
 
+        constexpr uint32_t indexMask = std::numeric_limits<uint32_t>::max() >> 1;
+
         CutData nodeData = reservoir.GetSample();
-        uint32_t nodeIndex = nodeData.nodeIndex;
+        uint32_t nodeIndex = nodeData.nodeIndex & indexMask;
         const LightcutsTreeNode* node = &m_tree.nodes[nodeIndex];
         
         Float pmfRepresentant = 1;
@@ -128,6 +130,8 @@ class SLCLightSampler {
         if (cutSize <= 0)
             return 0;
 
+        constexpr uint32_t indexMask = std::numeric_limits<uint32_t>::max() >> 1;
+
         Float cutWeightSum = 0;
         uint32_t foundIndex = std::numeric_limits<uint32_t>::max();
         for (int i = 0; i < PBRT_LIGHTCUTS_CUT_SIZE; ++i) {
@@ -135,8 +139,11 @@ class SLCLightSampler {
             if (errBound <= 0) continue;
 
             cutWeightSum += errBound;
-            const CutData& nodeData(cutData[i]);
-            if (nodeData.onTrail) {
+            CutData& nodeData(cutData[i]);
+
+            const bool onTrail = nodeData.nodeIndex >> 31;
+            if (onTrail) {
+                nodeData.nodeIndex &= indexMask;
                 foundIndex = i;
             }
         }
@@ -248,6 +255,8 @@ class SLCLightSampler {
         Point3f p = ctx.p();
         Vector3f wo = ctx.wo;
         Normal3f n = ctx.ns;
+        
+        constexpr uint32_t indexMask = std::numeric_limits<uint32_t>::max() >> 1;
 
         Point2f uOffset = GetR2SequenceOffset();
         for (int i = 0; i < NSamples; ++i) {
@@ -262,7 +271,7 @@ class SLCLightSampler {
 
             Float pmfLight = pmf;
 
-            uint32_t nodeIndex = clusterData.nodeIndex;
+            uint32_t nodeIndex = clusterData.nodeIndex & indexMask;
             const LightcutsTreeNode* node = &m_tree.nodes[nodeIndex];
 
             Float pmfRepresentant = 1;

@@ -169,7 +169,7 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
     if (cutSize == 0) {
         return {};
     }
-    
+
     WeightedReservoirSampler<CutData> reservoir(Hash(u));
     for (int i = 0, max = PBRT_LIGHTCUTS_CUT_SIZE; i < max; ++i) {
         Float errBound = errBounds[i];
@@ -183,7 +183,9 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
 
     pmf *= reservoir.SampleProbability();
 
-    const LightcutsTreeNode* node = &tree.nodes[reservoir.GetSample().nodeIndex];
+    constexpr uint32_t indexMask = std::numeric_limits<uint32_t>::max() >> 1;
+
+    const LightcutsTreeNode* node = &tree.nodes[reservoir.GetSample().nodeIndex & indexMask];
     const LightcutsTreeNode* representant = &tree.nodes[node->representantIdx];
     
     const Float nodeIntensity = node->compactLightBounds.PhiOrI();

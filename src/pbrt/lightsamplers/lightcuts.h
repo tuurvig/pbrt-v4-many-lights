@@ -202,6 +202,8 @@ public:
         if (cutSize <= 0) {
             return;
         }
+        
+        constexpr uint32_t indexMask = std::numeric_limits<uint32_t>::max() >> 1;
 
         Point2f uOffset = GetR2SequenceOffset();
         for (int i = 0; i < NSamples; ++i) {
@@ -214,7 +216,8 @@ public:
 
             CutData clusterData = data[i];
 
-            const LightcutsTreeNode& innerNode(selectedTree->nodes[clusterData.nodeIndex]);
+            const uint32_t nodeIndex = clusterData.nodeIndex & indexMask;
+            const LightcutsTreeNode& innerNode(selectedTree->nodes[nodeIndex]);
             const LightcutsTreeNode& representant(selectedTree->nodes[innerNode.representantIdx]);
 
             const Float nodeIntensity = innerNode.compactLightBounds.PhiOrI();
