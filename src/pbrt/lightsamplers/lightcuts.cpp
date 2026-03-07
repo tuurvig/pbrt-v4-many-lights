@@ -2,7 +2,6 @@
 
 #include <pbrt/util/stats.h>
 #include <pbrt/util/vecmath.h>
-
 #include <pbrt/util/hash.h>
 
 #ifdef PBRT_BUILD_GPU_RENDERER
@@ -167,25 +166,28 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
     Float sumErrBound = 0;
     int cutSize = ComputeLightcutsTreeCut<PBRT_LIGHTCUTS_CUT_SIZE>(errBounds, data, sumErrBound, ctx, tree.nodes, tree.allLightBounds, shadingFrame, bsdf, m_threshold, !isPoint);
 
-    if (sumErrBound <= MachineEpsilon || cutSize == 0) {
+    if (cutSize == 0) {
         return {};
     }
 
     Float upperBound = u * sumErrBound;
     if (upperBound >= sumErrBound)
         upperBound = NextFloatDown(sumErrBound);
+    
+    WeightedReservoirSampler<CutData> reservoir(Hash(u));
+    for (int i = 0, max = PBRT_LIGHTCUTS_CUT_SIZE; i < max; ++i) {
+        Float errBound = errBounds[i];
+        if (errBound <= 0) continue;
+        
+        CutData nodeData = data[i];
+        const LightcutsTreeNode* node = &tree.nodes[nodeData.nodeIndex];
 
-    int offset = 0;
-    Float sum = 0;
-    Float errBound = errBounds[0];
-    while (sum + errBound <= upperBound && offset < PBRT_LIGHTCUTS_CUT_SIZE - 1) {
-        sum += errBound;
-        ++offset;
-        errBound = errBounds[offset];
+        reservoir.Add(data[i], node->compactLightBounds.PhiOrI());
     }
 
-    pmf *= errBound / sumErrBound;
-    const LightcutsTreeNode* node = &tree.nodes[data[offset].nodeIndex];
+    pmf *= reservoir.SampleProbability();
+
+    const LightcutsTreeNode* node = &tree.nodes[reservoir.GetSample().nodeIndex];
     const LightcutsTreeNode* representant = &tree.nodes[node->representantIdx];
     
     const Float nodeIntensity = node->compactLightBounds.PhiOrI();

@@ -203,6 +203,16 @@ public:
             return;
         }
 
+        //sumErrBound = 0;
+        //uint32_t validSamples = 0;
+        //for (int i = 0; i < NSamples; ++i) {
+        //    Float errBound = errBounds[i];
+        //    if (errBound <= 0) continue;
+        //
+        //    sumErrBound += errBound;
+        //    validSamples++;
+        //}
+
         Point2f uOffset = GetR2SequenceOffset();
         for (int i = 0; i < NSamples; ++i) {
             Float errBound = errBounds[i];
@@ -213,8 +223,6 @@ public:
             if (uLight.y >= 1) uLight.y -= 1;
 
             CutData clusterData = data[i];
-
-            Float pmfLight = pmf * errBound / sumErrBound;
 
             const LightcutsTreeNode& innerNode(selectedTree->nodes[clusterData.nodeIndex]);
             const LightcutsTreeNode& representant(selectedTree->nodes[innerNode.representantIdx]);
@@ -229,7 +237,7 @@ public:
             DCHECK(light && pmf != 0);
             pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
             if (!ls || !ls->L || ls->pdf == 0)
-                return;
+                continue;
 
             Float lightPDF = pmf * ls->pdf;
             ls->L *= scale;

@@ -46,6 +46,7 @@ LightSampler LightSampler::Create(ERequiresShadowRays& nShadowRays, const std::s
         Error(R"(Cannot use lightcuts lightsampler without discretizing area lights. Using "bvh".)");
     }
     else if (name == "slc") {
+        nShadowRays = E_LIGHTCUTS_SHADOW_RAYS;
         return alloc.new_object<SLCLightSampler>(lights, alloc);
     }
     else if (name == "hslc") {
