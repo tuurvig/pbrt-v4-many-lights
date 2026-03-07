@@ -42,79 +42,35 @@ class SLCLightSampler {
 
         Point3f p = ctx.p();
         Vector3f wo = ctx.wo;
-        Normal3f n = ctx.n;
+        Normal3f n = ctx.ns;
 
         BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
-        Frame shadingFrame(bsdf ? bsdf->shadingFrame : Frame::FromZ(ctx.n));
+        Frame shadingFrame(bsdf ? bsdf->shadingFrame : Frame::FromZ(ctx.ns));
 
-        Float estL = 0;
-        Float estParent = 0;
-        Float clusterEst[2] = {};
+        Float errBounds[PBRT_LIGHTCUTS_CUT_SIZE] = {0};
+        CutData data[PBRT_LIGHTCUTS_CUT_SIZE];
+        
+        Float sumErrBound = 0;
+        int cutSize = ComputeLightcutsTreeCut<PBRT_LIGHTCUTS_CUT_SIZE>(errBounds, data, sumErrBound, ctx, m_tree.nodes, m_tree.allLightBounds, shadingFrame, bsdf, m_threshold);
 
-        constexpr Float floatUintMax = 0x1p32f;
-        uint32_t currentU = static_cast<uint32_t>(u * floatUintMax);
-
-        int nodeIndex = 0;
-        const LightcutsTreeNode* node = &m_tree.nodes[nodeIndex];
-
-        Float clusterIntensity = 1;
-        //Float repIntensity = 1;
-
-        while (!node->isLeaf) {
-            uint32_t childrenIndices[2] = {static_cast<uint32_t>(nodeIndex + 1), node->childOrLightIndex};
-
-            const LightcutsTreeNode *children[2] = {&m_tree.nodes[childrenIndices[0]],
-                                                    &m_tree.nodes[childrenIndices[1]]};
-
-            Float errBounds[2] = {1, 1};
-
-            if (!ComputeErrorBounds(errBounds[0], errBounds[1], p, wo, n, shadingFrame, bsdf, children[0], children[1], m_tree.allLightBounds)) {
-                return {};
-            }
-
-            const Float nodeIntensities[2] = {children[0]->compactLightBounds.PhiOrI(),
-                                              children[1]->compactLightBounds.PhiOrI()};
-
-            const LightcutsTreeNode *representants[2] = {&m_tree.nodes[children[0]->representantIdx],
-                                                         &m_tree.nodes[children[1]->representantIdx]};
-
-            const Float clusterEst[2] = {
-                ComputeClusterEstimate(bsdf, bsdfFlags, representants[0]->compactLightBounds.Bound(m_tree.allLightBounds, false), p, n, wo, nodeIntensities[0]),
-                ComputeClusterEstimate(bsdf, bsdfFlags, representants[1]->compactLightBounds.Bound(m_tree.allLightBounds, false), p, n, wo, nodeIntensities[1])
-            };
-
-            Float weights[2] = {0};
-            weights[0] = std::min(OneMinusEpsilon, errBounds[0] / (errBounds[0] + errBounds[1]));
-            weights[1] = 1 - weights[0];
-            
-            uint32_t threshold = static_cast<uint32_t>(weights[0] * floatUintMax);
-
-            // Randomly sample a children node
-            int child = 0;
-            if (currentU < threshold) {
-                currentU = static_cast<uint32_t>((static_cast<float>(currentU) / weights[0]));
-            } else {
-                child = 1;
-
-                currentU -= threshold;
-                currentU = static_cast<uint32_t>((static_cast<float>(currentU) / weights[1]));
-            }
-            
-            currentU ^= FastIntegerHash(nodeIndex);
-            pmf *= weights[child];
-            nodeIndex = childrenIndices[child];
-            node = &m_tree.nodes[nodeIndex];
-
-            estL = estL - estParent + clusterEst[0] + clusterEst[1];
-            estParent = clusterEst[child];
-
-            if (errBounds[child] < m_threshold * estL) {
-                clusterIntensity = nodeIntensities[child];
-                //repIntensity = clusterIntensity;
-                break;
-            }
+        if (cutSize == 0) {
+            return {};
         }
 
+        WeightedReservoirSampler<CutData> reservoir(Hash(u));
+        for (int i = 0, max = PBRT_LIGHTCUTS_CUT_SIZE; i < max; ++i) {
+            Float errBound = errBounds[i];
+            if (errBound <= 0) continue;
+
+            reservoir.Add(data[i], errBound);
+        }
+
+        pmf *= reservoir.SampleProbability();
+
+        CutData nodeData = reservoir.GetSample();
+        uint32_t nodeIndex = nodeData.nodeIndex;
+        const LightcutsTreeNode* node = &m_tree.nodes[nodeIndex];
+        
         Float pmfRepresentant = 1;
         while (!node->isLeaf) {
             uint32_t childrenIndices[2] = {static_cast<uint32_t>(nodeIndex + 1), node->childOrLightIndex};
@@ -132,28 +88,20 @@ class SLCLightSampler {
             weights[0] = std::min(OneMinusEpsilon, errBounds[0] / (errBounds[0] + errBounds[1]));
             weights[1] = 1 - weights[0];
 
-            uint32_t threshold = static_cast<uint32_t>(weights[0] * floatUintMax);
+            // Randomly sample light BVH child node
+            Float nodePMF;
+            int child = SampleDiscrete(weights, u, &nodePMF, &u);
+            pmfRepresentant *= nodePMF;
 
-            // Randomly sample a children node
-            int child = 0;
-            if (currentU < threshold) {
-                currentU = static_cast<uint32_t>((static_cast<float>(currentU) / weights[0]));
-            } else {
-                child = 1;
-
-                currentU -= threshold;
-                currentU = static_cast<uint32_t>((static_cast<float>(currentU) / weights[1]));
-            }
-
-            currentU ^= FastIntegerHash(nodeIndex);
-            pmfRepresentant *= weights[child];
             nodeIndex = childrenIndices[child];
             node = &m_tree.nodes[nodeIndex];
 
-            //repIntensity = node->compactLightBounds.PhiOrI();
+            const Float scrambleOffset = HashFloat(nodeIndex, seed);
+            u += scrambleOffset;
+            if (u >= 1) u -= 1;
         }
 
-        return SampledLight(m_tree.lights[node->childOrLightIndex], pmf, 1 / pmfRepresentant);
+        return SampledLight(m_tree.lights[node->childOrLightIndex], pmf * pmfRepresentant);
     }
 
     PBRT_CPU_GPU PBRT_NOINLINE
@@ -209,24 +157,105 @@ class SLCLightSampler {
 
     template <int NSamples, typename ScatterEval>
     PBRT_CPU_GPU PBRT_NOINLINE void SampleLd(CountedArray<SampledLd, NSamples>& samples, const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const {
-        pstd::optional<SampledLight> sampledLight = Sample(ctx, bsdf, seed, u);
-        if (!sampledLight) {
+        Float pmf = 1;
+        {
+            pstd::optional<SampledLight> infiniteLightSample = InfiniteLightSimpleSample(m_infiniteLights, m_tree.lights.size(), pmf, u);
+            if (infiniteLightSample) {
+                Light light = infiniteLightSample->light;
+                DCHECK(light && infiniteLightSample->p != 0);
+                pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
+                if (!ls || !ls->L || ls->pdf == 0)
+                    return;
+
+                Float lightPDF = infiniteLightSample->p * ls->pdf;
+                
+                Float scatterPDF = 0;
+                SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
+
+                samples.Add(SampledLd(f_hat * ls->L, ls->pLight, lightPDF, scatterPDF));
+                return;
+            }
+        }
+
+        const Frame shadingFrame(bsdf ? bsdf->shadingFrame : Frame::FromZ(ctx.ns));
+
+        Float errBounds[NSamples] = {0};
+        CutData data[NSamples];
+
+        Float sumErrBound = 0;
+        int cutSize = ComputeLightcutsTreeCut<NSamples>(errBounds, data, sumErrBound, ctx, m_tree.nodes, m_tree.allLightBounds, shadingFrame, bsdf, m_threshold, true);
+        if (cutSize <= 0) {
             return;
         }
 
-        Light light = sampledLight->light;
-        DCHECK(light && sampledLight->p != 0);
-        pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
-        if (!ls || !ls->L || ls->pdf == 0)
-            return;
+        Point3f p = ctx.p();
+        Vector3f wo = ctx.wo;
+        Normal3f n = ctx.ns;
 
-        Float lightPDF = sampledLight->p * ls->pdf;
-        ls->L *= sampledLight->scale;
-        
-        Float scatterPDF = 0;
-        SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
+        Point2f uOffset = GetR2SequenceOffset();
+        for (int i = 0; i < NSamples; ++i) {
+            Float errBound = errBounds[i];
+            if (errBound <= 0) continue;
 
-        samples.Add(SampledLd(f_hat * ls->L, ls->pLight, lightPDF, scatterPDF));
+            uLight += uOffset;
+            if (uLight.x >= 1) uLight.x -= 1;
+            if (uLight.y >= 1) uLight.y -= 1;
+
+            CutData clusterData = data[i];
+
+            Float pmfLight = pmf;
+
+            uint32_t nodeIndex = clusterData.nodeIndex;
+            const LightcutsTreeNode* node = &m_tree.nodes[nodeIndex];
+
+            Float pmfRepresentant = 1;
+            bool failed = false;
+            while (!node->isLeaf) {
+                uint32_t childrenIndices[2] = {static_cast<uint32_t>(nodeIndex + 1), node->childOrLightIndex};
+
+                const LightcutsTreeNode *children[2] = {&m_tree.nodes[childrenIndices[0]],
+                                                        &m_tree.nodes[childrenIndices[1]]};
+
+                Float errBounds[2] = {1, 1};
+
+                if (!ComputeErrorBounds(errBounds[0], errBounds[1], p, wo, n, shadingFrame, bsdf, children[0], children[1], m_tree.allLightBounds, true)) {
+                    failed = true;
+                    break;
+                }
+
+                Float weights[2] = {0};
+                weights[0] = std::min(OneMinusEpsilon, errBounds[0] / (errBounds[0] + errBounds[1]));
+                weights[1] = 1 - weights[0];
+
+                // Randomly sample light BVH child node
+                Float nodePMF;
+                int child = SampleDiscrete(weights, u, &nodePMF, &u);
+                pmfRepresentant *= nodePMF;
+
+                nodeIndex = childrenIndices[child];
+                node = &m_tree.nodes[nodeIndex];
+
+                const Float scrambleOffset = HashFloat(nodeIndex, seed);
+                u += scrambleOffset;
+                if (u >= 1) u -= 1;
+            }
+
+            if (failed) continue;
+
+            pmfLight *= pmfRepresentant;
+
+            Light light = m_tree.lights[node->childOrLightIndex];
+            DCHECK(light && pmfLight != 0);
+            pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
+            if (!ls || !ls->L || ls->pdf == 0)
+                continue;
+
+            Float lightPDF = pmfLight * ls->pdf;
+
+            Float scatterPDF = 0;
+            SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
+            samples.Add(SampledLd(f_hat * ls->L, ls->pLight, lightPDF, scatterPDF));
+        }
     }
 
     std::string ToString() const;
@@ -235,83 +264,6 @@ class SLCLightSampler {
 #ifdef PBRT_BUILD_GPU_RENDERER
     bool buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights, Float& u);
 #endif
-
-    //PBRT_CPU_GPU
-    //bool ComputeErrorBounds(Float &err0, Float &err1, Point3f p, Vector3f wo, Normal3f n, const Frame& frame, const BSDF* bsdf, const LightcutsTreeNode * child0, const LightcutsTreeNode * child1, const Bounds3f& allLightBounds, bool isOriented) const {
-    //    const Float nodeI0 = child0->compactLightBounds.PhiOrI();
-    //    const Float nodeI1 = child1->compactLightBounds.PhiOrI();
-    //
-    //    BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
-    //    
-    //    if (nodeI0 != 0 && nodeI1 != 0) {
-    //        const Bounds3f nodeBound0 = child0->compactLightBounds.Bounds(allLightBounds);
-    //        const Bounds3f nodeBound1 = child1->compactLightBounds.Bounds(allLightBounds);
-    //
-    //        Float geomBound0 = ComputeGeometricBound(child0, nodeBound0, frame, isOriented, p, wo);
-    //        Float geomBound1 = ComputeGeometricBound(child1, nodeBound1, frame, isOriented, p, wo);
-    //
-    //        if (geomBound0 > MachineEpsilon && geomBound1 > MachineEpsilon) {
-    //            Float ub0 = geomBound0 * nodeI0;
-    //            Float ub1 = geomBound1 * nodeI1;
-    //
-    //            Float matBound0 = 1;
-    //            Float matBound1 = 1;
-    //
-    //            if (bsdf) {
-    //                matBound0 = bsdf->Max_f(wo, nodeBound0, p);
-    //                matBound1 = bsdf->Max_f(wo, nodeBound1, p);
-    //            }
-    //            
-    //            if ((matBound0 > MachineEpsilon && matBound1 > MachineEpsilon)) {
-    //                ub0 *= matBound0;
-    //                ub1 *= matBound1;
-    //
-    //                const Float diagonalLengthSqr0 = std::max(LengthSquared(nodeBound0.Diagonal()), MathEpsilon);
-    //                const Float diagonalLengthSqr1 = std::max(LengthSquared(nodeBound1.Diagonal()), MathEpsilon);
-    //
-    //                Float dist2Min0 = DistanceSquared(p, ClosestPoint(p, nodeBound0));
-    //                Float dist2Min1 = DistanceSquared(p, ClosestPoint(p, nodeBound1));
-    //
-    //                if (dist2Min0 > diagonalLengthSqr0 && dist2Min1 > diagonalLengthSqr1) {
-    //                    Float dBoundMin0 = 1 / dist2Min0;
-    //                    Float dBoundMin1 = 1 / dist2Min1;
-    //                
-    //                    err0 = dBoundMin0 * ub0;
-    //                    err1 = dBoundMin1 * ub1;
-    //                }
-    //                else {
-    //                    err0 = ub0;
-    //                    err1 = ub1;
-    //                }
-    //            } else {
-    //                if (matBound0 < MachineEpsilon && matBound1 < MachineEpsilon) {
-    //                    return false;
-    //                }
-    //
-    //                // weight of the first child will be 1 or 0 based on whether the other child is 0.
-    //                err0 = static_cast<Float>(matBound1 < MachineEpsilon);
-    //                err1 = 1 - err0;
-    //            }
-    //        } else {
-    //            if (geomBound0 < MachineEpsilon && geomBound1 < MachineEpsilon) {
-    //                return false;
-    //            }
-    //            // weight of the first child will be 1 or 0 based on whether the other child is 0.
-    //            err0 = static_cast<Float>(geomBound1 < MachineEpsilon);
-    //            err1 = 1 - err0;
-    //        }
-    //    }    
-    //    else {
-    //        if (nodeI0 == 0 && nodeI1 == 0) {
-    //            return false;
-    //        }
-    //        // weight of the first child will be 1 or 0 based on whether the other child is 0.
-    //        err0 = static_cast<Float>(nodeI0 == 0);
-    //        err1 = 1 - err0;
-    //    }
-    //    
-    //    return true;
-    //}
 
     // LightcutsLightSampler Private Members
     LightcutsTree m_tree;

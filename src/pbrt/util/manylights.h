@@ -724,7 +724,8 @@ static int ComputeLightcutsTreeCut(Float* errBounds, CutData* data, Float& outSu
             --lastCutIndex;
             
             const LightcutsTreeNode* node = &treeNodes[nodeData.nodeIndex];
-            if (node->isLeaf || errBound < threshold * sumEstimate) {
+            //if (node->isLeaf || errBound < threshold * sumEstimate) {
+            if (node->isLeaf) {
                 errBounds[maxAvailablePositions - 1] = errBound;
                 data[maxAvailablePositions - 1] = nodeData;
                 --maxAvailablePositions;
@@ -745,7 +746,7 @@ static int ComputeLightcutsTreeCut(Float* errBounds, CutData* data, Float& outSu
         const LightcutsTreeNode* leftChild = &treeNodes[dataLeft.nodeIndex];
         const LightcutsTreeNode* rightChild = &treeNodes[dataRight.nodeIndex];
 
-        if (!ComputeErrorBounds(errBoundLeft, errBoundRight, p, wo, n, frame, bsdf, leftChild, rightChild, allLightBounds)) {
+        if (!ComputeErrorBounds(errBoundLeft, errBoundRight, p, wo, n, frame, bsdf, leftChild, rightChild, allLightBounds, isOriented)) {
             continue;
         }
 
