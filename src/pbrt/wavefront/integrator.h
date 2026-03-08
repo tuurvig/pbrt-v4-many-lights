@@ -39,6 +39,7 @@ class WavefrontAggregate {
     virtual void IntersectClosest(int maxRays, const RayQueue *rayQ,
                                   EscapedRayQueue *escapedRayQ,
                                   HitAreaLightQueue *hitAreaLightQ,
+                                  HitAreaMaterialLightQueue *hitAreaMaterialLightQ,
                                   MaterialEvalQueue *basicMtlQ,
                                   MaterialEvalQueue *universalMtlQ,
                                   MediumSampleQueue *mediumSampleQ,
@@ -81,6 +82,8 @@ class WavefrontPathIntegrator {
 
     void HandleEscapedRays();
     void HandleEmissiveIntersection();
+    template <typename ConcreteMaterial>
+    void HandleEmissiveIntersectionMaterial();
 
     void EvaluateMaterialsAndBSDFs(int wavefrontDepth, Transform movingFromCamera);
     template <int NShadowRays>
@@ -185,6 +188,8 @@ class WavefrontPathIntegrator {
     EscapedRayQueue *escapedRayQueue = nullptr;
 
     HitAreaLightQueue *hitAreaLightQueue = nullptr;
+    HitAreaMaterialLightQueue *hitAreaMaterialLightQueue = nullptr;
+    bool useBSDFDependentHitAreaQueue = false;
 
     MaterialEvalQueue *basicEvalMaterialQueue = nullptr;
     MaterialEvalQueue *universalEvalMaterialQueue = nullptr;

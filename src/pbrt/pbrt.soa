@@ -6,8 +6,8 @@
 flat int;
 flat Float;
 flat bool;
-flat BxDF;
 flat Medium;
+flat Material;
 flat LayeredBxDFConfig;
 
 soa SampledSpectrum;
@@ -39,10 +39,6 @@ soa SubsurfaceInteraction {
     Vector3f dpdus, dpdvs;
 };
 
-soa Frame {
-    Vector3f x, y, z;
-};
-
 soa VisibleSurface {
     bool set;
     Point3f p;
@@ -72,7 +68,15 @@ soa LightSampleContext {
     Vector3f wo;
 };
 
-soa BSDF {
-    BxDF bxdf;
-    Frame shadingFrame;
+soa ProcessedMaterialContext {
+    Material material;
+    Vector3f dpdus;
+    Point2f uv;
+    Float dudx;
+    Float dudy;
+    Float dvdx;
+    Float dvdy;
+    int faceIndex;
+    int isBasicTextureEvaluator;
+    int regularized;
 };

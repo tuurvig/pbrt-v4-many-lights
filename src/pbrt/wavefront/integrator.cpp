@@ -34,6 +34,7 @@
 #include <cstring>
 #include <iostream>
 #include <map>
+#include <type_traits>
 
 #ifdef PBRT_BUILD_GPU_RENDERER
 #include <cuda.h>
@@ -184,6 +185,9 @@ WavefrontPathIntegrator::WavefrontPathIntegrator(
     if (allLights.size() == 1)
         lightSamplerName = "uniform";
     lightSampler = LightSampler::Create(requiredShadowRays, lightSamplerName, allLights, Options->discretizeAreaLights > 0, alloc);
+    useBSDFDependentHitAreaQueue =
+        lightSampler.Is<LightcutsLightSampler>() || lightSampler.Is<SLCLightSampler>() ||
+        lightSampler.Is<HSLCLightSampler>();
     
     LOG_VERBOSE("Finished creating light sampler");
 
@@ -253,6 +257,14 @@ WavefrontPathIntegrator::WavefrontPathIntegrator(
     if (infiniteLights->size())
         escapedRayQueue = alloc.new_object<EscapedRayQueue>(maxQueueSize, alloc);
     hitAreaLightQueue = alloc.new_object<HitAreaLightQueue>(maxQueueSize, alloc);
+    if (useBSDFDependentHitAreaQueue) {
+        pstd::array<bool, Material::NumTags()> haveHitAreaMaterial;
+        haveHitAreaMaterial.fill(true);
+        haveHitAreaMaterial[Material::TypeIndex<MixMaterial>()] = false;
+        hitAreaMaterialLightQueue = alloc.new_object<HitAreaMaterialLightQueue>(
+            maxQueueSize, alloc,
+            pstd::MakeConstSpan(&haveHitAreaMaterial[1], haveHitAreaMaterial.size() - 1));
+    }
 
     basicEvalMaterialQueue = alloc.new_object<MaterialEvalQueue>(
         maxQueueSize, alloc,
@@ -387,6 +399,8 @@ Float WavefrontPathIntegrator::Render() {
                            if (escapedRayQueue)
                                escapedRayQueue->Reset();
                            hitAreaLightQueue->Reset();
+                           if (hitAreaMaterialLightQueue)
+                               hitAreaMaterialLightQueue->Reset();
 
                            basicEvalMaterialQueue->Reset();
                            universalEvalMaterialQueue->Reset();
@@ -403,7 +417,8 @@ Float WavefrontPathIntegrator::Render() {
                     // Find closest intersections along active rays
                     aggregate->IntersectClosest(
                                                 maxQueueSize, CurrentRayQueue(wavefrontDepth), escapedRayQueue,
-                                                hitAreaLightQueue, basicEvalMaterialQueue, universalEvalMaterialQueue,
+                                                hitAreaLightQueue, hitAreaMaterialLightQueue,
+                                                basicEvalMaterialQueue, universalEvalMaterialQueue,
                                                 mediumSampleQueue, NextRayQueue(wavefrontDepth));
 
                     if (wavefrontDepth > 0) {
@@ -539,9 +554,79 @@ void WavefrontPathIntegrator::HandleEscapedRays() {
         });
 }
 
+template <typename ConcreteMaterial>
+void WavefrontPathIntegrator::HandleEmissiveIntersectionMaterial() {
+    const bool discretizedAreaLights = Options->discretizeAreaLights > 0;
+    const int sampleIndex = currentSampleIndex;
+    auto queue = hitAreaMaterialLightQueue->Get<HitAreaMaterialLightWorkItem<ConcreteMaterial>>();
+    std::string desc = StringPrintf("Handle emitters hit by indirect rays (%s)",
+                                    ConcreteMaterial::Name());
+
+    ForAllQueued(
+        desc.c_str(), ProfilerKernelGroup::WAVEFRONT, queue, maxQueueSize,
+        PBRT_CPU_GPU_LAMBDA(const HitAreaMaterialLightWorkItem<ConcreteMaterial> w) {
+            // Find emitted radiance from surface that ray hit
+            SampledSpectrum Le = w.areaLight.L(w.p, w.n, w.uv, w.wo, w.lambda);
+            if (!Le)
+                return;
+            PBRT_DBG("Got Le %f %f %f %f from hit area light at depth %d\n", Le[0], Le[1],
+                     Le[2], Le[3], w.depth);
+
+            // Compute area light's weighted radiance contribution to the path
+            SampledSpectrum L(0.f);
+            if (w.depth == 0 || w.specularBounce) {
+                L = w.beta * Le / w.r_u.Average();
+            } else if (!discretizedAreaLights) {
+                // Recreate the previous BSDF from the processed material context.
+                Vector3f wi = -w.wo;
+                LightSampleContext ctx = w.prevIntrCtx;
+                MaterialEvalContext mtlCtx = w.GetMaterialEvalContext();
+                SampledWavelengths lambda = w.lambda;
+
+                auto computePMF = [&](auto texEval) {
+                    using ConcreteBxDF = typename ConcreteMaterial::BxDF;
+                    ConcreteBxDF bxdf = w.material->GetBxDF(texEval, mtlCtx, lambda);
+                    BSDF bsdf(mtlCtx.ns, mtlCtx.dpdus, &bxdf);
+                    if (w.prevMaterialCtx.regularized)
+                        bsdf.Regularize();
+
+                    return lightSampler.PMF(
+                        ctx, &bsdf, Hash(sampleIndex, w.pixelIndex, w.depth), w.areaLight);
+                };
+
+                LightPMF l_pmf =
+                    w.prevMaterialCtx.isBasicTextureEvaluator
+                        ? computePMF(BasicTextureEvaluator())
+                        : computePMF(UniversalTextureEvaluator());
+                Le *= l_pmf.scale;
+                Float lightPDF = l_pmf.pmf * w.areaLight.PDF_Li(ctx, wi, true);
+
+                SampledSpectrum r_u = w.r_u;
+                SampledSpectrum r_l = w.r_l * lightPDF;
+                L = w.beta * Le / (r_u + r_l).Average();
+            }
+
+            PBRT_DBG("Added L %f %f %f %f for pixel index %d\n", L[0], L[1], L[2], L[3],
+                     w.pixelIndex);
+
+            // Update _L_ in _PixelSampleState_ for area light's radiance
+            L += pixelSampleState.L[w.pixelIndex];
+            pixelSampleState.L[w.pixelIndex] = L;
+        });
+}
+
+template <typename Integrator>
+struct HandleEmissiveIntersectionMaterialCallback {
+    Integrator *integrator;
+    template <typename ConcreteMaterial>
+    void operator()() {
+        if constexpr (!std::is_same_v<ConcreteMaterial, MixMaterial>)
+            integrator->template HandleEmissiveIntersectionMaterial<ConcreteMaterial>();
+    }
+};
+
 void WavefrontPathIntegrator::HandleEmissiveIntersection() {
     const bool discretizedAreaLights = Options->discretizeAreaLights > 0;
-
     const int sampleIndex = currentSampleIndex;
 
     ForAllQueued(
@@ -558,15 +643,14 @@ void WavefrontPathIntegrator::HandleEmissiveIntersection() {
             SampledSpectrum L(0.f);
             if (w.depth == 0 || w.specularBounce) {
                 L = w.beta * Le / w.r_u.Average();
-            } else if (!discretizedAreaLights){
+            } else if (!discretizedAreaLights) {
                 // Compute MIS-weighted radiance contribution from area light
                 Vector3f wi = -w.wo;
                 LightSampleContext ctx = w.prevIntrCtx;
-                const BSDF* prevBsdfPtr = w.prevBsdf ? &w.prevBsdf : nullptr;
-                LightPMF l_pmf = lightSampler.PMF(ctx, prevBsdfPtr, Hash(sampleIndex, w.pixelIndex, w.depth), w.areaLight);
+                LightPMF l_pmf = lightSampler.PMF(
+                    ctx, nullptr, Hash(sampleIndex, w.pixelIndex, w.depth), w.areaLight);
                 Le *= l_pmf.scale;
-                Float lightChoicePDF = l_pmf.pmf;
-                Float lightPDF = lightChoicePDF * w.areaLight.PDF_Li(ctx, wi, true);
+                Float lightPDF = l_pmf.pmf * w.areaLight.PDF_Li(ctx, wi, true);
 
                 SampledSpectrum r_u = w.r_u;
                 SampledSpectrum r_l = w.r_l * lightPDF;
@@ -580,6 +664,11 @@ void WavefrontPathIntegrator::HandleEmissiveIntersection() {
             L += pixelSampleState.L[w.pixelIndex];
             pixelSampleState.L[w.pixelIndex] = L;
         });
+
+    if (useBSDFDependentHitAreaQueue && hitAreaMaterialLightQueue) {
+        ForEachType(HandleEmissiveIntersectionMaterialCallback<WavefrontPathIntegrator>{this},
+                    Material::Types());
+    }
 }
 
 void WavefrontPathIntegrator::TraceShadowRays(int wavefrontDepth) {

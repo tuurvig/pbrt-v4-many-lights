@@ -9,9 +9,7 @@ flat Light;
 flat Material;
 flat Medium;
 flat int;
-flat BxDF;
 
-soa BSDF;
 soa LightSampleContext;
 soa MediumInterface;
 soa Normal3f;
@@ -24,6 +22,7 @@ soa RaySamples;
 soa SampledSpectrum;
 soa SampledWavelengths;
 soa SubsurfaceInteraction;
+soa ProcessedMaterialContext;
 soa TabulatedBSSRDF;
 soa Vector3f;
 soa VisibleSurface;
@@ -45,7 +44,7 @@ soa RayWorkItem {
     SampledWavelengths lambda;
     SampledSpectrum beta, r_u, r_l;
     LightSampleContext prevIntrCtx;
-    BSDF prevBsdf;
+    ProcessedMaterialContext prevMaterialCtx;
     Float etaScale;
     int specularBounce;
     int anyNonSpecularBounces;
@@ -72,7 +71,22 @@ soa HitAreaLightWorkItem {
     Vector3f wo;
     int depth;
     LightSampleContext prevIntrCtx;
-    BSDF prevBsdf;
+    int specularBounce;
+    int pixelIndex;
+};
+
+soa HitAreaMaterialLightWorkItem<ConcreteMaterial> {
+    const ConcreteMaterial *material;
+    Light areaLight;
+    SampledWavelengths lambda;
+    SampledSpectrum beta, r_u, r_l;
+    Point3f p;
+    Normal3f n;
+    Point2f uv;
+    Vector3f wo;
+    int depth;
+    LightSampleContext prevIntrCtx;
+    ProcessedMaterialContext prevMaterialCtx;
     int specularBounce;
     int pixelIndex;
 };
@@ -132,6 +146,7 @@ soa MediumSampleWorkItem {
     Vector3f wo;
     Point2f uv;
     LightSampleContext prevIntrCtx;
+    ProcessedMaterialContext prevMaterialCtx;
     int specularBounce;
     Material material;
     Normal3f ns;

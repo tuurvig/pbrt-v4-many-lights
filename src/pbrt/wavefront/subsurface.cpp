@@ -135,9 +135,9 @@ void WavefrontPathIntegrator::SampleSubsurface(int wavefrontDepth) {
 
                         LightSampleContext ctx(intr.pi, intr.n, intr.ns, Vector3f(0, 0, 0));
                         nextRayQueue->PushIndirectRay(
-                            ray, w.depth + 1, ctx, BSDF(), beta, indir_r_u, r_l, lambda,
-                            etaScale, bsdfSample->IsSpecular(), anyNonSpecularBounces,
-                            w.pixelIndex);
+                            ray, w.depth + 1, ctx, ProcessedMaterialContext(), beta,
+                            indir_r_u, r_l, lambda, etaScale, bsdfSample->IsSpecular(),
+                            anyNonSpecularBounces, w.pixelIndex);
 
                         PBRT_DBG("Spawned indirect ray at depth %d. "
                                  "Specular %d beta %f %f %f %f indir_r_u %f %f %f %f "

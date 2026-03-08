@@ -35,6 +35,7 @@ class CPUAggregate : public WavefrontAggregate {
     void IntersectClosest(int maxRays, const RayQueue *rayQueue,
                           EscapedRayQueue *escapedRayQueue,
                           HitAreaLightQueue *hitAreaLightQueue,
+                          HitAreaMaterialLightQueue *hitAreaMaterialLightQueue,
                           MaterialEvalQueue *basicEvalMaterialQueue,
                           MaterialEvalQueue *universalEvalMaterialQueue,
                           MediumSampleQueue *mediumSampleQueue,

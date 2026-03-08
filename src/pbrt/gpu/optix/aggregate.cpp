@@ -1664,6 +1664,7 @@ OptiXAggregate::ParamBufferState &OptiXAggregate::getParamBuffer(
 void OptiXAggregate::IntersectClosest(int maxRays, const RayQueue *rayQueue,
                                       EscapedRayQueue *escapedRayQueue,
                                       HitAreaLightQueue *hitAreaLightQueue,
+                                      HitAreaMaterialLightQueue *hitAreaMaterialLightQueue,
                                       MaterialEvalQueue *basicEvalMaterialQueue,
                                       MaterialEvalQueue *universalEvalMaterialQueue,
                                       MediumSampleQueue *mediumSampleQueue,
@@ -1677,6 +1678,7 @@ void OptiXAggregate::IntersectClosest(int maxRays, const RayQueue *rayQueue,
         params.nextRayQueue = nextRayQueue;
         params.escapedRayQueue = escapedRayQueue;
         params.hitAreaLightQueue = hitAreaLightQueue;
+        params.hitAreaMaterialLightQueue = hitAreaMaterialLightQueue;
         params.basicEvalMaterialQueue = basicEvalMaterialQueue;
         params.universalEvalMaterialQueue = universalEvalMaterialQueue;
         params.mediumSampleQueue = mediumSampleQueue;

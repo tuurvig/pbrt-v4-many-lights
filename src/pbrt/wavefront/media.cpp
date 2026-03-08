@@ -184,8 +184,9 @@ void WavefrontPathIntegrator::SampleMediumInteraction(int wavefrontDepth) {
                 intr.mediumInterface = &w.mediumInterface;
                 Ray newRay = intr.SpawnRay(ray.d);
                 nextRayQueue->PushIndirectRay(
-                    newRay, w.depth, w.prevIntrCtx, BSDF(), beta, r_u, r_l, lambda,
-                    w.etaScale, w.specularBounce, w.anyNonSpecularBounces, w.pixelIndex);
+                    newRay, w.depth, w.prevIntrCtx, w.prevMaterialCtx, beta, r_u, r_l,
+                    lambda, w.etaScale, w.specularBounce, w.anyNonSpecularBounces,
+                    w.pixelIndex);
                 return;
             }
 
@@ -194,9 +195,22 @@ void WavefrontPathIntegrator::SampleMediumInteraction(int wavefrontDepth) {
                     "Ray hit an area light: adding to hitAreaLightQueue pixel index %d "
                     "depth %d\n",
                     w.pixelIndex, w.depth);
-                hitAreaLightQueue->Push(HitAreaLightWorkItem{
-                    w.areaLight, Point3f(w.pi), w.n, w.uv, -ray.d, lambda, w.depth, beta,
-                    r_u, r_l, w.prevIntrCtx, BSDF(), w.specularBounce, w.pixelIndex});
+                if (hitAreaMaterialLightQueue && w.prevMaterialCtx.material) {
+                    auto enqueueHitAreaWorkItem = [=](auto ptr) {
+                        using ConcreteMaterial =
+                            typename std::remove_reference_t<decltype(*ptr)>;
+                        hitAreaMaterialLightQueue->Push(
+                            HitAreaMaterialLightWorkItem<ConcreteMaterial>{
+                                ptr, w.areaLight, Point3f(w.pi), w.n, w.uv, -ray.d,
+                                lambda, w.depth, beta, r_u, r_l, w.prevIntrCtx,
+                                w.prevMaterialCtx, w.specularBounce, w.pixelIndex});
+                    };
+                    w.prevMaterialCtx.material.Dispatch(enqueueHitAreaWorkItem);
+                } else if (hitAreaLightQueue) {
+                    hitAreaLightQueue->Push(HitAreaLightWorkItem{
+                        w.areaLight, Point3f(w.pi), w.n, w.uv, -ray.d, lambda, w.depth,
+                        beta, r_u, r_l, w.prevIntrCtx, w.specularBounce, w.pixelIndex});
+                }
             }
 
             FloatTexture displacement = material.GetDisplacement();
@@ -348,7 +362,8 @@ void WavefrontPathIntegrator::SampleMediumScattering(int wavefrontDepth) {
             bool anyNonSpecularBounces = true;
 
             // Spawn indirect ray.
-            nextRayQueue->PushIndirectRay(ray, w.depth + 1, ctx, BSDF(), beta, r_u, r_l,
+            nextRayQueue->PushIndirectRay(ray, w.depth + 1, ctx,
+                                          ProcessedMaterialContext(), beta, r_u, r_l,
                                           w.lambda, w.etaScale, specularBounce,
                                           anyNonSpecularBounces, w.pixelIndex);
             PBRT_DBG("Enqueuing indirect medium ray at depth %d pixel index %d\n",

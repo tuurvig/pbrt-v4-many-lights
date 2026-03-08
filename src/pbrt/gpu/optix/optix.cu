@@ -145,6 +145,7 @@ static __forceinline__ __device__ void ProcessClosestIntersection(
 
     EnqueueWorkAfterIntersection(r, rayMedium, optixGetRayTmax(), intr, params.mediumSampleQueue,
                                  params.nextRayQueue, params.hitAreaLightQueue,
+                                 params.hitAreaMaterialLightQueue,
                                  params.basicEvalMaterialQueue,
                                  params.universalEvalMaterialQueue);
 }

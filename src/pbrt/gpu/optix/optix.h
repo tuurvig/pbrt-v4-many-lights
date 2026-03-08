@@ -56,6 +56,7 @@ struct RayIntersectParameters {
     RayQueue *nextRayQueue;
     EscapedRayQueue *escapedRayQueue;
     HitAreaLightQueue *hitAreaLightQueue;
+    HitAreaMaterialLightQueue *hitAreaMaterialLightQueue;
     MaterialEvalQueue *basicEvalMaterialQueue, *universalEvalMaterialQueue;
     MediumSampleQueue *mediumSampleQueue;
 

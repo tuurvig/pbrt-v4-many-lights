@@ -47,8 +47,9 @@ inline PBRT_CPU_GPU void RecordShadowRayResult(const ShadowRayWorkItem w,
 inline PBRT_CPU_GPU void EnqueueWorkAfterIntersection(
     RayWorkItem r, Medium rayMedium, float tMax, SurfaceInteraction intr,
     MediumSampleQueue *mediumSampleQueue, RayQueue *nextRayQueue,
-    HitAreaLightQueue *hitAreaLightQueue, MaterialEvalQueue *basicEvalMaterialQueue,
-    MaterialEvalQueue *universalEvalMaterialQueue) {
+    HitAreaLightQueue *hitAreaLightQueue,
+    HitAreaMaterialLightQueue *hitAreaMaterialLightQueue,
+    MaterialEvalQueue *basicEvalMaterialQueue, MaterialEvalQueue *universalEvalMaterialQueue) {
     MediumInterface mediumInterface =
         intr.mediumInterface ? *intr.mediumInterface : MediumInterface(rayMedium);
 
@@ -64,6 +65,7 @@ inline PBRT_CPU_GPU void EnqueueWorkAfterIntersection(
                                                      r.r_l,
                                                      r.pixelIndex,
                                                      r.prevIntrCtx,
+                                                     r.prevMaterialCtx,
                                                      r.specularBounce,
                                                      r.anyNonSpecularBounces,
                                                      r.etaScale,
@@ -99,19 +101,34 @@ inline PBRT_CPU_GPU void EnqueueWorkAfterIntersection(
         PBRT_DBG("Enqueuing into medium transition queue: pixel index %d \n",
                  r.pixelIndex);
         Ray newRay = intr.SpawnRay(r.ray.d);
-        nextRayQueue->PushIndirectRay(newRay, r.depth, r.prevIntrCtx, BSDF(), r.beta, r.r_u,
-                                      r.r_l, r.lambda, r.etaScale, r.specularBounce,
-                                      r.anyNonSpecularBounces, r.pixelIndex);
+        nextRayQueue->PushIndirectRay(newRay, r.depth, r.prevIntrCtx, r.prevMaterialCtx,
+                                      r.beta, r.r_u, r.r_l, r.lambda, r.etaScale,
+                                      r.specularBounce, r.anyNonSpecularBounces,
+                                      r.pixelIndex);
         return;
     }
 
     if (intr.areaLight) {
         PBRT_DBG("Ray hit an area light: adding to hitAreaLightQueue pixel index %d\n",
                  r.pixelIndex);
-        // TODO: intr.wo == -ray.d?
-        hitAreaLightQueue->Push(HitAreaLightWorkItem{
-            intr.areaLight, intr.p(), intr.n, intr.uv, intr.wo, r.lambda, r.depth, r.beta,
-            r.r_u, r.r_l, r.prevIntrCtx, r.prevBsdf, (int)r.specularBounce, r.pixelIndex});
+        if (hitAreaMaterialLightQueue && r.prevMaterialCtx.material) {
+            auto enqueueHitAreaWorkItem = [=](auto ptr) {
+                using ConcreteMaterial =
+                    typename std::remove_reference_t<decltype(*ptr)>;
+                hitAreaMaterialLightQueue->Push(
+                    HitAreaMaterialLightWorkItem<ConcreteMaterial>{
+                        ptr, intr.areaLight, intr.p(), intr.n, intr.uv, intr.wo, r.lambda,
+                        r.depth, r.beta, r.r_u, r.r_l, r.prevIntrCtx, r.prevMaterialCtx,
+                        (int)r.specularBounce, r.pixelIndex});
+            };
+            r.prevMaterialCtx.material.Dispatch(enqueueHitAreaWorkItem);
+        } else if (hitAreaLightQueue) {
+            // TODO: intr.wo == -ray.d?
+            hitAreaLightQueue->Push(HitAreaLightWorkItem{
+                intr.areaLight, intr.p(), intr.n, intr.uv, intr.wo, r.lambda, r.depth,
+                r.beta, r.r_u, r.r_l, r.prevIntrCtx, (int)r.specularBounce,
+                r.pixelIndex});
+        }
     }
 
     FloatTexture displacement = material.GetDisplacement();
