@@ -34,6 +34,7 @@ CPUAggregate::CPUAggregate(
 void CPUAggregate::IntersectClosest(int maxRays, const RayQueue *rayQueue,
                                     EscapedRayQueue *escapedRayQueue,
                                     HitAreaLightQueue *hitAreaLightQueue,
+                                    HitAreaMaterialLightQueue *hitAreaMaterialLightQueue,
                                     MaterialEvalQueue *basicEvalMaterialQueue,
                                     MaterialEvalQueue *universalEvalMaterialQueue,
                                     MediumSampleQueue *mediumSampleQueue,
@@ -53,7 +54,8 @@ void CPUAggregate::IntersectClosest(int maxRays, const RayQueue *rayQueue,
             // FIXME? Second arg r.ray.medium doesn't match OptiX path
             EnqueueWorkAfterIntersection(
                 r, r.ray.medium, si->tHit, si->intr, mediumSampleQueue, nextRayQueue,
-                hitAreaLightQueue, basicEvalMaterialQueue, universalEvalMaterialQueue);
+                hitAreaLightQueue, hitAreaMaterialLightQueue, basicEvalMaterialQueue,
+                universalEvalMaterialQueue);
     });
 }
 

@@ -74,6 +74,8 @@ void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQue
     std::string desc = StringPrintf(
         "%s + BxDF eval (%s tex)", ConcreteMaterial::Name(),
         std::is_same_v<TextureEvaluator, BasicTextureEvaluator> ? "Basic" : "Universal");
+    constexpr bool isBasicTextureEvaluator =
+        std::is_same_v<TextureEvaluator, BasicTextureEvaluator>;
 
     const int sampleIndex = currentSampleIndex;
 
@@ -144,17 +146,18 @@ void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQue
 
             // Get BSDF at intersection point
             SampledWavelengths lambda = w.lambda;
-            MaterialEvalContext ctx =
+            MaterialEvalContext materialCtx =
                 w.GetMaterialEvalContext(dudx, dudy, dvdx, dvdy, ns, dpdus);
             using ConcreteBxDF = typename ConcreteMaterial::BxDF;
-            ConcreteBxDF bxdf = w.material->GetBxDF(texEval, ctx, lambda);
-            BSDF bsdf(ctx.ns, ctx.dpdus, &bxdf);
+            ConcreteBxDF bxdf = w.material->GetBxDF(texEval, materialCtx, lambda);
+            BSDF bsdf(materialCtx.ns, materialCtx.dpdus, &bxdf);
             // Handle terminated secondary wavelengths after BSDF creation
             if (lambda.SecondaryTerminated())
                 pixelSampleState.lambda[w.pixelIndex] = lambda;
 
             // Regularize BSDF, if appropriate
-            if (regularize && w.anyNonSpecularBounces)
+            bool bsdfRegularized = regularize && w.anyNonSpecularBounces;
+            if (bsdfRegularized)
                 bsdf.Regularize();
 
             // Initialize _VisibleSurface_ at first intersection if necessary
@@ -252,9 +255,12 @@ void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQue
                         bool anyNonSpecularBounces =
                             !bsdfSample->IsSpecular() || w.anyNonSpecularBounces;
                         // NOTE: slightly different than context below. Problem?
-                        LightSampleContext ctx(w.pi, w.n, ns, w.wo);
+                        LightSampleContext lightCtx(w.pi, w.n, ns, w.wo);
+                        ProcessedMaterialContext prevMaterialCtx(
+                            Material(w.material), materialCtx, isBasicTextureEvaluator,
+                            bsdfRegularized);
                         nextRayQueue->PushIndirectRay(
-                            ray, w.depth + 1, ctx, bsdf, beta, r_u, r_l, lambda,
+                            ray, w.depth + 1, lightCtx, prevMaterialCtx, beta, r_u, r_l, lambda,
                             etaScale, bsdfSample->IsSpecular(), anyNonSpecularBounces,
                             w.pixelIndex);
 

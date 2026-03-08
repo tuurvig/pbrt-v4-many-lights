@@ -38,6 +38,30 @@ struct MaterialEvalContext : public TextureEvalContext {
     Vector3f dpdus;
 };
 
+struct ProcessedMaterialContext {
+    ProcessedMaterialContext() = default;
+
+    PBRT_CPU_GPU
+    ProcessedMaterialContext(Material material, const MaterialEvalContext& ctx,
+                             bool isBasicTextureEvaluator, bool regularized) :
+        material(material),
+        dpdus(ctx.dpdus),
+        uv(ctx.uv),
+        dudx(ctx.dudx), dudy(ctx.dudy),
+        dvdx(ctx.dvdx), dvdy(ctx.dvdy),
+        faceIndex(ctx.faceIndex),
+        isBasicTextureEvaluator(isBasicTextureEvaluator),
+        regularized(regularized) {}
+
+    Material material;
+    Vector3f dpdus;
+    Point2f uv;
+    Float dudx = 0, dudy = 0, dvdx = 0, dvdy = 0;
+    int faceIndex = 0;
+    int isBasicTextureEvaluator = 0;
+    int regularized = 0;
+};
+
 // NormalBumpEvalContext Definition
 struct NormalBumpEvalContext {
     // NormalBumpEvalContext Public Methods
