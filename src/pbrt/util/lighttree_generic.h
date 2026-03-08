@@ -1,4 +1,6 @@
-// pbrt/util/lighttree_generic.h
+// lighttree_generic is Copyright(c) 2026 Richard Kvasnica.
+// The pbrt source code is licensed under the Apache License, Version 2.0.
+// SPDX: Apache-2.0
 
 #ifndef PBRT_UTIL_LIGHTTREE_GENERIC_H
 #define PBRT_UTIL_LIGHTTREE_GENERIC_H

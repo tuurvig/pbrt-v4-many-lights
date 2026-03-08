@@ -17,6 +17,8 @@
 #include <pbrt/shapes.h>
 #include <pbrt/textures.h>
 #include <pbrt/util/colorspace.h>
+#include <pbrt/util/file.h>
+#include <pbrt/util/perlightstats.h>
 #include <pbrt/util/parallel.h>
 
 namespace pbrt {
@@ -154,6 +156,9 @@ void RenderCPU(BasicScene &parsedScene) {
 
         return;
     }
+
+    if (Options->recordPerLightStatistics)
+        StatsEnablePerLightStatistics(lights, RemoveExtension(film.GetFilename()));
 
     // Render!
     integrator->Render();

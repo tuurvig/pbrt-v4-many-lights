@@ -27,6 +27,7 @@
 #include <pbrt/util/file.h>
 #include <pbrt/util/hash.h>
 #include <pbrt/util/image.h>
+#include <pbrt/util/perlightstats.h>
 #include <pbrt/util/lowdiscrepancy.h>
 #include <pbrt/util/math.h>
 #include <pbrt/util/memory.h>
@@ -437,8 +438,13 @@ SampledSpectrum SimplePathIntegrator::Li(RayDifferential ray, uint32_t seed, Sam
                     // Evaluate BSDF for light and possibly add scattered radiance
                     Vector3f wi = ls->wi;
                     SampledSpectrum f = bsdf.f(wo, wi) * AbsDot(wi, isect.shading.n);
-                    if (f && Unoccluded(isect, ls->pLight))
-                        L += beta * f * ls->L / (sampledLight->p * ls->pdf);
+                    if (f) {
+                        ReportLightSampleBeforeShadow(sampledLight->light);
+                        if (Unoccluded(isect, ls->pLight)) {
+                            ReportLightSampleAfterShadowVisible(sampledLight->light);
+                            L += beta * f * ls->L / (sampledLight->p * ls->pdf);
+                        }
+                    }
                 }
             }
         }
@@ -804,9 +810,11 @@ SampledSpectrum PathIntegrator::SampleLd(const SurfaceInteraction &intr, uint32_
     for (int i = 0; i < samplesLd.count; ++i) {
         const SampledLd& sLd(samplesLd[i]);
 
+        ReportLightSampleBeforeShadow(sLd.light);
         if (!Unoccluded(intr, sLd.pLight, sLd.nLight)) {
             continue;
         }
+        ReportLightSampleAfterShadowVisible(sLd.light);
         
         Float p_b = sLd.scatterPDF;
         Float p_l = sLd.lightPDF;
@@ -1351,6 +1359,7 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, uint32_t se
     SampledSpectrum resultLd;
     for (int i = 0; i < samplesLd.count; ++i) {
         const SampledLd& sLd(samplesLd[i]);
+        ReportLightSampleBeforeShadow(sLd.light);
 
         // Declare path state variables for ray to light source
         Ray lightRay = sLd.SpawnShadowRay(intr);
@@ -1416,6 +1425,7 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, uint32_t se
         }
 
         if (shouldSkip) continue;
+        ReportLightSampleAfterShadowVisible(sLd.light);
 
         // Return path contribution function estimate for direct lighting
         r_l *= r_p * sLd.lightPDF;
@@ -3347,11 +3357,16 @@ SampledSpectrum SPPMIntegrator::SampleLd(const SurfaceInteraction &intr, uint32_
     CountedArray<SampledLd, 1> sampleLd;
     lightSampler.SampleLd(sampleLd, ctx, lambda, bsdf, seed, u, uLight, scatterEval);
 
-    if (sampleLd.count != 1 || !Unoccluded(intr, sampleLd[0].pLight, sampleLd[0].nLight)) {
+    if (sampleLd.count != 1) {
         return {};
     }
 
     const SampledLd& sLd(sampleLd[0]);
+    ReportLightSampleBeforeShadow(sLd.light);
+    if (!Unoccluded(intr, sLd.pLight, sLd.nLight)) {
+        return {};
+    }
+    ReportLightSampleAfterShadowVisible(sLd.light);
 
     // Return light's contribution to reflected radiance
     Float p_l = sLd.lightPDF;

@@ -36,8 +36,8 @@ struct LightPMF {
 struct SampledLd {
     SampledLd() = default;
 
-    PBRT_CPU_GPU SampledLd(const SampledSpectrum& s, const Interaction& intr, Float lightPDF, Float scatterPDF) :
-        Ld(s), pLight(intr.pi), nLight(intr.n), lightPDF(lightPDF), scatterPDF(scatterPDF) {}
+    PBRT_CPU_GPU SampledLd(const SampledSpectrum& s, Light light, const Interaction& intr, Float lightPDF, Float scatterPDF) :
+        Ld(s), light(light), pLight(intr.pi), nLight(intr.n), lightPDF(lightPDF), scatterPDF(scatterPDF) {}
 
     PBRT_CPU_GPU
     Ray SpawnShadowRay(const Interaction &from) const {
@@ -52,6 +52,7 @@ struct SampledLd {
     }
 
     SampledSpectrum Ld;
+    Light light;
     Point3fi pLight;
     Normal3f nLight;
     Float lightPDF;

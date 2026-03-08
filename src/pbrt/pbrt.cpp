@@ -21,6 +21,7 @@
 #include <pbrt/util/print.h>
 #include <pbrt/util/spectrum.h>
 #include <pbrt/util/stats.h>
+#include <pbrt/util/perlightstats.h>
 
 #include <ImfThreading.h>
 
@@ -137,6 +138,9 @@ void CleanupPBRT() {
 
     if (Options->recordPixelStatistics)
         StatsWritePixelImages();
+
+    if (Options->recordPerLightStatistics)
+        StatsWritePerLightStatistics();
 
     if (Options->printStatistics) {
         PrintStats(stdout);

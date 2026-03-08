@@ -663,6 +663,7 @@ SET (PBRT_UTIL_SOURCE
   src/pbrt/util/mipmap.cpp
   src/pbrt/util/noise.cpp
   src/pbrt/util/parallel.cpp
+  src/pbrt/util/perlightstats.cpp
   src/pbrt/util/pmj02tables.cpp
   src/pbrt/util/primes.cpp
   src/pbrt/util/print.cpp
@@ -697,6 +698,7 @@ SET (PBRT_UTIL_SOURCE_HEADERS
   src/pbrt/util/heap.h
   src/pbrt/util/image.h
   src/pbrt/util/lighttree_generic.h
+  src/pbrt/util/perlightstats.h
   src/pbrt/util/log.h
   src/pbrt/util/loopsubdiv.h
   src/pbrt/util/lowdiscrepancy.h

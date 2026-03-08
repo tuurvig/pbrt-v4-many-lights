@@ -163,7 +163,7 @@ class RHTLightSampler {
                 
                 Float scatterPDF = 0;
                 SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
-                samples.Add(SampledLd(f_hat * ls->L, ls->pLight, lightPDF, scatterPDF));
+                samples.Add(SampledLd(f_hat * ls->L, light, ls->pLight, lightPDF, scatterPDF));
                 return;
             }
         }
@@ -210,7 +210,7 @@ class RHTLightSampler {
                     const Float fWeight = f_hat.MaxComponentValue() / denom;
                     if (fWeight > 0) {
                         heuristicFSampler.Add([&]{
-                            return SampledLd(f_hat / hProb, ls->pLight, lightPDF, scatterPDF);
+                            return SampledLd(f_hat / hProb, light, ls->pLight, lightPDF, scatterPDF);
                         }, fWeight);
                     }
                 }

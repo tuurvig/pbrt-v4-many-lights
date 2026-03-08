@@ -191,8 +191,8 @@ int main(int argc, char *argv[]) {
                      onError) ||
             ParseArg(&iter, args.end(), "nthreads", &options.nThreads, onError) ||
             ParseArg(&iter, args.end(), "outfile", &options.imageFile, onError) ||
-            ParseArg(&iter, args.end(), "pixelstats", &options.recordPixelStatistics,
-                     onError) ||
+            ParseArg(&iter, args.end(), "pixelstats", &options.recordPixelStatistics, onError) ||
+            ParseArg(&iter, args.end(), "perlightstats", &options.recordPerLightStatistics, onError) ||
             ParseArg(&iter, args.end(), "quick", &options.quickRender, onError) ||
             ParseArg(&iter, args.end(), "quiet", &options.quiet, onError) ||
             ParseArg(&iter, args.end(), "render-coord-sys", &renderCoordSys, onError) ||
