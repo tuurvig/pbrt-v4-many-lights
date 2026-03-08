@@ -42,6 +42,7 @@ struct PBRTOptions : BasicPBRTOptions {
     bool logUtilization = false;
     bool writePartialImages = false;
     bool recordPixelStatistics = false;
+    bool recordPerLightStatistics = false;
     bool printStatistics = false;
     pstd::optional<int> pixelSamples;
     pstd::optional<int> gpuDevice;

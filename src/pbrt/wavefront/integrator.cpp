@@ -211,6 +211,8 @@ WavefrontPathIntegrator::WavefrontPathIntegrator(
         Warning("The wavefront integrator does not support --write-partial-images.");
     if (Options->recordPixelStatistics)
         ErrorExit("The wavefront integrator does not support --pixelstats.");
+    if (Options->recordPerLightStatistics)
+        ErrorExit("The wavefront integrator does not support --perlightstats.");
     if (!Options->mseReferenceImage.empty())
         ErrorExit("The wavefront integrator does not support --mse-reference-image.");
     if (!Options->mseReferenceOutput.empty())
