@@ -261,7 +261,11 @@ WavefrontPathIntegrator::WavefrontPathIntegrator(
     hitAreaLightQueue = alloc.new_object<HitAreaLightQueue>(maxQueueSize, alloc);
     if (useBSDFDependentHitAreaQueue) {
         pstd::array<bool, Material::NumTags()> haveHitAreaMaterial;
-        haveHitAreaMaterial.fill(true);
+        haveHitAreaMaterial.fill(false);
+        for (size_t i = 1; i < haveHitAreaMaterial.size(); ++i) {
+            haveHitAreaMaterial[i] =
+                haveBasicEvalMaterial[i] || haveUniversalEvalMaterial[i];
+        }
         haveHitAreaMaterial[Material::TypeIndex<MixMaterial>()] = false;
         hitAreaMaterialLightQueue = alloc.new_object<HitAreaMaterialLightQueue>(
             maxQueueSize, alloc,
