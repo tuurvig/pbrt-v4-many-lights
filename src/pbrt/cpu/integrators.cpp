@@ -42,6 +42,7 @@
 #include <pbrt/util/string.h>
 
 #include <algorithm>
+#include <limits>
 
 namespace pbrt {
 
@@ -161,6 +162,8 @@ void ImageTileIntegrator::Render() {
 
     // Render image in waves
     while (waveStart < spp) {
+        OnRenderWaveStart(waveStart, pixelBounds);
+
         // Render current wave's image tiles in parallel
         ParallelFor2D(pixelBounds, [&](Bounds2i tileBounds) {
             // Render image tile given by _tileBounds_
@@ -186,6 +189,7 @@ void ImageTileIntegrator::Render() {
                      tileBounds.pMin.y, tileBounds.pMax.x, tileBounds.pMax.y);
             progress.Update((waveEnd - waveStart) * tileBounds.Area());
         });
+        OnRenderWaveDone(waveStart);
 
         // Update start and end wave
         waveStart = waveEnd;
@@ -625,11 +629,33 @@ STAT_INT_DISTRIBUTION("Integrator/Path length", pathLength);
 // PathIntegrator Method Definitions
 PathIntegrator::PathIntegrator(int maxDepth, Camera camera, Sampler sampler,
                                Primitive aggregate, std::vector<Light> lights,
-                               const std::string &lightSampleStrategy, bool regularize)
+                               const std::string &lightSampleStrategy, bool regularize,
+                               bool collectShadingPoints)
     : RayIntegrator(camera, sampler, aggregate, lights),
       maxDepth(maxDepth), requiredShadowRays(E_DEFAULT_SHADOW_RAYS),
       lightSampler(LightSampler::Create(requiredShadowRays, lightSampleStrategy, lights, Options->discretizeAreaLights > 0, Allocator())),
-      regularize(regularize) {}
+      regularize(regularize),
+      collectShadingPoints(collectShadingPoints) {}
+
+void PathIntegrator::OnRenderWaveStart(int waveIndex, const Bounds2i &pixelBounds) {
+    if (!collectShadingPoints || waveIndex != 0)
+        return;
+
+    firstIterationShadingPoints =
+        std::make_unique<ShadingPointCollector>(pixelBounds, maxDepth, Allocator());
+}
+
+void PathIntegrator::OnRenderWaveDone(int waveIndex) {
+    if (waveIndex != 0 || !firstIterationShadingPoints)
+        return;
+
+    size_t count = firstIterationShadingPoints->Size();
+    LOG_VERBOSE("Collected %zu first-wave path shading points.", count);
+
+    // handoff point 
+
+    firstIterationShadingPoints.reset();
+}
 
 SampledSpectrum PathIntegrator::Li(RayDifferential ray, uint32_t seed, SampledWavelengths &lambda,
                                    Sampler sampler, ScratchBuffer &scratchBuffer,
@@ -689,6 +715,7 @@ SampledSpectrum PathIntegrator::Li(RayDifferential ray, uint32_t seed, SampledWa
         }
 
         SurfaceInteraction &isect = si->intr;
+
         // Get BSDF and skip over medium boundaries
         bsdf = isect.GetBSDF(ray, lambda, camera, scratchBuffer, sampler);
         if (!bsdf) {
@@ -799,6 +826,9 @@ SampledSpectrum PathIntegrator::SampleLd(const SurfaceInteraction &intr, uint32_
     else if (IsTransmissive(flags) && !IsReflective(flags))
         ctx.pi = intr.OffsetRayOrigin(-intr.wo);
 
+    if (firstIterationShadingPoints)
+        firstIterationShadingPoints->Append(ctx.p(), ctx.ns);
+
     // Choose a light source for the direct lighting calculation
     Float u = sampler.Get1D();
     Point2f uLight = sampler.Get2D();
@@ -831,8 +861,9 @@ SampledSpectrum PathIntegrator::SampleLd(const SurfaceInteraction &intr, uint32_
 }
 
 std::string PathIntegrator::ToString() const {
-    return StringPrintf("[ PathIntegrator maxDepth: %d lightSampler: %s regularize: %s ]",
-                        maxDepth, lightSampler, regularize);
+    return StringPrintf("[ PathIntegrator maxDepth: %d lightSampler: %s regularize: %s "
+                        "collectShadingPoints: %s ]",
+                        maxDepth, lightSampler, regularize, collectShadingPoints);
 }
 
 std::unique_ptr<PathIntegrator> PathIntegrator::Create(
@@ -841,8 +872,10 @@ std::unique_ptr<PathIntegrator> PathIntegrator::Create(
     int maxDepth = parameters.GetOneInt("maxdepth", 5);
     std::string lightStrategy = parameters.GetOneString("lightsampler", "bvh");
     bool regularize = parameters.GetOneBool("regularize", false);
+    bool collectShadingPoints = lightStrategy == "ltc";
     return std::make_unique<PathIntegrator>(maxDepth, camera, sampler, aggregate, lights,
-                                            lightStrategy, regularize);
+                                            lightStrategy, regularize,
+                                            collectShadingPoints);
 }
 
 // SimpleVolPathIntegrator Method Definitions
@@ -976,6 +1009,26 @@ STAT_COUNTER("Integrator/Volume interactions", volumeInteractions);
 STAT_COUNTER("Integrator/Surface interactions", surfaceInteractions);
 
 // VolPathIntegrator Method Definitions
+void VolPathIntegrator::OnRenderWaveStart(int waveIndex, const Bounds2i &pixelBounds) {
+    if (!collectShadingPoints || waveIndex != 0)
+        return;
+
+    firstIterationShadingPoints =
+        std::make_unique<ShadingPointCollector>(pixelBounds, maxDepth, Allocator());
+}
+
+void VolPathIntegrator::OnRenderWaveDone(int waveIndex) {
+    if (waveIndex != 0 || !firstIterationShadingPoints)
+        return;
+
+    size_t count = firstIterationShadingPoints->Size();
+    LOG_VERBOSE("Collected %zu first-wave volpath shading points.", count);
+
+    // handoff point
+
+    firstIterationShadingPoints.reset();
+}
+
 SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, uint32_t seed, SampledWavelengths &lambda,
                                       Sampler sampler, ScratchBuffer &scratchBuffer,
                                       VisibleSurface *visibleSurf) const {
@@ -1342,6 +1395,9 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, uint32_t se
     } else
         ctx = LightSampleContext(intr);
 
+    if (firstIterationShadingPoints)
+        firstIterationShadingPoints->Append(ctx.p(), ctx.ns);
+
     // Sample a light source using _lightSampler_
     Float u = sampler.Get1D();
     Point2f uLight = sampler.Get2D();
@@ -1443,8 +1499,9 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, uint32_t se
 
 std::string VolPathIntegrator::ToString() const {
     return StringPrintf(
-        "[ VolPathIntegrator maxDepth: %d lightSampler: %s regularize: %s ]", maxDepth,
-        lightSampler, regularize);
+        "[ VolPathIntegrator maxDepth: %d lightSampler: %s regularize: %s "
+        "collectShadingPoints: %s ]",
+        maxDepth, lightSampler, regularize, collectShadingPoints);
 }
 
 std::unique_ptr<VolPathIntegrator> VolPathIntegrator::Create(
@@ -1453,8 +1510,10 @@ std::unique_ptr<VolPathIntegrator> VolPathIntegrator::Create(
     int maxDepth = parameters.GetOneInt("maxdepth", 5);
     std::string lightStrategy = parameters.GetOneString("lightsampler", "bvh");
     bool regularize = parameters.GetOneBool("regularize", false);
+    bool collectShadingPoints = lightStrategy == "ltc";
     return std::make_unique<VolPathIntegrator>(maxDepth, camera, sampler, aggregate,
-                                               lights, lightStrategy, regularize);
+                                               lights, lightStrategy, regularize,
+                                               collectShadingPoints);
 }
 
 // AOIntegrator Method Definitions
