@@ -717,6 +717,7 @@ SET (PBRT_UTIL_SOURCE_HEADERS
   src/pbrt/util/rng.h
   src/pbrt/util/sampling.h
   src/pbrt/util/scattering.h
+  src/pbrt/util/shadingpoints.h
   src/pbrt/util/soa.h
   src/pbrt/util/sobolmatrices.h
   src/pbrt/util/spectrum.h
