@@ -217,8 +217,7 @@ class PathIntegrator : public RayIntegrator {
     PathIntegrator(int maxDepth, Camera camera, Sampler sampler, Primitive aggregate,
                    std::vector<Light> lights,
                    const std::string &lightSampleStrategy = "bvh",
-                   bool regularize = false,
-                   bool collectShadingPoints = false);
+                   bool regularize = false);
 
     SampledSpectrum Li(RayDifferential ray, uint32_t seed, SampledWavelengths &lambda, Sampler sampler,
                        ScratchBuffer &scratchBuffer, VisibleSurface *visibleSurface) const;
@@ -281,13 +280,14 @@ class VolPathIntegrator : public RayIntegrator {
     VolPathIntegrator(int maxDepth, Camera camera, Sampler sampler, Primitive aggregate,
                       std::vector<Light> lights,
                       const std::string &lightSampleStrategy = "bvh",
-                      bool regularize = false,
-                      bool collectShadingPoints = false)
+                      bool regularize = false)
         : RayIntegrator(camera, sampler, aggregate, lights),
           maxDepth(maxDepth), requiredShadowRays(E_DEFAULT_SHADOW_RAYS),
           lightSampler(LightSampler::Create(requiredShadowRays, lightSampleStrategy, lights, Options->discretizeAreaLights > 0, Allocator())),
           regularize(regularize),
-          collectShadingPoints(collectShadingPoints) {}
+          collectShadingPoints(false) {
+        collectShadingPoints = lightSampler.Is<LTCLightSampler>();
+    }
 
     SampledSpectrum Li(RayDifferential ray, uint32_t seed, SampledWavelengths &lambda, Sampler sampler,
                        ScratchBuffer &scratchBuffer, VisibleSurface *visibleSurface) const;

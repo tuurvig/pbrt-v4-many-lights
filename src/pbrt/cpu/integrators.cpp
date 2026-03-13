@@ -629,13 +629,14 @@ STAT_INT_DISTRIBUTION("Integrator/Path length", pathLength);
 // PathIntegrator Method Definitions
 PathIntegrator::PathIntegrator(int maxDepth, Camera camera, Sampler sampler,
                                Primitive aggregate, std::vector<Light> lights,
-                               const std::string &lightSampleStrategy, bool regularize,
-                               bool collectShadingPoints)
+                               const std::string &lightSampleStrategy, bool regularize)
     : RayIntegrator(camera, sampler, aggregate, lights),
       maxDepth(maxDepth), requiredShadowRays(E_DEFAULT_SHADOW_RAYS),
       lightSampler(LightSampler::Create(requiredShadowRays, lightSampleStrategy, lights, Options->discretizeAreaLights > 0, Allocator())),
       regularize(regularize),
-      collectShadingPoints(collectShadingPoints) {}
+      collectShadingPoints(false) {
+    collectShadingPoints = lightSampler.Is<LTCLightSampler>();
+}
 
 void PathIntegrator::OnRenderWaveStart(int waveIndex, const Bounds2i &pixelBounds) {
     if (!collectShadingPoints || waveIndex != 0)
@@ -872,10 +873,8 @@ std::unique_ptr<PathIntegrator> PathIntegrator::Create(
     int maxDepth = parameters.GetOneInt("maxdepth", 5);
     std::string lightStrategy = parameters.GetOneString("lightsampler", "bvh");
     bool regularize = parameters.GetOneBool("regularize", false);
-    bool collectShadingPoints = lightStrategy == "ltc";
     return std::make_unique<PathIntegrator>(maxDepth, camera, sampler, aggregate, lights,
-                                            lightStrategy, regularize,
-                                            collectShadingPoints);
+                                            lightStrategy, regularize);
 }
 
 // SimpleVolPathIntegrator Method Definitions
@@ -1510,10 +1509,8 @@ std::unique_ptr<VolPathIntegrator> VolPathIntegrator::Create(
     int maxDepth = parameters.GetOneInt("maxdepth", 5);
     std::string lightStrategy = parameters.GetOneString("lightsampler", "bvh");
     bool regularize = parameters.GetOneBool("regularize", false);
-    bool collectShadingPoints = lightStrategy == "ltc";
     return std::make_unique<VolPathIntegrator>(maxDepth, camera, sampler, aggregate,
-                                               lights, lightStrategy, regularize,
-                                               collectShadingPoints);
+                                               lights, lightStrategy, regularize);
 }
 
 // AOIntegrator Method Definitions
