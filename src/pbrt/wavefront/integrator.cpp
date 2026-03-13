@@ -185,9 +185,11 @@ WavefrontPathIntegrator::WavefrontPathIntegrator(
     if (allLights.size() == 1)
         lightSamplerName = "uniform";
     lightSampler = LightSampler::Create(requiredShadowRays, lightSamplerName, allLights, Options->discretizeAreaLights > 0, alloc);
+    bool collectShadingPoints = lightSampler.Is<LTCLightSampler>();
+
     useBSDFDependentHitAreaQueue =
         lightSampler.Is<LightcutsLightSampler>() || lightSampler.Is<SLCLightSampler>() ||
-        lightSampler.Is<HSLCLightSampler>();
+        lightSampler.Is<HSLCLightSampler>() || lightSampler.Is<LTCLightSampler>();
     
     LOG_VERBOSE("Finished creating light sampler");
 
@@ -232,7 +234,8 @@ WavefrontPathIntegrator::WavefrontPathIntegrator(
 #endif  // PBRT_BUILD_GPU_RENDERER
 
     // Compute number of scanlines to render per pass
-    Vector2i resolution = film.PixelBounds().Diagonal();
+    Bounds2i pixelBounds = film.PixelBounds();
+    Vector2i resolution = pixelBounds.Diagonal();
     // TODO: make this configurable. Base it on the amount of GPU memory?
     int maxSamples = 1024 * 1024;
     scanlinesPerPass = std::max(1, maxSamples / resolution.x);
@@ -303,6 +306,11 @@ WavefrontPathIntegrator::WavefrontPathIntegrator(
         pathIntegratorBytes += endSize - startSize;
     }
 #endif  // PBRT_BUILD_GPU_RENDERER
+
+    if (collectShadingPoints) {
+        firstIterationShadingPoints =
+            alloc.new_object<ShadingPointCollector>(pixelBounds, maxDepth, alloc);
+    }
 }
 
 // WavefrontPathIntegrator Method Definitions
@@ -460,6 +468,21 @@ Float WavefrontPathIntegrator::Render() {
             if (Options->useGPU && !Options->displayServer.empty())
                 UpdateDisplayRGBFromFilm(pixelBounds);
 
+            if (firstIterationShadingPoints) {
+#ifdef PBRT_BUILD_GPU_RENDERER
+                if (Options->useGPU)
+                    GPUWait();
+#endif
+                uint32_t count = firstIterationShadingPoints->Size();
+                LOG_VERBOSE("Collected %u first-wave wavefront shading points.", count);
+
+                // handoff point
+
+                Allocator alloc(memoryResource);
+                alloc.delete_object(firstIterationShadingPoints);
+                firstIterationShadingPoints = nullptr;
+            }
+
             progress.Update();
         }
 
@@ -492,7 +515,6 @@ Float WavefrontPathIntegrator::Render() {
                     });
             }
         }
-
     }
 
     if (gui) {
