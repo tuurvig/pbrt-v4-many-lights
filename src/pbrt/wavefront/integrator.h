@@ -22,6 +22,7 @@
 #include <pbrt/util/pstd.h>
 #include <pbrt/wavefront/workitems.h>
 #include <pbrt/wavefront/workqueue.h>
+#include <pbrt/util/shadingpoints.h>
 
 namespace pbrt {
 
@@ -172,6 +173,7 @@ class WavefrontPathIntegrator {
 
     int maxDepth, samplesPerPixel, currentSampleIndex;
     bool regularize;
+    ShadingPointCollector *firstIterationShadingPoints = nullptr;
 
     int scanlinesPerPass, maxQueueSize;
     ERequiresShadowRays requiredShadowRays;

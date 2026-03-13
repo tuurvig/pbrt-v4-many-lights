@@ -288,6 +288,9 @@ void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQue
                 else if (IsTransmissive(flags) && IsReflective(flags))
                     ctx.pi = OffsetRayOrigin(ctx.pi, w.n, -wo);
 
+                if (firstIterationShadingPoints)
+                    firstIterationShadingPoints->Append(ctx.p(), ctx.ns);
+
                 BSDFScatterEval scatterEval(&bsdf, ns);
                 CountedArray<SampledLd, NShadowRays> samplesLd;
                 lightSampler.SampleLd(samplesLd, ctx, lambda, &bsdf, Hash(sampleIndex, w.pixelIndex, (w.depth + 1)),
