@@ -592,6 +592,7 @@ set (PBRT_LIGHT_SAMPLERS_SOURCE_HEADERS
   src/pbrt/lightsamplers/slc.h
   src/pbrt/lightsamplers/hslc.h
   src/pbrt/lightsamplers/rht.h
+  src/pbrt/lightsamplers/ltc.h
 )
 
 set (PBRT_LIGHT_SAMPLERS_SOURCE
@@ -602,6 +603,7 @@ set (PBRT_LIGHT_SAMPLERS_SOURCE
   src/pbrt/lightsamplers/slc.cpp
   src/pbrt/lightsamplers/hslc.cpp
   src/pbrt/lightsamplers/rht.cpp
+  src/pbrt/lightsamplers/ltc.cpp
 )
 
 SET (PBRT_CPU_SOURCE
