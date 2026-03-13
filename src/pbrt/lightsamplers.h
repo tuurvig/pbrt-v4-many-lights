@@ -25,6 +25,7 @@
 #include <pbrt/lightsamplers/slc.h>
 #include <pbrt/lightsamplers/hslc.h>
 #include <pbrt/lightsamplers/rht.h>
+#include <pbrt/lightsamplers/ltc.h>
 
 #include <algorithm>
 #include <cstdint>

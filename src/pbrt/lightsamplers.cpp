@@ -56,6 +56,9 @@ LightSampler LightSampler::Create(ERequiresShadowRays& nShadowRays, const std::s
         nShadowRays = E_TWO_SHADOW_RAYS;
         return alloc.new_object<RHTLightSampler>(lights, alloc);
     }
+    else if (name == "ltc") {
+        return alloc.new_object<LTCLightSampler>(lights, alloc);
+    }
     else if (name == "exhaustive")
         return alloc.new_object<ExhaustiveLightSampler>(lights, alloc);
     else {
