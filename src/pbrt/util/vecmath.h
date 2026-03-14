@@ -1849,6 +1849,9 @@ class OctahedralVector {
         return Normalize(v);
     }
 
+    inline uint16_t X() const { return x; }
+    inline uint16_t Y() const { return y; }
+
     std::string ToString() const {
         return StringPrintf("[ OctahedralVector x: %d y: %d ]", x, y);
     }

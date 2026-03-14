@@ -52,7 +52,7 @@
 namespace pbrt {
 
 enum ProfilerKernelGroup {
-    WAVEFRONT, HPLOC, END
+    WAVEFRONT, HPLOC, LTC, END
 };
 
 std::pair<cudaEvent_t, cudaEvent_t> GetProfilerEvents(const char *description, ProfilerKernelGroup group);

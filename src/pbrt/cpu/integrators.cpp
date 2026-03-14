@@ -650,9 +650,13 @@ void PathIntegrator::OnRenderWaveDone(int waveIndex) {
     if (waveIndex != 0 || !firstIterationShadingPoints)
         return;
 
-    size_t count = firstIterationShadingPoints->Size();
+    uint32_t count = firstIterationShadingPoints->Size();
     LOG_VERBOSE("Collected %zu first-wave path shading points.", count);
 
+    LTCLightSampler* ltc = lightSampler.CastOrNullptr<LTCLightSampler>();
+    if (ltc) {
+        ltc->SetupScenePartitions(firstIterationShadingPoints->Points(), aggregate.Bounds());
+    }
     // handoff point 
 
     firstIterationShadingPoints.reset();

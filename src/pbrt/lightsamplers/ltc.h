@@ -20,11 +20,69 @@
 
 namespace pbrt {
 
+struct ShadingPoint;
+
+struct alignas(8) PartitionTreeNode {
+    PartitionTreeNode() = default;
+
+    PBRT_CPU_GPU static PartitionTreeNode MakeLeaf(uint32_t leafIdx) {
+        return PartitionTreeNode{std::numeric_limits<Float>::max(), {7, leafIdx}};
+    }
+
+    PBRT_CPU_GPU static PartitionTreeNode MakeInterior(uint32_t splitAxis, Float splitValue, uint32_t childIdx) {
+        return PartitionTreeNode{splitValue, {splitAxis, childIdx}};
+    }
+
+    bool IsLeaf() const { return splitAxis == 7; }
+
+    std::string ToString() const;
+
+    // Partition5DNode Public Members
+    Float splitValue;
+    struct {
+        uint32_t splitAxis : 3;
+        uint32_t rightChildOrLeafIndex : 29;
+    };
+};
+
+struct alignas(32) OnlineCutData {
+    Float q; // estimated importance
+    Float variance; // variance estimate
+    Float secondMoment; // for updating variance online
+    Float _padding;
+
+    uint32_t clusterIndex;
+    uint32_t bitTrail;
+    uint32_t depth;
+    uint32_t visitCount;
+};
+
+#define PBRT_LTC_MAX_CUT_SIZE 64
+
+struct OnlineLightTreeCut {
+    OnlineCutData data[PBRT_LTC_MAX_CUT_SIZE];
+    AtomicFloat sumAccumulator[PBRT_LTC_MAX_CUT_SIZE];
+    AtomicFloat sumSquaredAccumulator[PBRT_LTC_MAX_CUT_SIZE];
+    AtomicInt<uint32_t> visitCountAccumulator[PBRT_LTC_MAX_CUT_SIZE];
+    uint32_t cutSize;
+    uint32_t lastUpdateIteration;
+};
+
+struct PartitionTree {
+    PartitionTree(Allocator alloc);
+    pstd::vector<OnlineLightTreeCut> leaves;
+    pstd::vector<PartitionTreeNode> innerNodes;
+    pstd::vector<ShadingPoint> representantPoints;
+    Vector3f sceneExtent;
+};
+
 // Learning To Cluster Lightsampler Definition
 class LTCLightSampler {
   public:
     // Learning To Cluster Light Sampler Public Methods
-    LTCLightSampler(pstd::span<const Light> lights, Allocator alloc);
+    LTCLightSampler(pstd::span<const Light> lights, Allocator alloc, Float beta = 4, Float omega = Float(6)/7, Float gamma = 128);
+
+    void SetupScenePartitions(pstd::span<ShadingPoint> shadingPoints, const Bounds3f& sceneBounds);
 
     PBRT_CPU_GPU PBRT_NOINLINE
     pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t seed, Float u) const {
@@ -201,16 +259,30 @@ class LTCLightSampler {
 
     std::string ToString() const;
 
+    PBRT_CPU_GPU
+    void Update(uint32_t currentIteration);
   private:
     // Learning To Cluster Light Sampler Private Methods
 #ifdef PBRT_BUILD_GPU_RENDERER
     bool buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights, Float& u);
 #endif
 
+    uint32_t BuildPartitionTree(pstd::span<ShadingPoint>& items, int start, int end);
+
+    PBRT_CPU_GPU
+    void MakeInitialTreeCut(OnlineLightTreeCut& cut, const ShadingPoint& representant) const;
+
+    PBRT_CPU_GPU
+    void ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& representant, uint32_t currentIteration) const;
+
     // Learning To Cluster Light Sampler Private Members
     LightcutsTree m_tree;
+    PartitionTree m_partitions;
     pstd::vector<Light> m_infiniteLights;
     HashMap<Light, uint32_t> m_lightToBitTrail;
+    Float m_beta;
+    Float m_omega;
+    Float m_gamma;
 };
 
 }
