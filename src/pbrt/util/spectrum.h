@@ -196,6 +196,14 @@ class SampledSpectrum {
     }
 
     PBRT_CPU_GPU
+    bool IsNonZero() const {
+        for (int i = 0; i < NSpectrumSamples; ++i)
+            if (values[i] != 0)
+                return true;
+        return false;
+    }
+
+    PBRT_CPU_GPU
     XYZ ToXYZ(const SampledWavelengths &lambda) const;
     PBRT_CPU_GPU
     RGB ToRGB(const SampledWavelengths &lambda, const RGBColorSpace &cs) const;

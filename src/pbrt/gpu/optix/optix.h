@@ -63,6 +63,7 @@ struct RayIntersectParameters {
     // shadow rays
     ShadowRayQueue *shadowRayQueue;
     SOA<PixelSampleState> pixelSampleState;
+    LightSampler lightSampler;
 
     // Subsurface scattering...
     SubsurfaceScatterQueue *subsurfaceScatterQueue;

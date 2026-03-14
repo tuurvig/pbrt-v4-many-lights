@@ -190,7 +190,7 @@ void WavefrontPathIntegrator::SampleSubsurface(int wavefrontDepth) {
                                                             : w.mediumInterface.inside;
                     (*shadowRayQueue)[reserveStartIdx + i] =
                         ShadowRayWorkItem{ray, 1 - ShadowEpsilon, lambda, Ld, sample_r_u,
-                                          sample_r_l, w.pixelIndex};
+                                          sample_r_l, w.pixelIndex, std::numeric_limits<uint32_t>::max(), 0};
                 }
             }
         });

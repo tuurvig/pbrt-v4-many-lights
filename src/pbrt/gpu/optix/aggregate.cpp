@@ -1708,7 +1708,8 @@ void OptiXAggregate::IntersectClosest(int maxRays, const RayQueue *rayQueue,
 };
 
 void OptiXAggregate::IntersectShadow(int maxRays, ShadowRayQueue *shadowRayQueue,
-                                     SOA<PixelSampleState> *pixelSampleState) const {
+                                     SOA<PixelSampleState> *pixelSampleState,
+                                     const LightSampler &lightSampler) const {
     KernelTimerWrapper timer(GetProfilerEvents("Trace shadow rays", ProfilerKernelGroup::WAVEFRONT));
 
     if (rootTraversable) {
@@ -1716,6 +1717,7 @@ void OptiXAggregate::IntersectShadow(int maxRays, ShadowRayQueue *shadowRayQueue
         params.traversable = rootTraversable;
         params.shadowRayQueue = shadowRayQueue;
         params.pixelSampleState = *pixelSampleState;
+        params.lightSampler = lightSampler;
 
         ParamBufferState &pbs = getParamBuffer(params);
 
@@ -1742,7 +1744,8 @@ void OptiXAggregate::IntersectShadow(int maxRays, ShadowRayQueue *shadowRayQueue
 }
 
 void OptiXAggregate::IntersectShadowTr(int maxRays, ShadowRayQueue *shadowRayQueue,
-                                       SOA<PixelSampleState> *pixelSampleState) const {
+                                       SOA<PixelSampleState> *pixelSampleState,
+                                       const LightSampler &lightSampler) const {
     KernelTimerWrapper timer(GetProfilerEvents("Tracing shadow Tr rays", ProfilerKernelGroup::WAVEFRONT));
 
     if (rootTraversable) {
@@ -1750,6 +1753,7 @@ void OptiXAggregate::IntersectShadowTr(int maxRays, ShadowRayQueue *shadowRayQue
         params.traversable = rootTraversable;
         params.shadowRayQueue = shadowRayQueue;
         params.pixelSampleState = *pixelSampleState;
+        params.lightSampler = lightSampler;
 
         ParamBufferState &pbs = getParamBuffer(params);
 

@@ -610,7 +610,7 @@ inline Float GeomTermBoundInFrame(Point3f point, const Frame& frame, const Bound
 }
 
 PBRT_CPU_GPU
-inline Float ComputeGeometricBound(const LightcutsTreeNode* node, const Bounds3f& nodeBounds, const Frame& frame, bool isOriented, Point3f point, Vector3f wo) {
+inline Float ComputeGeometricBound(const LightcutsTreeNode* node, const Bounds3f& nodeBounds, const Frame& frame, bool isOriented, Point3f point) {
     Float G = GeomTermBoundInFrame(point, frame, nodeBounds);
     G = std::abs(G);
 
@@ -647,8 +647,8 @@ static bool ComputeErrorBounds(Float &err0, Float &err1, Point3f p, Vector3f wo,
     const Bounds3f nodeBound0 = child0->compactLightBounds.Bounds(allLightBounds);
     const Bounds3f nodeBound1 = child1->compactLightBounds.Bounds(allLightBounds);
 
-    Float geomBound0 = ComputeGeometricBound(child0, nodeBound0, frame, isOriented, p, wo);
-    Float geomBound1 = ComputeGeometricBound(child1, nodeBound1, frame, isOriented, p, wo);
+    Float geomBound0 = ComputeGeometricBound(child0, nodeBound0, frame, isOriented, p);
+    Float geomBound1 = ComputeGeometricBound(child1, nodeBound1, frame, isOriented, p);
     
     Float ub0 = geomBound0 * nodeI0;
     Float ub1 = geomBound1 * nodeI1; 

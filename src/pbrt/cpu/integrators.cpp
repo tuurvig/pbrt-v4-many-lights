@@ -634,12 +634,12 @@ PathIntegrator::PathIntegrator(int maxDepth, Camera camera, Sampler sampler,
       maxDepth(maxDepth), requiredShadowRays(E_DEFAULT_SHADOW_RAYS),
       lightSampler(LightSampler::Create(requiredShadowRays, lightSampleStrategy, lights, Options->discretizeAreaLights > 0, Allocator())),
       regularize(regularize),
-      collectShadingPoints(false) {
-    collectShadingPoints = lightSampler.Is<LTCLightSampler>();
+      isOnlineLightSampler(false) {
+    isOnlineLightSampler = lightSampler.Is<LTCLightSampler>();
 }
 
 void PathIntegrator::OnRenderWaveStart(int waveIndex, const Bounds2i &pixelBounds) {
-    if (!collectShadingPoints || waveIndex != 0)
+    if (!isOnlineLightSampler || waveIndex != 0)
         return;
 
     firstIterationShadingPoints =
@@ -647,13 +647,23 @@ void PathIntegrator::OnRenderWaveStart(int waveIndex, const Bounds2i &pixelBound
 }
 
 void PathIntegrator::OnRenderWaveDone(int waveIndex) {
+    if (isOnlineLightSampler) {
+        LTCLightSampler* ltc = lightSampler.CastOrNullptr<LTCLightSampler>();
+        if (ltc) {
+            ltc->Update(waveIndex);
+        }
+    }
+
     if (waveIndex != 0 || !firstIterationShadingPoints)
         return;
 
-    size_t count = firstIterationShadingPoints->Size();
+    uint32_t count = firstIterationShadingPoints->Size();
     LOG_VERBOSE("Collected %zu first-wave path shading points.", count);
 
-    // handoff point 
+    LTCLightSampler* ltc = lightSampler.CastOrNullptr<LTCLightSampler>();
+    if (ltc) {
+        ltc->SetupScenePartitions(firstIterationShadingPoints->Points(), aggregate.Bounds());
+    }
 
     firstIterationShadingPoints.reset();
 }
@@ -842,19 +852,30 @@ SampledSpectrum PathIntegrator::SampleLd(const SurfaceInteraction &intr, uint32_
         const SampledLd& sLd(samplesLd[i]);
 
         ReportLightSampleBeforeShadow(sLd.light);
-        if (!Unoccluded(intr, sLd.pLight, sLd.nLight)) {
-            continue;
+        const bool isUnoccluded = Unoccluded(intr, sLd.pLight, sLd.nLight);
+        if (isUnoccluded) {
+            SampledSpectrum finalLd;
+            ReportLightSampleAfterShadowVisible(sLd.light);
+
+            Float p_b = sLd.scatterPDF;
+            Float p_l = sLd.lightPDF;
+            
+            if (p_b == 0) {
+                finalLd = sLd.Ld / p_l;
+            }
+            else {
+                Float w_l = PowerHeuristic(1, p_l, 1, p_b);
+                finalLd = w_l * sLd.Ld / p_l;
+            }
+
+            resultLd += finalLd;
         }
-        ReportLightSampleAfterShadowVisible(sLd.light);
-        
-        Float p_b = sLd.scatterPDF;
-        Float p_l = sLd.lightPDF;
-        if (p_b == 0) {
-            resultLd += sLd.Ld / p_l;
-        }
-        else {
-            Float w_l = PowerHeuristic(1, p_l, 1, p_b);
-            resultLd += w_l * sLd.Ld / p_l;
+
+        if (isOnlineLightSampler) {
+            const LTCLightSampler* ltc = lightSampler.CastOrNullptr<LTCLightSampler>();
+            if (ltc) {
+                ltc->AccumulateContribution(isUnoccluded * sLd.learningContribution, sLd.lightSamplerHint);
+            }
         }
     }
 
@@ -863,8 +884,8 @@ SampledSpectrum PathIntegrator::SampleLd(const SurfaceInteraction &intr, uint32_
 
 std::string PathIntegrator::ToString() const {
     return StringPrintf("[ PathIntegrator maxDepth: %d lightSampler: %s regularize: %s "
-                        "collectShadingPoints: %s ]",
-                        maxDepth, lightSampler, regularize, collectShadingPoints);
+                        "isOnlineLightSampler: %s ]",
+                        maxDepth, lightSampler, regularize, isOnlineLightSampler);
 }
 
 std::unique_ptr<PathIntegrator> PathIntegrator::Create(
@@ -1009,7 +1030,7 @@ STAT_COUNTER("Integrator/Surface interactions", surfaceInteractions);
 
 // VolPathIntegrator Method Definitions
 void VolPathIntegrator::OnRenderWaveStart(int waveIndex, const Bounds2i &pixelBounds) {
-    if (!collectShadingPoints || waveIndex != 0)
+    if (!isOnlineLightSampler || waveIndex != 0)
         return;
 
     firstIterationShadingPoints =
@@ -1017,15 +1038,24 @@ void VolPathIntegrator::OnRenderWaveStart(int waveIndex, const Bounds2i &pixelBo
 }
 
 void VolPathIntegrator::OnRenderWaveDone(int waveIndex) {
-    if (waveIndex != 0 || !firstIterationShadingPoints)
-        return;
+    if (waveIndex != 0 && isOnlineLightSampler) {
+        LTCLightSampler* ltc = lightSampler.CastOrNullptr<LTCLightSampler>();
+        if (ltc) {
+            ltc->Update(waveIndex);
+        }
+    }
 
-    size_t count = firstIterationShadingPoints->Size();
-    LOG_VERBOSE("Collected %zu first-wave volpath shading points.", count);
+    if (waveIndex == 0 && firstIterationShadingPoints) {
+        size_t count = firstIterationShadingPoints->Size();
+        LOG_VERBOSE("Collected %zu first-wave volpath shading points.", count);
 
-    // handoff point
+        LTCLightSampler* ltc = lightSampler.CastOrNullptr<LTCLightSampler>();
+        if (ltc) {
+            ltc->SetupScenePartitions(firstIterationShadingPoints->Points(), aggregate.Bounds());
+        }
 
-    firstIterationShadingPoints.reset();
+        firstIterationShadingPoints.reset();
+    }
 }
 
 SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, uint32_t seed, SampledWavelengths &lambda,
@@ -1479,17 +1509,29 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, uint32_t se
             lightRay = sLd.SpawnShadowRay(si->intr);
         }
 
-        if (shouldSkip) continue;
-        ReportLightSampleAfterShadowVisible(sLd.light);
+        const bool isUnoccluded = !shouldSkip;
+        if (isUnoccluded) {
+            ReportLightSampleAfterShadowVisible(sLd.light);
+            SampledSpectrum finalLd;
 
-        // Return path contribution function estimate for direct lighting
-        r_l *= r_p * sLd.lightPDF;
-        if (sLd.scatterPDF == 0) {
-            resultLd += beta * sLd.Ld * T_ray / r_l.Average();
+            // Return path contribution function estimate for direct lighting
+            r_l *= r_p * sLd.lightPDF;
+            if (sLd.scatterPDF == 0) {
+                finalLd = beta * sLd.Ld * T_ray / r_l.Average();
+            }
+            else {
+                r_u *= r_p * sLd.scatterPDF;
+                finalLd = beta * sLd.Ld * T_ray / (r_l + r_u).Average();
+            }
+
+            resultLd += finalLd;
         }
-        else {
-            r_u *= r_p * sLd.scatterPDF;
-            resultLd += beta * sLd.Ld * T_ray / (r_l + r_u).Average();
+        
+        if (isOnlineLightSampler && !firstIterationShadingPoints) {
+            const LTCLightSampler* ltc = lightSampler.CastOrNullptr<LTCLightSampler>();
+            if (ltc) {
+                ltc->AccumulateContribution(isUnoccluded * sLd.learningContribution, sLd.lightSamplerHint);
+            }
         }
     }
 
@@ -1499,8 +1541,8 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, uint32_t se
 std::string VolPathIntegrator::ToString() const {
     return StringPrintf(
         "[ VolPathIntegrator maxDepth: %d lightSampler: %s regularize: %s "
-        "collectShadingPoints: %s ]",
-        maxDepth, lightSampler, regularize, collectShadingPoints);
+        "isOnlineLightSampler: %s ]",
+        maxDepth, lightSampler, regularize, isOnlineLightSampler);
 }
 
 std::unique_ptr<VolPathIntegrator> VolPathIntegrator::Create(

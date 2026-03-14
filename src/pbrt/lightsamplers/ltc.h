@@ -20,11 +20,92 @@
 
 namespace pbrt {
 
+struct ShadingPoint;
+
+struct alignas(8) PartitionTreeNode {
+    PartitionTreeNode() = default;
+
+    PartitionTreeNode(Float splitValue, uint32_t splitAxis, uint32_t rightChildOrLeafIndex)
+        : splitValue(splitValue), splitAxis(splitAxis), rightChildOrLeafIndex(rightChildOrLeafIndex) {}
+
+    static PartitionTreeNode MakeLeaf(uint32_t leafIdx) {
+        return PartitionTreeNode(std::numeric_limits<Float>::max(), 7, leafIdx);
+    }
+
+    static PartitionTreeNode MakeInterior(uint32_t splitAxis, Float splitValue, uint32_t childIdx) {
+        return PartitionTreeNode(splitValue, splitAxis, childIdx);
+    }
+
+    PBRT_CPU_GPU
+    bool IsLeaf() const { return splitAxis == 7; }
+
+    std::string ToString() const;
+
+    // Partition5DNode Public Members
+    Float splitValue;
+    struct {
+        uint32_t splitAxis : 3;
+        uint32_t rightChildOrLeafIndex : 29;
+    };
+};
+
+//struct alignas(32) OnlineCutData {
+//    Float q; // estimated importance
+//    Float variance; // variance estimate
+//    Float visitCount;
+//    Float prefixSum;
+//
+//    uint32_t clusterIndex;
+//    uint32_t bitTrail;
+//    uint32_t depth;
+//    uint32_t _padding1;
+//};
+
+#define PBRT_LTC_MAX_CUT_SIZE 64
+
+struct OnlineLightTreeCut {
+    PBRT_CPU_GPU
+    OnlineLightTreeCut() : cutSize(0), lastUpdateIteration(0) {}
+
+    //OnlineCutData data[PBRT_LTC_MAX_CUT_SIZE];
+    Float q[PBRT_LTC_MAX_CUT_SIZE];
+    Float variance[PBRT_LTC_MAX_CUT_SIZE];
+    Float visitCount[PBRT_LTC_MAX_CUT_SIZE];
+    Float prefixSum[PBRT_LTC_MAX_CUT_SIZE];
+
+    uint32_t clusterIndex[PBRT_LTC_MAX_CUT_SIZE];
+    uint32_t bitTrail[PBRT_LTC_MAX_CUT_SIZE];
+    uint32_t depth[PBRT_LTC_MAX_CUT_SIZE];
+
+    AtomicFloat sumAccumulator[PBRT_LTC_MAX_CUT_SIZE];
+    AtomicInt<uint32_t> visitCountAccumulator[PBRT_LTC_MAX_CUT_SIZE];
+    uint32_t cutSize;
+    uint32_t lastUpdateIteration;
+};
+
+struct PartitionTree {
+    explicit PartitionTree(Allocator alloc);
+    ~PartitionTree();
+
+    PBRT_CPU_GPU
+    OnlineLightTreeCut &Leaf(size_t idx) { return *leaves[idx]; }
+
+    void EmplaceLeaf();
+
+    Allocator alloc;
+    pstd::vector<OnlineLightTreeCut*> leaves;
+    pstd::vector<PartitionTreeNode> innerNodes;
+    pstd::vector<ShadingPoint> representantPoints;
+    Vector3f sceneExtent;
+};
+
 // Learning To Cluster Lightsampler Definition
 class LTCLightSampler {
   public:
     // Learning To Cluster Light Sampler Public Methods
-    LTCLightSampler(pstd::span<const Light> lights, Allocator alloc);
+    LTCLightSampler(pstd::span<const Light> lights, Allocator alloc, Float beta = 4, Float omega = Float(6)/7, Float gamma = 128);
+
+    void SetupScenePartitions(pstd::span<ShadingPoint> shadingPoints, const Bounds3f& sceneBounds);
 
     PBRT_CPU_GPU PBRT_NOINLINE
     pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t seed, Float u) const {
@@ -47,9 +128,49 @@ class LTCLightSampler {
         BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
         Frame shadingFrame(bsdf ? bsdf->shadingFrame : Frame::FromZ(ctx.ns));
 
-        int nodeIndex = 0;
-        const LightcutsTreeNode* node = &m_tree.nodes[nodeIndex];
+        uint32_t nodeIndex = 0;
+        uint32_t lightSamplerHint = std::numeric_limits<uint32_t>::max();
+        constexpr uint32_t clusterIndexPowerTwoCapacity = 8;
+        if (!m_partitions.leaves.empty() && n != Normal3f(0, 0, 0)) {
+            Vector3f nv(n);
+            UniformDiskVector diskVector(nv);
+            uint32_t partitionIdx = GetPartitionIndex(p, diskVector);
+            lightSamplerHint = partitionIdx << clusterIndexPowerTwoCapacity;
 
+            const OnlineLightTreeCut &cut(*m_partitions.leaves[partitionIdx]);
+
+            uint32_t offset = 0;
+            const uint32_t cutSize = cut.cutSize;
+            const Float weightSum = cut.prefixSum[cutSize - 1];
+            Float up = u * weightSum;
+            if (up >= weightSum) {
+                up = NextFloatDown(up);
+                offset = cutSize - 1;
+            } else {
+                uint32_t high = cutSize - 1;
+
+                // binary search of the target cluster chosen by a random variable u
+                while (offset < high) {
+                    uint32_t mid = offset + ((high - offset) >> 1);
+                    const Float prefixSum = cut.prefixSum[mid];
+
+                    offset = prefixSum <= up ? mid + 1 : offset;
+                    high = prefixSum > up ? mid : high;
+                }
+                DCHECK_LT(offset, cutSize);
+            }
+
+            //const OnlineCutData clusterData = cut.data[offset];
+            const Float importance = cut.q[offset];
+            const Float prevPrefix = (offset > 0) ? cut.prefixSum[offset - 1] : 0;
+            pmf *= importance / weightSum;
+            u = std::min((up - prevPrefix) / importance, OneMinusEpsilon);
+            lightSamplerHint |= offset;
+            nodeIndex = cut.clusterIndex[offset];
+        }
+        
+        const LightcutsTreeNode* node = &m_tree.nodes[nodeIndex];
+        Float clusterPdf = 1;
         while (!node->isLeaf) {
             uint32_t childrenIndices[2] = {static_cast<uint32_t>(nodeIndex + 1), node->childOrLightIndex};
 
@@ -61,6 +182,7 @@ class LTCLightSampler {
             Float errBounds[2] = {1, 1};
 
             if (!ComputeErrorBounds(errBounds[0], errBounds[1], p, wo, n, shadingFrame, bsdf, children[0], children[1], m_tree.allLightBounds)) {
+                AccumulateContribution(0, lightSamplerHint);
                 return {};
             }
 
@@ -71,7 +193,7 @@ class LTCLightSampler {
             // Randomly sample light BVH child node
             Float nodePMF;
             int child = SampleDiscrete(weights, u, &nodePMF, &u);
-            pmf *= nodePMF;
+            clusterPdf *= nodePMF;
 
             nodeIndex = childrenIndices[child];
             node = &m_tree.nodes[nodeIndex];
@@ -81,7 +203,9 @@ class LTCLightSampler {
             if (u >= 1) u -= 1;
         }
 
-        return SampledLight(m_tree.lights[node->childOrLightIndex], pmf);
+        pmf *= clusterPdf;
+
+        return SampledLight(m_tree.lights[node->childOrLightIndex], pmf, lightSamplerHint, clusterPdf);
     }
 
     PBRT_CPU_GPU PBRT_NOINLINE
@@ -101,14 +225,41 @@ class LTCLightSampler {
         Vector3f wo = ctx.wo;
         
         Float pmf = 1 - pInfinite;
-        int nodeIndex = 0;
 
         BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
         Frame shadingFrame(bsdf ? bsdf->shadingFrame : Frame::FromZ(ctx.ns));
+        
+        uint32_t nodeIndex = 0;
+        if (!m_partitions.leaves.empty() && n != Normal3f(0, 0, 0)) {
+            Vector3f nv(n);
+            UniformDiskVector diskVector(nv);
+            uint32_t partitionIdx = GetPartitionIndex(p, diskVector);
+            const OnlineLightTreeCut &cut(*m_partitions.leaves[partitionIdx]);
+
+            const uint32_t cutSize = cut.cutSize;
+            const Float weightSum = cut.prefixSum[cutSize - 1];
+            uint32_t foundIndex = cutSize;
+            for (uint32_t i = 0; i < cutSize; ++i) {
+                const uint32_t currentDepth = cut.depth[i];
+                const uint32_t currentBitTrail = cut.bitTrail[i];
+
+                const uint32_t bitMask = (1u << currentDepth) - 1;
+                const uint32_t masked = bitTrail & bitMask;
+
+                foundIndex = (masked == currentBitTrail) ? i : foundIndex;
+            }
+
+            DCHECK_LT(foundIndex, cutSize);
+
+            bitTrail >>= cut.depth[foundIndex];
+            nodeIndex = cut.clusterIndex[foundIndex];
+
+            pmf *= cut.q[foundIndex] / weightSum;
+        }
 
         const LightcutsTreeNode *node = &m_tree.nodes[nodeIndex];
 
-        // Compute light's PMF by walking down tree nodes to the light
+        // Compute light's cluster pdf by walking down tree nodes to the light
         while (!node->isLeaf) {
             // Compute child importances and update PMF for current node
             uint32_t childrenIndices[2] = {static_cast<uint32_t>(nodeIndex + 1), node->childOrLightIndex};
@@ -187,19 +338,44 @@ class LTCLightSampler {
         Light light = sampledLight->light;
         DCHECK(light && sampledLight->p != 0);
         pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
-        if (!ls || !ls->L || ls->pdf == 0)
+        if (!ls || !ls->L || ls->pdf == 0) {
+            AccumulateContribution(0, sampledLight->hint);
             return;
+        }
 
         Float lightPDF = sampledLight->p * ls->pdf;
-        ls->L *= sampledLight->scale;
-        
         Float scatterPDF = 0;
         SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
+        SampledSpectrum Ld = f_hat * ls->L;
 
-        samples.Add(SampledLd(f_hat * ls->L, light, ls->pLight, lightPDF, scatterPDF));
+        const Float learningPDF = sampledLight->pLearning * ls->pdf;
+        const Float learningContribution = Ld.MaxComponentValue() / (learningPDF + scatterPDF);
+
+        samples.Add(SampledLd(Ld, light, ls->pLight, lightPDF, scatterPDF, sampledLight->hint, learningContribution));
     }
 
     std::string ToString() const;
+
+    void Update(uint32_t currentIteration);
+
+    PBRT_CPU_GPU
+    void AccumulateContribution(Float contribution, const uint32_t lightSamplerHint) const {
+        if (m_partitions.leaves.empty() || lightSamplerHint == std::numeric_limits<uint32_t>::max()) {
+            return;
+        }
+
+        constexpr uint32_t clusterIndexPowerTwoCapacity = 8;
+        constexpr uint32_t clusterIndexMask = (1 << clusterIndexPowerTwoCapacity) - 1;
+
+        const uint32_t clusterIndex = lightSamplerHint & clusterIndexMask;
+        const uint32_t partitionIndex = lightSamplerHint >> clusterIndexPowerTwoCapacity;
+        DCHECK_LT(partitionIndex, static_cast<uint32_t>(m_partitions.leaves.size()));
+
+        OnlineLightTreeCut* cut(m_partitions.leaves[partitionIndex]);
+
+        cut->sumAccumulator[clusterIndex].Add(contribution);
+        cut->visitCountAccumulator[clusterIndex].Add(1);
+    }
 
   private:
     // Learning To Cluster Light Sampler Private Methods
@@ -207,10 +383,19 @@ class LTCLightSampler {
     bool buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights, Float& u);
 #endif
 
+    uint32_t BuildPartitionTree(pstd::span<ShadingPoint>& items, int start, int end);
+
+    PBRT_CPU_GPU
+    uint32_t GetPartitionIndex(const Point3f& p, const UniformDiskVector& oct) const;
+     
     // Learning To Cluster Light Sampler Private Members
     LightcutsTree m_tree;
+    PartitionTree m_partitions;
     pstd::vector<Light> m_infiniteLights;
     HashMap<Light, uint32_t> m_lightToBitTrail;
+    Float m_beta;
+    Float m_omega;
+    Float m_gamma;
 };
 
 }

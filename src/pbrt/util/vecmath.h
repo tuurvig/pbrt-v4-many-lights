@@ -1867,6 +1867,30 @@ class OctahedralVector {
     uint16_t x, y;
 };
 
+// OctahedralVector Definition
+class UniformDiskVector {
+  public:
+    // OctahedralVector Public Methods
+    UniformDiskVector() = default;
+
+    PBRT_CPU_GPU
+    UniformDiskVector(Vector3f v);
+
+    PBRT_CPU_GPU
+    explicit operator Vector3f() const;
+
+    PBRT_CPU_GPU
+    uint16_t operator[](int dim) const {
+        return vec[dim];
+    }
+
+    std::string ToString() const;
+
+  private:
+    // UniformDiskVector Private Members
+    Point2<uint16_t> vec;
+};
+
 // DirectionCone Definition
 class DirectionCone {
   public:

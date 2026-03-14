@@ -192,7 +192,7 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
     const Float repIntensity = representant->compactLightBounds.PhiOrI();
 
     int representantLightIndex = representant->childOrLightIndex;
-    return SampledLight(tree.lights[representantLightIndex], pmf, nodeIntensity / repIntensity);
+    return SampledLight(tree.lights[representantLightIndex], pmf, FloatToBits(nodeIntensity / repIntensity));
 }
 
 #ifdef PBRT_BUILD_GPU_RENDERER

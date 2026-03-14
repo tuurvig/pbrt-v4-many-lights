@@ -17,24 +17,6 @@
 #include <atomic>
 #include <utility>
 
-#ifdef __CUDACC__
-
-#ifdef PBRT_IS_WINDOWS
-#if (__CUDA_ARCH__ < 700)
-#define PBRT_USE_LEGACY_CUDA_ATOMICS
-#endif
-#else
-#if (__CUDA_ARCH__ < 600)
-#define PBRT_USE_LEGACY_CUDA_ATOMICS
-#endif
-#endif  // PBRT_IS_WINDOWS
-
-#ifndef PBRT_USE_LEGACY_CUDA_ATOMICS
-#include <cuda/atomic>
-#endif
-
-#endif  // __CUDACC__
-
 namespace pbrt {
 
 // WorkQueue Definition
@@ -46,37 +28,18 @@ class WorkQueue : public SOA<WorkItem> {
     WorkQueue(int n, Allocator alloc) : SOA<WorkItem>(n, alloc) {}
     WorkQueue &operator=(const WorkQueue &w) {
         SOA<WorkItem>::operator=(w);
-#if defined(PBRT_IS_GPU_CODE) && defined(PBRT_USE_LEGACY_CUDA_ATOMICS)
-        size = w.size;
-#else
-        size.store(w.size.load());
-#endif
+        size.Store(w.size.Load());
         return *this;
     }
 
     PBRT_CPU_GPU
     int Size() const {
-#ifdef PBRT_IS_GPU_CODE
-#ifdef PBRT_USE_LEGACY_CUDA_ATOMICS
-        return size;
-#else
-        return size.load(cuda::std::memory_order_relaxed);
-#endif
-#else
-        return size.load(std::memory_order_relaxed);
-#endif
+        return size.Load();
     }
+
     PBRT_CPU_GPU
     void Reset() {
-#ifdef PBRT_IS_GPU_CODE
-#ifdef PBRT_USE_LEGACY_CUDA_ATOMICS
-        size = 0;
-#else
-        size.store(0, cuda::std::memory_order_relaxed);
-#endif
-#else
-        size.store(0, std::memory_order_relaxed);
-#endif
+        size.Store(0);
     }
 
     PBRT_CPU_GPU
@@ -92,43 +55,19 @@ class WorkQueue : public SOA<WorkItem> {
             return -1;
         }
 
-#ifdef PBRT_IS_GPU_CODE
-#ifdef PBRT_USE_LEGACY_CUDA_ATOMICS
-        return atomicAdd(&size, count);
-#else
-        return size.fetch_add(count, cuda::std::memory_order_relaxed);
-#endif
-#else
-        return size.fetch_add(count, std::memory_order_relaxed);
-#endif
+        return size.FetchAdd(count);
     }
 
   protected:
     // WorkQueue Protected Methods
     PBRT_CPU_GPU
     int AllocateEntry() {
-#ifdef PBRT_IS_GPU_CODE
-#ifdef PBRT_USE_LEGACY_CUDA_ATOMICS
-        return atomicAdd(&size, 1);
-#else
-        return size.fetch_add(1, cuda::std::memory_order_relaxed);
-#endif
-#else
-        return size.fetch_add(1, std::memory_order_relaxed);
-#endif
+        return size.FetchAdd(1);
     }
 
   private:
     // WorkQueue Private Members
-#ifdef PBRT_IS_GPU_CODE
-#ifdef PBRT_USE_LEGACY_CUDA_ATOMICS
-    int size = 0;
-#else
-    cuda::atomic<int, cuda::thread_scope_device> size{0};
-#endif
-#else
-    std::atomic<int> size{0};
-#endif  // PBRT_IS_GPU_CODE
+    AtomicInt<int> size;
 };
 
 // WorkQueue Inline Functions

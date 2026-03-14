@@ -7,6 +7,7 @@
 #include <pbrt/util/stats.h>
 #include <pbrt/util/transform.h>
 #include <pbrt/util/vecmath.h>
+#include <pbrt/util/sampling.h>
 
 #include <algorithm>
 #include <cmath>
@@ -84,6 +85,40 @@ PBRT_CPU_GPU DirectionCone Union(const DirectionCone &a, const DirectionCone &b)
 
 std::string DirectionCone::ToString() const {
     return StringPrintf("[ DirectionCone w: %s cosTheta: %f ]", w, cosTheta);
+}
+
+PBRT_CPU_GPU
+UniformDiskVector::UniformDiskVector(Vector3f v) {
+    Point2f sphereSample = InvertUniformDiskConcentricSample({v.x, v.y});
+    if (v.z < 0) {
+        sphereSample.x = 2 - sphereSample.x;
+    }
+    sphereSample.x *= 0.5;
+
+    vec.x = static_cast<uint16_t>(sphereSample.x * 65535.f);
+    vec.y = static_cast<uint16_t>(sphereSample.y * 65535.f);
+}
+
+PBRT_CPU_GPU
+UniformDiskVector::operator Vector3f() const {
+    Point2f sphereSample;
+    sphereSample.x = 2 * (static_cast<Float>(vec.x) / 65535.f);
+    sphereSample.y = static_cast<Float>(vec.y) / 65535.f;
+
+    Float sign = 1;
+    if (sphereSample.x > 1) {
+        sphereSample.x = 2 - sphereSample.x;
+        sign = -1;
+    }
+
+    Vector3f out = SampleCosineHemisphere(sphereSample);
+    out.z *= sign;
+
+    return Normalize(out);
+}
+
+std::string UniformDiskVector::ToString() const {
+    return StringPrintf("[ UniformDiskVector x: %d y: %d ]", vec.x, vec.y);
 }
 
 }  // namespace pbrt

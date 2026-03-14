@@ -47,9 +47,11 @@ class WavefrontAggregate {
                                   RayQueue *nextRayQ) const = 0;
 
     virtual void IntersectShadow(int maxRays, ShadowRayQueue *shadowRayQueue,
-                                 SOA<PixelSampleState> *pixelSampleState) const = 0;
+                                 SOA<PixelSampleState> *pixelSampleState,
+                                 const LightSampler &lightSampler) const = 0;
     virtual void IntersectShadowTr(int maxRays, ShadowRayQueue *shadowRayQueue,
-                                   SOA<PixelSampleState> *pixelSampleState) const = 0;
+                                   SOA<PixelSampleState> *pixelSampleState,
+                                   const LightSampler &lightSampler) const = 0;
 
     virtual void IntersectOneRandom(
         int maxRays, SubsurfaceScatterQueue *subsurfaceScatterQueue) const = 0;
@@ -96,6 +98,8 @@ class WavefrontPathIntegrator {
                                  int wavefrontDepth);
 
     void UpdateFilm();
+    void OnRenderWaveStart(int waveIndex, const Bounds2i &pixelBounds);
+    void OnRenderWaveDone(int waveIndex);
 
     WavefrontPathIntegrator(pstd::pmr::memory_resource *memoryResource,
                             BasicScene &scene);
@@ -173,6 +177,7 @@ class WavefrontPathIntegrator {
 
     int maxDepth, samplesPerPixel, currentSampleIndex;
     bool regularize;
+    bool isOnlineLightSampler = false;
     ShadingPointCollector *firstIterationShadingPoints = nullptr;
 
     int scanlinesPerPass, maxQueueSize;

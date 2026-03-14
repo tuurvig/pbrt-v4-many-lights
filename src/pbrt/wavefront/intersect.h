@@ -30,18 +30,23 @@ inline PBRT_CPU_GPU void EnqueueWorkAfterMiss(RayWorkItem r,
 
 inline PBRT_CPU_GPU void RecordShadowRayResult(const ShadowRayWorkItem w,
                                                SOA<PixelSampleState> *pixelSampleState,
-                                               bool foundIntersection) {
-    if (foundIntersection) {
-        PBRT_DBG("Shadow ray was occluded\n");
-        return;
-    }
-    SampledSpectrum Ld = w.Ld / (w.r_u + w.r_l).Average();
-    PBRT_DBG("Unoccluded shadow ray. Final Ld %f %f %f %f "
+                                               bool foundIntersection,
+                                               const LightSampler &lightSampler) {
+    const bool isUnoccluded = !foundIntersection;
+    if (isUnoccluded) {
+        SampledSpectrum Ld = w.Ld / (w.r_u + w.r_l).Average();
+        PBRT_DBG("Unoccluded shadow ray. Final Ld %f %f %f %f "
              "(sr.Ld %f %f %f %f r_u %f %f %f %f r_l %f %f %f %f)\n",
              Ld[0], Ld[1], Ld[2], Ld[3], w.Ld[0], w.Ld[1], w.Ld[2], w.Ld[3], w.r_u[0],
              w.r_u[1], w.r_u[2], w.r_u[3], w.r_l[0], w.r_l[1], w.r_l[2], w.r_l[3]);
-
-    pixelSampleState->L.AtomicAdd(w.pixelIndex, Ld);
+        
+        pixelSampleState->L.AtomicAdd(w.pixelIndex, Ld);
+    } else {
+        PBRT_DBG("Shadow ray was occluded\n");
+    }
+    
+    if (const LTCLightSampler *ltc = lightSampler.CastOrNullptr<LTCLightSampler>())
+        ltc->AccumulateContribution(isUnoccluded * w.learningContribution, w.lightSamplerHint);
 }
 
 inline PBRT_CPU_GPU void EnqueueWorkAfterIntersection(
@@ -180,7 +185,8 @@ struct TransmittanceTraceResult {
 template <typename T, typename S>
 inline PBRT_CPU_GPU void TraceTransmittance(ShadowRayWorkItem sr,
                                             SOA<PixelSampleState> *pixelSampleState,
-                                            T trace, S spawnTo) {
+                                            T trace, S spawnTo,
+                                            const LightSampler &lightSampler) {
     SampledWavelengths lambda = sr.lambda;
 
     SampledSpectrum Ld = sr.Ld;
@@ -276,15 +282,20 @@ inline PBRT_CPU_GPU void TraceTransmittance(ShadowRayWorkItem sr,
              T_ray[2] / (sr.r_u * r_u + sr.r_l * r_l).Average(),
              T_ray[3] / (sr.r_u * r_u + sr.r_l * r_l).Average());
 
-    if (T_ray) {
+    const bool isUnoccluded = T_ray.IsNonZero();
+    if (isUnoccluded) {
         // FIXME/reconcile: this takes r_l as input while
         // e.g. VolPathIntegrator::SampleLd() does not...
-        Ld *= T_ray / (sr.r_u * r_u + sr.r_l * r_l).Average();
+        SampledSpectrum finalLd = Ld * (T_ray / (sr.r_u * r_u + sr.r_l * r_l).Average());
 
         PBRT_DBG("Setting final Ld for shadow ray pixel index %d = as %f %f %f %f\n",
                  sr.pixelIndex, Ld[0], Ld[1], Ld[2], Ld[3]);
 
-        pixelSampleState->L.AtomicAdd(sr.pixelIndex, Ld);
+        pixelSampleState->L.AtomicAdd(sr.pixelIndex, finalLd);
+    }
+
+    if (const LTCLightSampler *ltc = lightSampler.CastOrNullptr<LTCLightSampler>()) {
+        ltc->AccumulateContribution(isUnoccluded * sr.learningContribution, sr.lightSamplerHint);
     }
 }
 
