@@ -105,7 +105,40 @@ class LTCLightSampler {
         BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
         Frame shadingFrame(bsdf ? bsdf->shadingFrame : Frame::FromZ(ctx.ns));
 
-        int nodeIndex = 0;
+        Vector3f nv(n);
+        OctahedralVector octVec(nv);
+        uint32_t partitionIdx = GetPartitionIndex(p, octVec);
+        const OnlineLightTreeCut& cut = m_partitions.leaves[partitionIdx];
+        
+        uint32_t nodeIndex = 0;
+        int offset = 0;
+        {
+            Float weightSum = 0;
+            Float clusterWeights[PBRT_LTC_MAX_CUT_SIZE];
+            for (uint32_t i = 0; i < cut.cutSize; ++i) {
+                const Float weight = std::max<Float>(cut.data[i].q, 0);
+                clusterWeights[i] = weight;
+                weightSum += weight;
+            }
+
+            // Compute rescaled $u'$ sample
+            Float up = u * weightSum;
+            if (up == weightSum)
+                up = NextFloatDown(up);
+
+            // Find offset in _weights_ corresponding to $u'$
+            Float sum = 0;
+            while (sum + clusterWeights[offset] <= up) {
+                sum += clusterWeights[offset++];
+                DCHECK_LT(offset, cut.cutSize);
+            }
+
+            pmf *= clusterWeights[offset] / weightSum;
+            u = std::min((up - sum) / clusterWeights[offset], OneMinusEpsilon);
+
+            nodeIndex = cut.data[offset].clusterIndex;
+        }
+
         const LightcutsTreeNode* node = &m_tree.nodes[nodeIndex];
 
         while (!node->isLeaf) {
@@ -159,10 +192,38 @@ class LTCLightSampler {
         Vector3f wo = ctx.wo;
         
         Float pmf = 1 - pInfinite;
-        int nodeIndex = 0;
 
         BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
         Frame shadingFrame(bsdf ? bsdf->shadingFrame : Frame::FromZ(ctx.ns));
+
+        Vector3f nv(n);
+        OctahedralVector octVec(nv);
+        uint32_t partitionIdx = GetPartitionIndex(p, octVec);
+        const OnlineLightTreeCut& cut = m_partitions.leaves[partitionIdx];
+        uint32_t nodeIndex = 0;
+        {
+            Float weightSum = 0;
+            uint32_t foundIndex = std::numeric_limits<uint32_t>::max();
+            for (uint32_t i = 0; i < cut.cutSize; ++i) {
+                const OnlineCutData& cutData(cut.data[i]);
+                const Float weight = cutData.q;
+                weightSum += weight;
+                
+                const uint32_t bitMask = (1 << cutData.depth) - 1;
+                const uint32_t masked = bitTrail & bitMask;
+
+                if (foundIndex >= cut.cutSize && masked == cutData.bitTrail) {
+                    foundIndex = i;
+                }
+            }
+
+            const OnlineCutData foundData = cut.data[foundIndex];
+            bitTrail >>= foundData.depth;
+            nodeIndex = foundData.clusterIndex;
+            const Float clusterWeight = std::max<Float>(foundData.q, 0);
+
+            pmf *= clusterWeight / weightSum;
+        }
 
         const LightcutsTreeNode *node = &m_tree.nodes[nodeIndex];
 
@@ -268,12 +329,12 @@ class LTCLightSampler {
 #endif
 
     uint32_t BuildPartitionTree(pstd::span<ShadingPoint>& items, int start, int end);
-
     PBRT_CPU_GPU
     void MakeInitialTreeCut(OnlineLightTreeCut& cut, const ShadingPoint& representant) const;
-
     PBRT_CPU_GPU
-    void ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& representant, uint32_t currentIteration) const;
+    void ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& representant, uint32_t currentIteration, Float learningRate) const;
+    PBRT_CPU_GPU
+    uint32_t GetPartitionIndex(const Point3f& p, const OctahedralVector& oct) const;
 
     // Learning To Cluster Light Sampler Private Members
     LightcutsTree m_tree;

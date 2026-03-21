@@ -151,26 +151,17 @@ void LTCLightSampler::MakeInitialTreeCut(OnlineLightTreeCut& cut, const ShadingP
     const LightcutsTreeNode* child0 = &m_tree.nodes[childIndex0];
     const LightcutsTreeNode* child1 = &m_tree.nodes[childIndex1];
 
-    // The simplest geometry proxy for outgoing direction (wo) is the normal of the surface.
-    // This decision was made to not initialize cuts on demand during kernel execution due to thread divergence.
-    // In this case, it is better to initialize all cuts at the same time by an approximate importance.
-    // The importance collected inside the kernels will receive diferent rays with different wo values.
-    // Approximating it with wo = n should be sufficient.
+    const uint32_t childIndex00 = childIndex0 + 1;
+    const uint32_t childIndex01 = child0->childOrLightIndex;
+    const uint32_t childIndex10 = childIndex0 + 1;
+    const uint32_t childIndex11 = child0->childOrLightIndex;
 
-    const Point3f p = representant.point;
-    const Vector3f wo(representant.dir);
-    const Normal3f n(wo);
-    const Frame shadingFrame = Frame::FromZ(n);
+    const LightcutsTreeNode* child00 = &m_tree.nodes[childIndex00];
+    const LightcutsTreeNode* child01 = &m_tree.nodes[childIndex01];
+    const LightcutsTreeNode* child10 = &m_tree.nodes[childIndex10];
+    const LightcutsTreeNode* child11 = &m_tree.nodes[childIndex11];
 
-    Float errBound0, errBound1;
-    if (!ComputeErrorBounds(errBound0, errBound1, p, wo, n, shadingFrame, nullptr, child0, child1, m_tree.allLightBounds, true)) {
-        return;
-    }
-
-    auto AddCluster = [&](uint32_t index, Float importance, uint32_t bitTrail, uint32_t depth) {
-        OnlineCutData& cluster(cut.data[cut.cutSize]);
-        ++cut.cutSize;
-
+    auto AddCluster = [](OnlineCutData& cluster, uint32_t index, Float importance, uint32_t bitTrail, uint32_t depth) {
         cluster.q = importance;
         cluster.variance = 0;
         cluster.secondMoment = 0;
@@ -181,55 +172,47 @@ void LTCLightSampler::MakeInitialTreeCut(OnlineLightTreeCut& cut, const ShadingP
         cluster.visitCount = 0;
     };
 
-    if (errBound0 != 0) {
-        const uint32_t childIndex00 = childIndex0 + 1;
-        const uint32_t childIndex01 = child0->childOrLightIndex;
-
-        const LightcutsTreeNode* child00 = &m_tree.nodes[childIndex00];
-        const LightcutsTreeNode* child01 = &m_tree.nodes[childIndex01];
-        Float errBound00, errBound01;
-        if (!ComputeErrorBounds(errBound00, errBound01, p, wo, n, shadingFrame, nullptr, child00, child01, m_tree.allLightBounds, true)) {
-            return;
-        }
-
-        if (errBound00 != 0) {
-            AddCluster(childIndex00, errBound00, 0, 2);
-        }
-
-        if (errBound01 != 0) {
-            AddCluster(childIndex01, errBound01, 1, 2);
-        }
-    }
-
-    if (errBound1 != 0) {
-        const uint32_t childIndex10 = childIndex0 + 1;
-        const uint32_t childIndex11 = child0->childOrLightIndex;
-
-        const LightcutsTreeNode* child10 = &m_tree.nodes[childIndex10];
-        const LightcutsTreeNode* child11 = &m_tree.nodes[childIndex11];
-        Float errBound10, errBound11;
-        if (!ComputeErrorBounds(errBound10, errBound11, p, wo, n, shadingFrame, nullptr, child10, child11, m_tree.allLightBounds, true)) {
-            return;
-        }
-
-        if (errBound10 != 0) {
-            AddCluster(childIndex10, errBound10, 2, 2);
-        }
-
-        if (errBound11 != 0) {
-            AddCluster(childIndex11, errBound11, 3, 2);
-        }
-    }
+    // light clustering is initialized based on the total power of each light cluster
+    AddCluster(cut.data[cut.cutSize], childIndex00, child00->compactLightBounds.PhiOrI(), 0, 2);
+    ++cut.cutSize;
+    AddCluster(cut.data[cut.cutSize], childIndex01, child01->compactLightBounds.PhiOrI(), 1, 2);
+    ++cut.cutSize;
+    AddCluster(cut.data[cut.cutSize], childIndex10, child10->compactLightBounds.PhiOrI(), 2, 2);
+    ++cut.cutSize;
+    AddCluster(cut.data[cut.cutSize], childIndex11, child11->compactLightBounds.PhiOrI(), 3, 2);
+    ++cut.cutSize;
 }
 
 uint32_t LTCLightSampler::BuildPartitionTree(pstd::span<ShadingPoint>& items, int start, int end) {
     DCHECK_LT(start, end);
 
+    // 1. Base Case: Leaf node
+    if (end - start <= 250) {
+        uint32_t leafIndex = static_cast<uint32_t>(m_partitions.leaves.size());
+        uint32_t nodeIndex = static_cast<uint32_t>(m_partitions.innerNodes.size());
+        m_partitions.innerNodes.emplace_back(PartitionTreeNode::MakeLeaf(leafIndex));
+        m_partitions.leaves.emplace_back();
+        
+        Point3f avgPosition(0, 0, 0);
+        DirectionCone cone;
+        for (size_t i = 0; i < items.size(); ++i) {
+            avgPosition += items[i].point;
+
+            Vector3f normal(items[i].dir);
+            Union(cone, DirectionCone(normal));
+        }
+        
+        avgPosition /= items.size();
+        m_partitions.representantPoints.emplace_back(avgPosition, OctahedralVector(cone.w));
+
+        return nodeIndex;
+    }
+
     int splitAxis = -1;
     int mid = -1;
     Float splitValue = std::numeric_limits<Float>::max();
     {
-        // 1. Find tight bounds for the current node
+        // 2. Find tight bounds for the current node
         Bounds3f spaceBounds;
         Bounds2i directionBounds;
         for (int i = start; i < end; ++i) {
@@ -240,7 +223,7 @@ uint32_t LTCLightSampler::BuildPartitionTree(pstd::span<ShadingPoint>& items, in
             directionBounds = Union(directionBounds, direction2d);
         }
 
-        // 2. Find the longest dimension for split for tight bounds
+        // 3. Find the longest dimension for split for tight bounds
         const Vector3f spaceDiagonal = spaceBounds.Diagonal();
         const Vector2i dirDiagonal = directionBounds.Diagonal();
 
@@ -254,7 +237,7 @@ uint32_t LTCLightSampler::BuildPartitionTree(pstd::span<ShadingPoint>& items, in
 
         splitAxis = std::distance(normalizedExtents, std::max_element(normalizedExtents, normalizedExtents + 5));
 
-        // 3. Find the median and split value in O(n) time
+        // 4. Find the median and split value in O(n) time
         mid = (start + end) / 2;
         const int dim = splitAxis;
 
@@ -269,40 +252,31 @@ uint32_t LTCLightSampler::BuildPartitionTree(pstd::span<ShadingPoint>& items, in
                 [](const ShadingPoint& a, const ShadingPoint& b) {
                     return a.dir.X() < b.dir.X();
                 });
-            splitValue = items[mid].dir.X();
+            const auto splitInt = items[mid].dir.X();
+            splitValue = splitInt;
+            if (splitInt == directionBounds.pMax.x || splitInt == directionBounds.pMin.x) {
+                splitValue = (directionBounds.pMax.x + directionBounds.pMin.x) * Float(0.5);
+                auto midIt = std::partition(items.begin() + start, items.end() + end,
+                    [=](const ShadingPoint& item) {
+                        return Float(item.dir.X()) <= splitValue;
+                    });
+                mid = std::distance(items.begin(), midIt);
+            }
         } else {
             std::nth_element(items.begin() + start, items.begin() + mid, items.end() + end,
                 [](const ShadingPoint& a, const ShadingPoint& b) {
                     return a.dir.Y() < b.dir.Y();
                 });
-            splitValue = items[mid].dir.Y();
-        }
-
-        // 4. Base Case: Leaf node
-        if (end - start <= 250) {
-            uint32_t leafIndex = static_cast<uint32_t>(m_partitions.leaves.size());
-            uint32_t nodeIndex = static_cast<uint32_t>(m_partitions.innerNodes.size());
-            m_partitions.representantPoints.emplace_back(items[mid]);
-            m_partitions.innerNodes.emplace_back(PartitionTreeNode::MakeLeaf(leafIndex));
-            m_partitions.leaves.emplace_back();
-            return nodeIndex;
-        }
-
-        const auto splitInt = static_cast<uint16_t>(splitValue);
-        if (dim == 3 && (splitInt == directionBounds.pMax.x || splitInt == directionBounds.pMin.x)) {
-            splitValue = (directionBounds.pMax.x + directionBounds.pMin.x) * Float(0.5);
-            auto midIt = std::partition(items.begin() + start, items.end() + end,
-                [=](const ShadingPoint& item) {
-                    return Float(item.dir.X()) <= splitValue;
-                });
-            mid = std::distance(items.begin(), midIt);
-        } else if (dim == 4 && (splitInt == directionBounds.pMax.y || splitInt == directionBounds.pMin.y)) {
-            splitValue = (directionBounds.pMax.y + directionBounds.pMin.y) * Float(0.5);
-            auto midIt = std::partition(items.begin() + start, items.end() + end,
-                [=](const ShadingPoint& item) {
-                    return Float(item.dir.Y()) <= splitValue;
-                });
-            mid = std::distance(items.begin(), midIt);
+            const auto splitInt = items[mid].dir.Y();
+            splitValue = splitInt;
+            if (splitInt == directionBounds.pMax.y || splitInt == directionBounds.pMin.y) {
+                splitValue = (directionBounds.pMax.y + directionBounds.pMin.y) * Float(0.5);
+                auto midIt = std::partition(items.begin() + start, items.end() + end,
+                    [=](const ShadingPoint& item) {
+                        return Float(item.dir.Y()) <= splitValue;
+                    });
+                mid = std::distance(items.begin(), midIt);
+            }
         }
     }
 
@@ -348,30 +322,32 @@ void LTCLightSampler::SetupScenePartitions(pstd::span<ShadingPoint> shadingPoint
 }
 
 PBRT_CPU_GPU
-void LTCLightSampler::Update(uint32_t currentIteration) {
-    
+void LTCLightSampler::Update(const uint32_t currentIteration) {
+    const Float t = currentIteration;
+    const Float learningRate = 1 / (m_beta * std::pow(t, m_omega));
+
+    for (size_t i = 0; i < m_partitions.leaves.size(); ++i) {
+        ApplyIterationUpdate(m_partitions.leaves[i], m_partitions.representantPoints[i], currentIteration, learningRate);
+    }
 }
 
 PBRT_CPU_GPU
-void LTCLightSampler::ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& representant, uint32_t currentIteration) const {
+void LTCLightSampler::ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& representant, const uint32_t currentIteration, const Float learningRate) const {
     // max cut reached
     if (cut.cutSize == PBRT_LTC_MAX_CUT_SIZE - 1) {
         return;
     }
 
     const uint32_t lastCutSize = cut.cutSize;
+    const Float OneMinusLearningRate = 1 - learningRate;
 
     // stop refining if no updates happen for a while
     if (currentIteration > cut.lastUpdateIteration &&
         static_cast<Float>(currentIteration - cut.lastUpdateIteration) / lastCutSize > m_gamma) {
         return;
     }
-
-    const Float t = currentIteration;
-    const Float learningRate = 1 / (m_beta * std::pow(t, m_omega));
-
+   
     Float sumVariance = 0;
-    
     for (uint32_t idx = 0; idx < lastCutSize; ++idx) {
         const uint32_t numSamples = cut.visitCountAccumulator[idx];
         if (numSamples < 1)
@@ -383,8 +359,8 @@ void LTCLightSampler::ApplyIterationUpdate(OnlineLightTreeCut& cut, const Shadin
 
         // update the global EMA statistics for first and second moments
         OnlineCutData& cluster(cut.data[idx]);
-        cluster.q = (1 - learningRate) * cluster.q + learningRate * batchMean;
-        cluster.secondMoment = (1 - learningRate) * cluster.secondMoment + learningRate * batchSqrMean;
+        cluster.q = OneMinusLearningRate * cluster.q + learningRate * batchMean;
+        cluster.secondMoment = OneMinusLearningRate * cluster.secondMoment + learningRate * batchSqrMean;
         
         // update variance from accumulated statistics
         // V = E[X^2] - E[X]^2
@@ -398,11 +374,19 @@ void LTCLightSampler::ApplyIterationUpdate(OnlineLightTreeCut& cut, const Shadin
     }
     sumVariance += MathEpsilon;
 
+    const Point3f p = representant.point;
+    const Vector3f wo(representant.dir);
+    const Normal3f n(wo);
+    const Frame shadingFrame = Frame::FromZ(n);
+
     constexpr Float initialCutSize = 4;
-    uint32_t newCutSize = 0;
-    //RNG rng()
-    for (uint32_t idx = 0; idx < lastCutSize; ++idx) {
-        OnlineCutData& cluster(cut.data[idx]);
+    constexpr uint32_t maxToSplit = PBRT_LTC_MAX_CUT_SIZE / 2;
+    uint32_t toSplit[maxToSplit];
+    uint32_t splitCount = 0;
+    uint32_t newCutSize = lastCutSize;
+
+    for (uint32_t i = 0; i < lastCutSize; ++i) {
+        OnlineCutData cluster(cut.data[i]);
         const LightcutsTreeNode* node = &m_tree.nodes[cluster.clusterIndex];
 
         if (node->isLeaf || newCutSize >= PBRT_LTC_MAX_CUT_SIZE - 1 || cluster.visitCount <= 1) {
@@ -414,9 +398,108 @@ void LTCLightSampler::ApplyIterationUpdate(OnlineLightTreeCut& cut, const Shadin
 
         const Float relativeSize = lastCutSize / initialCutSize;
         const Float splitProb = relativeVariance * visitTerm / (1 + relativeSize * std::exp(-cluster.variance));
+
+        const Float u = HashFloat(i, cluster.clusterIndex, currentIteration);
+        if (u <= splitProb) {
+            toSplit[splitCount] = i;
+            ++splitCount;
+            ++newCutSize;
+        }
+    }
+
+    for (uint32_t i = 0; i < splitCount; ++i) {
+        OnlineCutData& cluster(cut.data[toSplit[i]]);
+        const LightcutsTreeNode* node = &m_tree.nodes[cluster.clusterIndex];
+        const uint32_t childIndex0 = cluster.clusterIndex + 1;
+        const uint32_t childIndex1 = node->childOrLightIndex;
+        const LightcutsTreeNode* child0 = &m_tree.nodes[childIndex0];
+        const LightcutsTreeNode* child1 = &m_tree.nodes[childIndex1];
+
+        // Child initialization
+        Float lu0, lu1;
+        if (!ComputeErrorBounds(lu0, lu1, p, wo, n, shadingFrame, nullptr, child0, child1, m_tree.allLightBounds, true)) {
+            // the representative light could be a bad pick for the cluster of light
+            // fallback to the light intensities
+            lu0 = child0->compactLightBounds.PhiOrI();
+            lu1 = child1->compactLightBounds.PhiOrI();
+        } else {
+            lu0 = std::max(lu0, MathEpsilon);
+            lu1 = std::max(lu1, MathEpsilon);
+        }
+        
+        const Float luSum = lu0 + lu1;
+        const Float probLeft = std::min(lu0 / luSum, OneMinusEpsilon);
+        const Float probRight = 1 - probLeft;
+        
+        // Approximate visit counts based on the bounds
+        const Float nc0 = probLeft * cluster.visitCount;
+        const Float nc1 = probRight * cluster.visitCount;
+
+        // decay factors
+        const Float decay0 = std::pow(OneMinusLearningRate, nc0);
+        const Float decay1 = std::pow(OneMinusLearningRate, nc1);
+
+        {
+            OnlineCutData c0;
+            c0.clusterIndex = childIndex0;
+            c0.bitTrail = cluster.bitTrail;
+            c0.depth = cluster.depth + 1;
+            c0.visitCount = 0;
+            c0.variance = 0;
+            c0.secondMoment = 0;
+            c0.q = decay0 * lu0 + (1 - decay0) * cluster.q;
+            cluster = c0;
+        }
+        {
+            OnlineCutData c1;
+            c1.clusterIndex = childIndex1;
+            c1.bitTrail = cluster.bitTrail | (1 << cluster.depth);
+            c1.depth = cluster.depth + 1;
+            c1.visitCount = 0;
+            c1.variance = 0;
+            c1.secondMoment = 0;
+            c1.q = decay1 * lu1 + (1 - decay1) * cluster.q;
+            cut.data[cut.cutSize] = c1;
+            ++cut.cutSize;
+        }
+    }
+
+    if (splitCount > 0) {
+        cut.lastUpdateIteration = currentIteration;
     }
 }
 
+PBRT_CPU_GPU
+uint32_t LTCLightSampler::GetPartitionIndex(const Point3f& p, const OctahedralVector& oct) const {
+    if (m_partitions.innerNodes.empty()) {
+        return 0;
+    }
+
+    uint32_t nodeIndex = 0;
+    const PartitionTreeNode* node = &m_partitions.innerNodes[nodeIndex];
+
+    while (!node->IsLeaf()) {
+        // extract the value to test based on the split axis of the node
+        Float testValue;
+        const uint32_t splitAxis = node->splitAxis;
+        if (splitAxis < 3) {
+            testValue = p[splitAxis];
+        } else if (splitAxis == 3) {
+            testValue = static_cast<Float>(oct.X());
+        } else {
+            testValue = static_cast<Float>(oct.Y());
+        }
+
+        const uint32_t childIndices[2] = { nodeIndex + 1,
+                                           node->rightChildOrLeafIndex };
+
+        const int child = testValue > node->splitValue;
+        nodeIndex = childIndices[child];
+        node = &m_partitions.innerNodes[nodeIndex];
+    }
+
+    return node->rightChildOrLeafIndex;
+}
 
 std::string LTCLightSampler::ToString() const {
     return StringPrintf("[ LTCLightSampler nodes: %s ]", m_tree.nodes);
