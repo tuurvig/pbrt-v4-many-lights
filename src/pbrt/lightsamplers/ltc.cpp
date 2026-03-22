@@ -138,10 +138,19 @@ bool LTCLightSampler::buildLightTreeGPU(std::vector<LightcutsBuildContainer> &li
 #endif
 
 PartitionTree::PartitionTree(Allocator alloc) :
-    leaves(alloc), innerNodes(alloc) {}
+    alloc(alloc), leaves(alloc), innerNodes(alloc), representantPoints(alloc) {}
+
+PartitionTree::~PartitionTree() {
+    for (OnlineLightTreeCut *leaf : leaves)
+        alloc.delete_object(leaf);
+}
+
+void PartitionTree::EmplaceLeaf() {
+    leaves.emplace_back(alloc.new_object<OnlineLightTreeCut>());
+}
 
 PBRT_CPU_GPU
-void LTCLightSampler::MakeInitialTreeCut(OnlineLightTreeCut& cut, const ShadingPoint& representant) const {
+void LTCLightSampler::MakeInitialTreeCut(OnlineLightTreeCut& cut) const {
     cut.cutSize = 0;
 
     const LightcutsTreeNode* root = &m_tree.nodes[0];
@@ -185,33 +194,38 @@ void LTCLightSampler::MakeInitialTreeCut(OnlineLightTreeCut& cut, const ShadingP
 
 uint32_t LTCLightSampler::BuildPartitionTree(pstd::span<ShadingPoint>& items, int start, int end) {
     DCHECK_LT(start, end);
-
-    // 1. Base Case: Leaf node
-    if (end - start <= 250) {
-        uint32_t leafIndex = static_cast<uint32_t>(m_partitions.leaves.size());
-        uint32_t nodeIndex = static_cast<uint32_t>(m_partitions.innerNodes.size());
-        m_partitions.innerNodes.emplace_back(PartitionTreeNode::MakeLeaf(leafIndex));
-        m_partitions.leaves.emplace_back();
-        
-        Point3f avgPosition(0, 0, 0);
-        DirectionCone cone;
-        for (size_t i = 0; i < items.size(); ++i) {
-            avgPosition += items[i].point;
-
-            Vector3f normal(items[i].dir);
-            Union(cone, DirectionCone(normal));
-        }
-        
-        avgPosition /= items.size();
-        m_partitions.representantPoints.emplace_back(avgPosition, OctahedralVector(cone.w));
-
-        return nodeIndex;
-    }
-
+    
     int splitAxis = -1;
-    int mid = -1;
+    int splitIndex = -1;
     Float splitValue = std::numeric_limits<Float>::max();
     {
+        const int partitionSize = end - start;
+        auto emitLeaf = [&]() -> uint32_t {
+            uint32_t leafIndex = static_cast<uint32_t>(m_partitions.leaves.size());
+            uint32_t nodeIndex = static_cast<uint32_t>(m_partitions.innerNodes.size());
+            m_partitions.innerNodes.emplace_back(PartitionTreeNode::MakeLeaf(leafIndex));
+            m_partitions.EmplaceLeaf();
+
+            Point3f avgPosition(0, 0, 0);
+            DirectionCone cone;
+            for (int i = start; i < end; ++i) {
+                avgPosition += items[i].point;
+
+                Vector3f normal(items[i].dir);
+                cone = Union(cone, DirectionCone(normal));
+            }
+            
+            avgPosition /= partitionSize;
+            m_partitions.representantPoints.emplace_back(avgPosition, Normal3f(cone.w));
+
+            return nodeIndex;
+        };
+
+        // 1. Base Case: Leaf node
+        if (partitionSize <= 250) {
+            return emitLeaf();
+        }
+
         // 2. Find tight bounds for the current node
         Bounds3f spaceBounds;
         Bounds2i directionBounds;
@@ -219,7 +233,7 @@ uint32_t LTCLightSampler::BuildPartitionTree(pstd::span<ShadingPoint>& items, in
             const ShadingPoint& item(items[i]);
             spaceBounds = Union(spaceBounds, item.point);
 
-            Point2i direction2d(item.dir.X(), item.dir.Y());
+            Point2i direction2d(item.dir[0], item.dir[1]);
             directionBounds = Union(directionBounds, direction2d);
         }
 
@@ -227,7 +241,7 @@ uint32_t LTCLightSampler::BuildPartitionTree(pstd::span<ShadingPoint>& items, in
         const Vector3f spaceDiagonal = spaceBounds.Diagonal();
         const Vector2i dirDiagonal = directionBounds.Diagonal();
 
-        Float normalizedExtents[5] = {
+        const Float normalizedExtents[5] = {
             spaceDiagonal.x / m_partitions.sceneExtent.x,
             spaceDiagonal.y / m_partitions.sceneExtent.y,
             spaceDiagonal.z / m_partitions.sceneExtent.z,
@@ -235,59 +249,96 @@ uint32_t LTCLightSampler::BuildPartitionTree(pstd::span<ShadingPoint>& items, in
             dirDiagonal.y / 65535.f,
         };
 
-        splitAxis = std::distance(normalizedExtents, std::max_element(normalizedExtents, normalizedExtents + 5));
+        const Float* maxExtent = std::max_element(normalizedExtents, normalizedExtents + 5);
+        if (*maxExtent <= MathEpsilon) {
+            // degenerate bounds
+            return emitLeaf();
+        }
+
+        splitAxis = static_cast<int>(maxExtent - normalizedExtents);
 
         // 4. Find the median and split value in O(n) time
-        mid = (start + end) / 2;
-        const int dim = splitAxis;
+        auto findPartitionSplit = [&items, start, end](Float& splitValue, Float minBound, Float maxBound, auto getVal) -> int {
+            int medianIndex = (start + end) / 2;
+            auto startIt = items.begin() + start;
+            auto endIt = items.begin() + end;
+            auto midIt = items.begin() + medianIndex;
+            
+            std::nth_element(startIt, midIt, endIt, [&getVal](const ShadingPoint& a, const ShadingPoint& b){
+                return getVal(a) < getVal(b);
+            });
 
-        if (dim < 3) {
-            std::nth_element(items.begin() + start, items.begin() + mid, items.end() + end,
-                [dim](const ShadingPoint& a, const ShadingPoint& b) {
-                    return a.point[dim] < b.point[dim];
-                });
-            splitValue = items[mid].point[dim];
-        } else if (dim == 3){
-            std::nth_element(items.begin() + start, items.begin() + mid, items.end() + end,
-                [](const ShadingPoint& a, const ShadingPoint& b) {
-                    return a.dir.X() < b.dir.X();
-                });
-            const auto splitInt = items[mid].dir.X();
-            splitValue = splitInt;
-            if (splitInt == directionBounds.pMax.x || splitInt == directionBounds.pMin.x) {
-                splitValue = (directionBounds.pMax.x + directionBounds.pMin.x) * Float(0.5);
-                auto midIt = std::partition(items.begin() + start, items.end() + end,
-                    [=](const ShadingPoint& item) {
-                        return Float(item.dir.X()) <= splitValue;
-                    });
-                mid = std::distance(items.begin(), midIt);
+            const Float median = getVal(*midIt);
+            splitValue = median;
+            
+            // 3-way partition
+            auto leftEnd = std::partition(startIt, endIt, [&getVal, median](const ShadingPoint& x){
+                return getVal(x) < median;
+            });
+            auto rightBegin = std::partition(leftEnd, endIt, [&getVal, median](const ShadingPoint& x){
+                return getVal(x) == median;
+            });
+
+            const bool isMedianUnique = std::distance(leftEnd, rightBegin) == 1;
+            if (isMedianUnique) {
+                return std::distance(items.begin(), rightBegin);
             }
+
+            const size_t strictlyLess = std::distance(startIt, leftEnd);
+            const size_t strictlyMore = std::distance(rightBegin, endIt);
+            
+            auto finalMid = leftEnd;
+            if (strictlyLess >= strictlyMore) {
+                // median duplicates went right.
+                // left side has values < median. Right has >= median.
+                // Traversal always uses <= for the left child
+                // Must find the highest value on the left for the splitValue
+                auto maxLeftIt = std::max_element(startIt, leftEnd, [&getVal](const ShadingPoint& a, const ShadingPoint& b){
+                    return getVal(a) < getVal(b);
+                });
+
+                const Float maxLeftVal = getVal(*maxLeftIt);
+                // try to split the empty space
+                const Float gapMidPoint = (maxLeftVal + median) * Float(0.5);
+                splitValue = gapMidPoint >= median ? maxLeftVal : gapMidPoint;
+            } else {
+                finalMid = rightBegin;
+                // median duplicates went left
+                // finding the split value in the gap space between median and minValueRight
+                auto minRightIt = std::min_element(rightBegin, endIt, [&getVal](const ShadingPoint& a, const ShadingPoint& b){
+                    return getVal(a) < getVal(b);
+                });
+
+                const Float minRightVal = getVal(*minRightIt);
+                // try to split the empty space
+                const Float gapMidPoint = (median + minRightVal) * Float(0.5);
+                splitValue = gapMidPoint >= minRightVal ? median : gapMidPoint;
+            }
+
+            return std::distance(items.begin(), finalMid);
+        };
+
+        if (splitAxis < 3) {
+            int dim = splitAxis;
+            splitIndex = findPartitionSplit(splitValue, spaceBounds.pMin[dim], spaceBounds.pMax[dim],
+                [dim](const ShadingPoint& x) { return x.point[dim]; });
         } else {
-            std::nth_element(items.begin() + start, items.begin() + mid, items.end() + end,
-                [](const ShadingPoint& a, const ShadingPoint& b) {
-                    return a.dir.Y() < b.dir.Y();
-                });
-            const auto splitInt = items[mid].dir.Y();
-            splitValue = splitInt;
-            if (splitInt == directionBounds.pMax.y || splitInt == directionBounds.pMin.y) {
-                splitValue = (directionBounds.pMax.y + directionBounds.pMin.y) * Float(0.5);
-                auto midIt = std::partition(items.begin() + start, items.end() + end,
-                    [=](const ShadingPoint& item) {
-                        return Float(item.dir.Y()) <= splitValue;
-                    });
-                mid = std::distance(items.begin(), midIt);
-            }
+            int dim = splitAxis - 3;
+            splitIndex = findPartitionSplit(splitValue, directionBounds.pMin[dim], directionBounds.pMax[dim],
+                [dim](const ShadingPoint& x) { return x.dir[dim]; });
         }
     }
 
     // 5. Recursion
+    DCHECK_GT(splitIndex, start);
+    DCHECK_LT(splitIndex, end);
     const uint32_t reservationIndex = m_partitions.innerNodes.size();
     m_partitions.innerNodes.emplace_back();
 
-    const uint32_t leftChildIdx = BuildPartitionTree(items, start, mid);
+    const uint32_t leftChildIdx = BuildPartitionTree(items, start, splitIndex);
     DCHECK_EQ(leftChildIdx, reservationIndex + 1);
 
-    const uint32_t rightChildIdx = BuildPartitionTree(items, mid, end);
+    const uint32_t rightChildIdx = BuildPartitionTree(items, splitIndex, end);
     
     m_partitions.innerNodes[reservationIndex] = PartitionTreeNode::MakeInterior(splitAxis, splitValue, rightChildIdx);
     return reservationIndex;
@@ -298,7 +349,7 @@ void LTCLightSampler::SetupScenePartitions(pstd::span<ShadingPoint> shadingPoint
     BuildPartitionTree(shadingPoints, 0, shadingPoints.size());
     
     for (size_t i = 0; i < m_partitions.representantPoints.size(); ++i) {
-        MakeInitialTreeCut(m_partitions.leaves[i], m_partitions.representantPoints[i]);
+        MakeInitialTreeCut(*m_partitions.leaves[i]);
     }
 //    if (Options->useGPU) {
 //#ifdef PBRT_BUILD_GPU_RENDERER
@@ -317,7 +368,8 @@ void LTCLightSampler::SetupScenePartitions(pstd::span<ShadingPoint> shadingPoint
 //    }
 
     LTCScenePartitionBytes += m_partitions.innerNodes.size() * sizeof(PartitionTreeNode) + 
-                              m_partitions.leaves.size() * sizeof(OnlineLightTreeCut) + 
+                              m_partitions.leaves.size() * sizeof(OnlineLightTreeCut) +
+                              m_partitions.leaves.size() * sizeof(OnlineLightTreeCut*) +
                               m_partitions.representantPoints.size() * sizeof(ShadingPoint);
 }
 
@@ -327,7 +379,7 @@ void LTCLightSampler::Update(const uint32_t currentIteration) {
     const Float learningRate = 1 / (m_beta * std::pow(t, m_omega));
 
     for (size_t i = 0; i < m_partitions.leaves.size(); ++i) {
-        ApplyIterationUpdate(m_partitions.leaves[i], m_partitions.representantPoints[i], currentIteration, learningRate);
+        ApplyIterationUpdate(*m_partitions.leaves[i], m_partitions.representantPoints[i], currentIteration, learningRate);
     }
 }
 
@@ -470,7 +522,7 @@ void LTCLightSampler::ApplyIterationUpdate(OnlineLightTreeCut& cut, const Shadin
 }
 
 PBRT_CPU_GPU
-uint32_t LTCLightSampler::GetPartitionIndex(const Point3f& p, const OctahedralVector& oct) const {
+uint32_t LTCLightSampler::GetPartitionIndex(const Point3f& p, const UniformDiskVector& vec) const {
     if (m_partitions.innerNodes.empty()) {
         return 0;
     }
@@ -484,15 +536,14 @@ uint32_t LTCLightSampler::GetPartitionIndex(const Point3f& p, const OctahedralVe
         const uint32_t splitAxis = node->splitAxis;
         if (splitAxis < 3) {
             testValue = p[splitAxis];
-        } else if (splitAxis == 3) {
-            testValue = static_cast<Float>(oct.X());
         } else {
-            testValue = static_cast<Float>(oct.Y());
+            testValue = static_cast<Float>(vec[splitAxis - 3]);
         }
 
         const uint32_t childIndices[2] = { nodeIndex + 1,
                                            node->rightChildOrLeafIndex };
 
+        // left child == 0 when testValue <= splitValue
         const int child = testValue > node->splitValue;
         nodeIndex = childIndices[child];
         node = &m_partitions.innerNodes[nodeIndex];

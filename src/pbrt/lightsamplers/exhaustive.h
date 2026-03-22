@@ -58,8 +58,6 @@ class ExhaustiveLightSampler {
             return;
 
         Float lightPDF = sampledLight->p * ls->pdf;
-        ls->L *= sampledLight->scale;
-        
         Float scatterPDF = 0;
         SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
 

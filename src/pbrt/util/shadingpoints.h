@@ -13,34 +13,15 @@
 #include <pbrt/util/stats.h>
 #include <atomic>
 
-#ifdef __CUDACC__
-#ifdef PBRT_IS_WINDOWS
-#if (__CUDA_ARCH__ < 700)
-#ifndef PBRT_USE_LEGACY_CUDA_ATOMICS
-#define PBRT_USE_LEGACY_CUDA_ATOMICS
-#endif
-#endif
-#else
-#if (__CUDA_ARCH__ < 600)
-#ifndef PBRT_USE_LEGACY_CUDA_ATOMICS
-#define PBRT_USE_LEGACY_CUDA_ATOMICS
-#endif
-#endif
-#endif  // PBRT_IS_WINDOWS
-
-#ifndef PBRT_USE_LEGACY_CUDA_ATOMICS
-#include <cuda/atomic>
-#endif
-#endif  // __CUDACC__
-
 namespace pbrt {
 
 struct alignas(16) ShadingPoint {
+    PBRT_CPU_GPU
     ShadingPoint(const Point3f& p, const Normal3f& n) :
         point(p), dir(Vector3f(n)) {}
 
     Point3f point;
-    OctahedralVector dir;
+    UniformDiskVector dir;
 };
 
 STAT_MEMORY_COUNTER("Memory/Shading Point Collector", shadingPointCollectorBytes);

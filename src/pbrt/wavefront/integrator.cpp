@@ -185,7 +185,7 @@ WavefrontPathIntegrator::WavefrontPathIntegrator(
     if (allLights.size() == 1)
         lightSamplerName = "uniform";
     lightSampler = LightSampler::Create(requiredShadowRays, lightSamplerName, allLights, Options->discretizeAreaLights > 0, alloc);
-    bool collectShadingPoints = lightSampler.Is<LTCLightSampler>();
+    bool isOnlineLightSampler = lightSampler.Is<LTCLightSampler>();
 
     useBSDFDependentHitAreaQueue =
         lightSampler.Is<LightcutsLightSampler>() || lightSampler.Is<SLCLightSampler>() ||
@@ -307,7 +307,7 @@ WavefrontPathIntegrator::WavefrontPathIntegrator(
     }
 #endif  // PBRT_BUILD_GPU_RENDERER
 
-    if (collectShadingPoints) {
+    if (isOnlineLightSampler) {
         firstIterationShadingPoints =
             alloc.new_object<ShadingPointCollector>(pixelBounds, maxDepth, alloc);
     }

@@ -124,7 +124,7 @@ class BVHLightSampler {
         int lightIndex = std::min<int>(u * m_lights.size(), m_lights.size() - 1);
         Light light = m_lights[lightIndex];
         LightPMF lpmf = PMF(light);
-        return SampledLight{light, lpmf.pmf, lpmf.scale};
+        return SampledLight{light, lpmf.pmf};
     }
 
     PBRT_CPU_GPU
@@ -157,8 +157,6 @@ class BVHLightSampler {
             return;
 
         Float lightPDF = sampledLight->p * ls->pdf;
-        ls->L *= sampledLight->scale;
-        
         Float scatterPDF = 0;
         SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
 

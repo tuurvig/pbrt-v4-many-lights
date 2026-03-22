@@ -41,6 +41,11 @@
 
 #ifndef PBRT_USE_LEGACY_CUDA_ATOMICS
 #include <cuda/atomic>
+
+// CUDA headers may pull in Windows macros that collide with pbrt::RGB.
+#ifdef RGB
+#undef RGB
+#endif  // RGB
 #endif
 #endif  // __CUDACC__
 

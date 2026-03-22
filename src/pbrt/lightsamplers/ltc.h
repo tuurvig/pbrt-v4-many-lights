@@ -33,6 +33,7 @@ struct alignas(8) PartitionTreeNode {
         return PartitionTreeNode{splitValue, {splitAxis, childIdx}};
     }
 
+    PBRT_CPU_GPU
     bool IsLeaf() const { return splitAxis == 7; }
 
     std::string ToString() const;
@@ -60,6 +61,9 @@ struct alignas(32) OnlineCutData {
 #define PBRT_LTC_MAX_CUT_SIZE 64
 
 struct OnlineLightTreeCut {
+    PBRT_CPU_GPU
+    OnlineLightTreeCut() : cutSize(0), lastUpdateIteration(0) {}
+
     OnlineCutData data[PBRT_LTC_MAX_CUT_SIZE];
     AtomicFloat sumAccumulator[PBRT_LTC_MAX_CUT_SIZE];
     AtomicFloat sumSquaredAccumulator[PBRT_LTC_MAX_CUT_SIZE];
@@ -69,8 +73,18 @@ struct OnlineLightTreeCut {
 };
 
 struct PartitionTree {
-    PartitionTree(Allocator alloc);
-    pstd::vector<OnlineLightTreeCut> leaves;
+    explicit PartitionTree(Allocator alloc);
+    ~PartitionTree();
+
+    PBRT_CPU_GPU
+    OnlineLightTreeCut &Leaf(size_t idx) { return *leaves[idx]; }
+    //PBRT_CPU_GPU
+    //const OnlineLightTreeCut &Leaf(size_t idx) const { return *leaves[idx]; }
+
+    void EmplaceLeaf();
+
+    Allocator alloc;
+    pstd::vector<OnlineLightTreeCut*> leaves;
     pstd::vector<PartitionTreeNode> innerNodes;
     pstd::vector<ShadingPoint> representantPoints;
     Vector3f sceneExtent;
@@ -105,14 +119,18 @@ class LTCLightSampler {
         BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
         Frame shadingFrame(bsdf ? bsdf->shadingFrame : Frame::FromZ(ctx.ns));
 
-        Vector3f nv(n);
-        OctahedralVector octVec(nv);
-        uint32_t partitionIdx = GetPartitionIndex(p, octVec);
-        const OnlineLightTreeCut& cut = m_partitions.leaves[partitionIdx];
-        
         uint32_t nodeIndex = 0;
-        int offset = 0;
-        {
+        uint32_t lightSamplerHint = std::numeric_limits<uint32_t>::max();
+        constexpr uint32_t clusterIndexPowerTwoCapacity = 8;
+        if (!m_partitions.leaves.empty() && n != Normal3f(0, 0, 0)) {
+            Vector3f nv(n);
+            UniformDiskVector diskVector(nv);
+            uint32_t partitionIdx = GetPartitionIndex(p, diskVector);
+            lightSamplerHint = partitionIdx << clusterIndexPowerTwoCapacity;
+
+            const OnlineLightTreeCut &cut(*m_partitions.leaves[partitionIdx]);
+
+            uint32_t offset = 0;
             Float weightSum = 0;
             Float clusterWeights[PBRT_LTC_MAX_CUT_SIZE];
             for (uint32_t i = 0; i < cut.cutSize; ++i) {
@@ -129,16 +147,17 @@ class LTCLightSampler {
             // Find offset in _weights_ corresponding to $u'$
             Float sum = 0;
             while (sum + clusterWeights[offset] <= up) {
-                sum += clusterWeights[offset++];
+                sum += clusterWeights[offset];
+                ++offset;
                 DCHECK_LT(offset, cut.cutSize);
             }
 
             pmf *= clusterWeights[offset] / weightSum;
             u = std::min((up - sum) / clusterWeights[offset], OneMinusEpsilon);
-
+            lightSamplerHint |= offset;
             nodeIndex = cut.data[offset].clusterIndex;
         }
-
+        
         const LightcutsTreeNode* node = &m_tree.nodes[nodeIndex];
 
         while (!node->isLeaf) {
@@ -172,7 +191,7 @@ class LTCLightSampler {
             if (u >= 1) u -= 1;
         }
 
-        return SampledLight(m_tree.lights[node->childOrLightIndex], pmf);
+        return SampledLight(m_tree.lights[node->childOrLightIndex], pmf, lightSamplerHint);
     }
 
     PBRT_CPU_GPU PBRT_NOINLINE
@@ -195,13 +214,14 @@ class LTCLightSampler {
 
         BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
         Frame shadingFrame(bsdf ? bsdf->shadingFrame : Frame::FromZ(ctx.ns));
-
-        Vector3f nv(n);
-        OctahedralVector octVec(nv);
-        uint32_t partitionIdx = GetPartitionIndex(p, octVec);
-        const OnlineLightTreeCut& cut = m_partitions.leaves[partitionIdx];
+        
         uint32_t nodeIndex = 0;
-        {
+        if (!m_partitions.leaves.empty() && n != Normal3f(0, 0, 0)) {
+            Vector3f nv(n);
+            UniformDiskVector diskVector(nv);
+            uint32_t partitionIdx = GetPartitionIndex(p, diskVector);
+            const OnlineLightTreeCut &cut(*m_partitions.leaves[partitionIdx]);
+
             Float weightSum = 0;
             uint32_t foundIndex = std::numeric_limits<uint32_t>::max();
             for (uint32_t i = 0; i < cut.cutSize; ++i) {
@@ -310,18 +330,36 @@ class LTCLightSampler {
             return;
 
         Float lightPDF = sampledLight->p * ls->pdf;
-        ls->L *= sampledLight->scale;
-        
         Float scatterPDF = 0;
         SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
 
-        samples.Add(SampledLd(f_hat * ls->L, light, ls->pLight, lightPDF, scatterPDF));
+        samples.Add(SampledLd(f_hat * ls->L, light, ls->pLight, lightPDF, scatterPDF, sampledLight->hint));
     }
 
     std::string ToString() const;
 
     PBRT_CPU_GPU
     void Update(uint32_t currentIteration);
+
+    PBRT_CPU_GPU
+    void AccumulateContribution(const SampledSpectrum& contribution, const uint32_t lightSamplerHint) const {
+        if (lightSamplerHint >= m_partitions.leaves.size() || lightSamplerHint != std::numeric_limits<uint32_t>::max()) {
+            return;
+        }
+
+        constexpr uint32_t clusterIndexPowerTwoCapacity = 8;
+        constexpr uint32_t clusterIndexMask = (1 << clusterIndexPowerTwoCapacity) - 1;
+
+        const uint32_t clusterIndex = lightSamplerHint & clusterIndexMask;
+        const uint32_t partitionIndex = lightSamplerHint >> clusterIndexPowerTwoCapacity;
+        OnlineLightTreeCut& cut(*m_partitions.leaves[partitionIndex]);
+        const Float sample = contribution.Average();
+
+        cut.sumAccumulator[clusterIndex].Add(sample);
+        cut.sumSquaredAccumulator[clusterIndex].Add(Sqr(sample));
+        cut.visitCountAccumulator[clusterIndex].Add(1);
+    }
+
   private:
     // Learning To Cluster Light Sampler Private Methods
 #ifdef PBRT_BUILD_GPU_RENDERER
@@ -330,11 +368,11 @@ class LTCLightSampler {
 
     uint32_t BuildPartitionTree(pstd::span<ShadingPoint>& items, int start, int end);
     PBRT_CPU_GPU
-    void MakeInitialTreeCut(OnlineLightTreeCut& cut, const ShadingPoint& representant) const;
+    void MakeInitialTreeCut(OnlineLightTreeCut& cut) const;
     PBRT_CPU_GPU
     void ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& representant, uint32_t currentIteration, Float learningRate) const;
     PBRT_CPU_GPU
-    uint32_t GetPartitionIndex(const Point3f& p, const OctahedralVector& oct) const;
+    uint32_t GetPartitionIndex(const Point3f& p, const UniformDiskVector& oct) const;
 
     // Learning To Cluster Light Sampler Private Members
     LightcutsTree m_tree;

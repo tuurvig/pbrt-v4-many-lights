@@ -247,7 +247,7 @@ class PathIntegrator : public RayIntegrator {
     ERequiresShadowRays requiredShadowRays;
     LightSampler lightSampler;
     bool regularize;
-    bool collectShadingPoints;
+    bool isOnlineLightSampler;
     std::unique_ptr<ShadingPointCollector> firstIterationShadingPoints;
 };
 
@@ -285,8 +285,8 @@ class VolPathIntegrator : public RayIntegrator {
           maxDepth(maxDepth), requiredShadowRays(E_DEFAULT_SHADOW_RAYS),
           lightSampler(LightSampler::Create(requiredShadowRays, lightSampleStrategy, lights, Options->discretizeAreaLights > 0, Allocator())),
           regularize(regularize),
-          collectShadingPoints(false) {
-        collectShadingPoints = lightSampler.Is<LTCLightSampler>();
+          isOnlineLightSampler(false) {
+        isOnlineLightSampler = lightSampler.Is<LTCLightSampler>();
     }
 
     SampledSpectrum Li(RayDifferential ray, uint32_t seed, SampledWavelengths &lambda, Sampler sampler,
@@ -317,7 +317,7 @@ class VolPathIntegrator : public RayIntegrator {
     ERequiresShadowRays requiredShadowRays;
     LightSampler lightSampler;
     bool regularize;
-    bool collectShadingPoints;
+    bool isOnlineLightSampler;
     std::unique_ptr<ShadingPointCollector> firstIterationShadingPoints;
 };
 
