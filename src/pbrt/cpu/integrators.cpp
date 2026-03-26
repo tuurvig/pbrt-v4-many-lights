@@ -1523,7 +1523,7 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, uint32_t se
         }
         
         resultLd += finalLd;
-        if (isOnlineLightSampler) {
+        if (isOnlineLightSampler && !firstIterationShadingPoints) {
             const LTCLightSampler* ltc = lightSampler.CastOrNullptr<LTCLightSampler>();
             if (ltc) {
                 ltc->AccumulateContribution(finalLd, sLd.lightSamplerHint);

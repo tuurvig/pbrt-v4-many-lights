@@ -37,7 +37,7 @@ struct SampledLd {
     SampledLd() = default;
 
     PBRT_CPU_GPU SampledLd(const SampledSpectrum& s, Light light, const Interaction& intr, Float lightPDF, Float scatterPDF, uint32_t lightSamplerHint = std::numeric_limits<uint32_t>::max()) :
-        Ld(s), pLight(intr.pi), nLight(intr.n), lightPDF(lightPDF), scatterPDF(scatterPDF), light(light), lightSamplerHint()  {}
+        Ld(s), pLight(intr.pi), nLight(intr.n), lightPDF(lightPDF), scatterPDF(scatterPDF), light(light), lightSamplerHint(lightSamplerHint)  {}
 
     PBRT_CPU_GPU
     Ray SpawnShadowRay(const Interaction &from) const {
