@@ -180,7 +180,7 @@ uint32_t LTCLightSampler::BuildPartitionTree(pstd::span<ShadingPoint>& items, in
         };
 
         // 1. Base Case: Leaf node
-        if (partitionSize <= 250) {
+        if (partitionSize <= 150) {
             return emitLeaf();
         }
 
@@ -398,6 +398,18 @@ void LTCLightSampler::SetupScenePartitions(pstd::span<ShadingPoint> shadingPoint
 PBRT_CPU_GPU
 static bool ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& representant, const LightcutsTree* tree, const uint32_t currentIteration, uint32_t cutIndex, const Float learningRate) {
     const uint32_t lastCutSize = cut.cutSize;
+
+    // Count actual pixel samples influencing this cut
+    uint32_t totalCutSamples = 0;
+    for (uint32_t idx = 0; idx < lastCutSize; ++idx) {
+        totalCutSamples += cut.visitCountAccumulator[idx];
+    }
+
+    // initial sampling budget for learning
+    constexpr Float n0 = 4.0f;
+    constexpr Float initialCutSize = 4.0f;
+    const Float nt = std::max(lastCutSize / initialCutSize, Float(2)) * n0;
+
     Float sumVariance = 0;
     for (uint32_t idx = 0; idx < lastCutSize; ++idx) {
         const uint32_t numSamples = cut.visitCountAccumulator[idx];
@@ -414,7 +426,10 @@ static bool ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& re
             const Float varianceDelta = meanDelta * (batchMean - cluster.q) - cluster.variance;
             cluster.variance += learningRate * varianceDelta;
 
-            cluster.visitCount += numSamples;
+            const Float visitedRatio = static_cast<Float>(numSamples) / totalCutSamples;
+            const Float scaledVisits = visitedRatio * nt;
+
+            cluster.visitCount += scaledVisits;
 
             cut.sumAccumulator[idx] = 0;
             cut.visitCountAccumulator[idx] = 0;
@@ -428,7 +443,6 @@ static bool ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& re
     const Normal3f n(wo);
     const Frame shadingFrame = Frame::FromZ(n);
 
-    constexpr Float initialCutSize = 4;
     constexpr uint32_t maxToSplit = PBRT_LTC_MAX_CUT_SIZE / 2;
     uint32_t toSplit[maxToSplit];
     uint32_t splitCount = 0;
@@ -526,6 +540,29 @@ static bool ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& re
 void LTCLightSampler::Update(const uint32_t currentIteration) {
     const Float t = currentIteration;
     const Float learningRate = 1 / (m_beta * std::pow(t, m_omega));
+
+    //for (int idx = 0; idx < m_partitions.leaves.size(); ++idx) {
+    //    OnlineLightTreeCut& cut(*m_partitions.leaves[idx]);
+    //
+    //    // max cut reached
+    //    if (cut.cutSize == PBRT_LTC_MAX_CUT_SIZE - 1) {
+    //        return;
+    //    }
+    //    
+    //    const uint32_t lastCutSize = cut.cutSize;
+    //    
+    //    // stop refining if no updates happen for a while
+    //    if (currentIteration > cut.lastUpdateIteration &&
+    //        static_cast<Float>(currentIteration - cut.lastUpdateIteration) / lastCutSize > m_gamma) {
+    //        return;
+    //    }
+    //
+    //    if (ApplyIterationUpdate(cut, m_partitions.representantPoints[idx], &m_tree, currentIteration, idx, learningRate)) {
+    //        cut.lastUpdateIteration = currentIteration;
+    //    }
+    //}
+    //
+    //return;
 
     if (Options->useGPU) {
 #ifdef PBRT_BUILD_GPU_RENDERER

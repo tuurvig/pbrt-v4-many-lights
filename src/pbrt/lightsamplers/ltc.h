@@ -52,13 +52,13 @@ struct alignas(8) PartitionTreeNode {
 struct alignas(32) OnlineCutData {
     Float q; // estimated importance
     Float variance; // variance estimate
+    Float visitCount;
     Float _padding0;
-    Float _padding1;
 
     uint32_t clusterIndex;
     uint32_t bitTrail;
     uint32_t depth;
-    uint32_t visitCount;
+    uint32_t _padding1;
 };
 
 #define PBRT_LTC_MAX_CUT_SIZE 64

@@ -185,7 +185,7 @@ WavefrontPathIntegrator::WavefrontPathIntegrator(
     if (allLights.size() == 1)
         lightSamplerName = "uniform";
     lightSampler = LightSampler::Create(requiredShadowRays, lightSamplerName, allLights, Options->discretizeAreaLights > 0, alloc);
-    bool isOnlineLightSampler = lightSampler.Is<LTCLightSampler>();
+    isOnlineLightSampler = lightSampler.Is<LTCLightSampler>();
 
     useBSDFDependentHitAreaQueue =
         lightSampler.Is<LightcutsLightSampler>() || lightSampler.Is<SLCLightSampler>() ||
@@ -306,14 +306,48 @@ WavefrontPathIntegrator::WavefrontPathIntegrator(
         pathIntegratorBytes += endSize - startSize;
     }
 #endif  // PBRT_BUILD_GPU_RENDERER
-
-    if (isOnlineLightSampler) {
-        firstIterationShadingPoints =
-            alloc.new_object<ShadingPointCollector>(pixelBounds, maxDepth, alloc);
-    }
 }
 
 // WavefrontPathIntegrator Method Definitions
+void WavefrontPathIntegrator::OnRenderWaveStart(int waveIndex, const Bounds2i &pixelBounds) {
+    if (!isOnlineLightSampler || waveIndex != 0)
+        return;
+
+    Allocator alloc(memoryResource);
+    firstIterationShadingPoints =
+        alloc.new_object<ShadingPointCollector>(pixelBounds, maxDepth, alloc);
+}
+
+void WavefrontPathIntegrator::OnRenderWaveDone(int waveIndex) {
+    if (waveIndex != 0 && isOnlineLightSampler) {
+        LTCLightSampler *ltc = lightSampler.CastOrNullptr<LTCLightSampler>();
+        if (ltc) {
+            ltc->Update(waveIndex);
+        }
+        return;
+    }
+
+    if (waveIndex == 0 && firstIterationShadingPoints) {
+#ifdef PBRT_BUILD_GPU_RENDERER
+        if (Options->useGPU)
+            GPUWait();
+#endif
+
+        uint32_t count = firstIterationShadingPoints->Size();
+        LOG_VERBOSE("Collected %u first-wave wavefront shading points.", count);
+
+        LTCLightSampler *ltc = lightSampler.CastOrNullptr<LTCLightSampler>();
+        if (ltc) {
+            Bounds3f sceneBounds = aggregate->Bounds();
+            ltc->SetupScenePartitions(firstIterationShadingPoints->Points(), sceneBounds);
+        }
+
+        Allocator alloc(memoryResource);
+        alloc.delete_object(firstIterationShadingPoints);
+        firstIterationShadingPoints = nullptr;
+    }
+}
+
 Float WavefrontPathIntegrator::Render() {
     Bounds2i pixelBounds = film.PixelBounds();
     Vector2i resolution = pixelBounds.Diagonal();
@@ -375,6 +409,8 @@ Float WavefrontPathIntegrator::Render() {
         // Keep running the outer for loop but don't take more samples if
         // the GUI is being used so that the user can move the camera, etc.
         if (currentSampleIndex < lastSampleIndex) {
+            OnRenderWaveStart(currentSampleIndex, pixelBounds);
+
             // Render image for sample _sampleIndex_
             LOG_VERBOSE("Starting to submit work for sample %d", currentSampleIndex);
             for (int y0 = pixelBounds.pMin.y; y0 < pixelBounds.pMax.y;
@@ -468,20 +504,7 @@ Float WavefrontPathIntegrator::Render() {
             if (Options->useGPU && !Options->displayServer.empty())
                 UpdateDisplayRGBFromFilm(pixelBounds);
 
-            if (firstIterationShadingPoints) {
-#ifdef PBRT_BUILD_GPU_RENDERER
-                if (Options->useGPU)
-                    GPUWait();
-#endif
-                uint32_t count = firstIterationShadingPoints->Size();
-                LOG_VERBOSE("Collected %u first-wave wavefront shading points.", count);
-
-                // handoff point
-
-                Allocator alloc(memoryResource);
-                alloc.delete_object(firstIterationShadingPoints);
-                firstIterationShadingPoints = nullptr;
-            }
+            OnRenderWaveDone(currentSampleIndex);
 
             progress.Update();
         }
