@@ -430,10 +430,10 @@ static bool ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& re
             const Float scaledVisits = visitedRatio * nt;
 
             cluster.visitCount += scaledVisits;
-
-            cut.sumAccumulator[idx] = 0;
-            cut.visitCountAccumulator[idx] = 0;
         }
+
+        cut.sumAccumulator[idx] = 0;
+        cut.visitCountAccumulator[idx] = 0;
         sumVariance += cluster.variance;
     }
     sumVariance += MathEpsilon;
@@ -530,6 +530,8 @@ static bool ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& re
             c1.variance = 0;
             c1.visitCount = 0;
             cut.data[cut.cutSize] = c1;
+            cut.sumAccumulator[cut.cutSize] = 0;
+            cut.visitCountAccumulator[cut.cutSize] = 0;
             ++cut.cutSize;
         }
     }

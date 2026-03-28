@@ -171,6 +171,7 @@ class LTCLightSampler {
             Float errBounds[2] = {1, 1};
 
             if (!ComputeErrorBounds(errBounds[0], errBounds[1], p, wo, n, shadingFrame, bsdf, children[0], children[1], m_tree.allLightBounds)) {
+                AccumulateContribution(0, lightSamplerHint);
                 return {};
             }
 
@@ -328,8 +329,10 @@ class LTCLightSampler {
         Light light = sampledLight->light;
         DCHECK(light && sampledLight->p != 0);
         pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
-        if (!ls || !ls->L || ls->pdf == 0)
+        if (!ls || !ls->L || ls->pdf == 0) {
+            AccumulateContribution(0, sampledLight->hint);
             return;
+        }
 
         Float lightPDF = sampledLight->p * ls->pdf;
         Float scatterPDF = 0;
@@ -343,8 +346,8 @@ class LTCLightSampler {
     void Update(uint32_t currentIteration);
 
     PBRT_CPU_GPU
-    void AccumulateContribution(const SampledSpectrum& contribution, const uint32_t lightSamplerHint) const {
-        if (lightSamplerHint == std::numeric_limits<uint32_t>::max()) {
+    void AccumulateContribution(Float contribution, const uint32_t lightSamplerHint) const {
+        if (m_partitions.leaves.empty() || lightSamplerHint == std::numeric_limits<uint32_t>::max()) {
             return;
         }
 
@@ -356,9 +359,8 @@ class LTCLightSampler {
         DCHECK_LT(partitionIndex, static_cast<uint32_t>(m_partitions.leaves.size()));
 
         OnlineLightTreeCut& cut(*m_partitions.leaves[partitionIndex]);
-        const Float sample = contribution.Average();
 
-        cut.sumAccumulator[clusterIndex].Add(sample);
+        cut.sumAccumulator[clusterIndex].Add(contribution);
         cut.visitCountAccumulator[clusterIndex].Add(1);
     }
 

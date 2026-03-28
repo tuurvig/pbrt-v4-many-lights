@@ -852,28 +852,28 @@ SampledSpectrum PathIntegrator::SampleLd(const SurfaceInteraction &intr, uint32_
         const SampledLd& sLd(samplesLd[i]);
 
         ReportLightSampleBeforeShadow(sLd.light);
-        if (!Unoccluded(intr, sLd.pLight, sLd.nLight)) {
-            continue;
-        }
-        ReportLightSampleAfterShadowVisible(sLd.light);
-
-        Float p_b = sLd.scatterPDF;
-        Float p_l = sLd.lightPDF;
         SampledSpectrum finalLd;
-        if (p_b == 0) {
-            finalLd = sLd.Ld / p_l;
-        }
-        else {
-            Float w_l = PowerHeuristic(1, p_l, 1, p_b);
-            finalLd = w_l * sLd.Ld / p_l;
-        }
+        if (Unoccluded(intr, sLd.pLight, sLd.nLight)) {
+            ReportLightSampleAfterShadowVisible(sLd.light);
 
-        resultLd += finalLd;
+            Float p_b = sLd.scatterPDF;
+            Float p_l = sLd.lightPDF;
+            
+            if (p_b == 0) {
+                finalLd = sLd.Ld / p_l;
+            }
+            else {
+                Float w_l = PowerHeuristic(1, p_l, 1, p_b);
+                finalLd = w_l * sLd.Ld / p_l;
+            }
+
+            resultLd += finalLd;
+        }
 
         if (isOnlineLightSampler) {
             const LTCLightSampler* ltc = lightSampler.CastOrNullptr<LTCLightSampler>();
             if (ltc) {
-                ltc->AccumulateContribution(finalLd, sLd.lightSamplerHint);
+                ltc->AccumulateContribution(finalLd.MaxComponentValue(), sLd.lightSamplerHint);
             }
         }
     }
@@ -1508,25 +1508,27 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, uint32_t se
             lightRay = sLd.SpawnShadowRay(si->intr);
         }
 
-        if (shouldSkip) continue;
-        ReportLightSampleAfterShadowVisible(sLd.light);
-
-        // Return path contribution function estimate for direct lighting
-        r_l *= r_p * sLd.lightPDF;
         SampledSpectrum finalLd;
-        if (sLd.scatterPDF == 0) {
-            finalLd = beta * sLd.Ld * T_ray / r_l.Average();
-        }
-        else {
-            r_u *= r_p * sLd.scatterPDF;
-            finalLd = beta * sLd.Ld * T_ray / (r_l + r_u).Average();
+        if (!shouldSkip) {
+            ReportLightSampleAfterShadowVisible(sLd.light);
+            
+            // Return path contribution function estimate for direct lighting
+            r_l *= r_p * sLd.lightPDF;
+            if (sLd.scatterPDF == 0) {
+                finalLd = beta * sLd.Ld * T_ray / r_l.Average();
+            }
+            else {
+                r_u *= r_p * sLd.scatterPDF;
+                finalLd = beta * sLd.Ld * T_ray / (r_l + r_u).Average();
+            }
+
+            resultLd += finalLd;
         }
         
-        resultLd += finalLd;
         if (isOnlineLightSampler && !firstIterationShadingPoints) {
             const LTCLightSampler* ltc = lightSampler.CastOrNullptr<LTCLightSampler>();
             if (ltc) {
-                ltc->AccumulateContribution(finalLd, sLd.lightSamplerHint);
+                ltc->AccumulateContribution(finalLd.MaxComponentValue(), sLd.lightSamplerHint);
             }
         }
     }

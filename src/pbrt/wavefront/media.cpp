@@ -322,7 +322,8 @@ void WavefrontPathIntegrator::SampleMediumScattering(int wavefrontDepth) {
                 
                 // Enqueue shadow ray
                 (*shadowRayQueue)[reserveStartIdx + i] =
-                        ShadowRayWorkItem{ray, 1 - ShadowEpsilon, w.lambda, Ld, r_u, r_l, w.pixelIndex};
+                        ShadowRayWorkItem{ray, 1 - ShadowEpsilon, w.lambda, Ld, r_u, r_l,
+                                          w.pixelIndex, sLd.lightSamplerHint};
 
                 PBRT_DBG("Enqueued medium shadow ray depth %d "
                          "Ld %f %f %f %f r_u %f %f %f %f "

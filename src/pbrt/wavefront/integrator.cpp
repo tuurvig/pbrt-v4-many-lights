@@ -504,9 +504,9 @@ Float WavefrontPathIntegrator::Render() {
             if (Options->useGPU && !Options->displayServer.empty())
                 UpdateDisplayRGBFromFilm(pixelBounds);
 
-            OnRenderWaveDone(currentSampleIndex);
-
             progress.Update();
+
+            OnRenderWaveDone(currentSampleIndex);
         }
 
         if (gui) {
@@ -725,9 +725,11 @@ void WavefrontPathIntegrator::HandleEmissiveIntersection() {
 void WavefrontPathIntegrator::TraceShadowRays(int wavefrontDepth) {
     int maxShadowRays = maxQueueSize * static_cast<int>(requiredShadowRays);
     if (haveMedia)
-        aggregate->IntersectShadowTr(maxShadowRays, shadowRayQueue, &pixelSampleState);
+        aggregate->IntersectShadowTr(maxShadowRays, shadowRayQueue, &pixelSampleState,
+                                     lightSampler);
     else
-        aggregate->IntersectShadow(maxShadowRays, shadowRayQueue, &pixelSampleState);
+        aggregate->IntersectShadow(maxShadowRays, shadowRayQueue, &pixelSampleState,
+                                   lightSampler);
     // Reset shadow ray queue
     Do(
         "Reset shadowRayQueue", PBRT_CPU_GPU_LAMBDA() {
