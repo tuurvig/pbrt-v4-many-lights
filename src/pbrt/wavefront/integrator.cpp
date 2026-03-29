@@ -504,9 +504,9 @@ Float WavefrontPathIntegrator::Render() {
             if (Options->useGPU && !Options->displayServer.empty())
                 UpdateDisplayRGBFromFilm(pixelBounds);
 
-            progress.Update();
-
             OnRenderWaveDone(currentSampleIndex);
+
+            progress.Update();
         }
 
         if (gui) {

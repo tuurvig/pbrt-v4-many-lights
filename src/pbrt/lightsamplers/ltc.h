@@ -159,7 +159,7 @@ class LTCLightSampler {
         }
         
         const LightcutsTreeNode* node = &m_tree.nodes[nodeIndex];
-
+        Float clusterPdf = 1;
         while (!node->isLeaf) {
             uint32_t childrenIndices[2] = {static_cast<uint32_t>(nodeIndex + 1), node->childOrLightIndex};
 
@@ -182,7 +182,7 @@ class LTCLightSampler {
             // Randomly sample light BVH child node
             Float nodePMF;
             int child = SampleDiscrete(weights, u, &nodePMF, &u);
-            pmf *= nodePMF;
+            clusterPdf *= nodePMF;
 
             nodeIndex = childrenIndices[child];
             node = &m_tree.nodes[nodeIndex];
@@ -192,7 +192,9 @@ class LTCLightSampler {
             if (u >= 1) u -= 1;
         }
 
-        return SampledLight(m_tree.lights[node->childOrLightIndex], pmf, lightSamplerHint);
+        pmf *= clusterPdf;
+
+        return SampledLight(m_tree.lights[node->childOrLightIndex], pmf, lightSamplerHint, clusterPdf);
     }
 
     PBRT_CPU_GPU PBRT_NOINLINE
@@ -250,7 +252,7 @@ class LTCLightSampler {
 
         const LightcutsTreeNode *node = &m_tree.nodes[nodeIndex];
 
-        // Compute light's PMF by walking down tree nodes to the light
+        // Compute light's cluster pdf by walking down tree nodes to the light
         while (!node->isLeaf) {
             // Compute child importances and update PMF for current node
             uint32_t childrenIndices[2] = {static_cast<uint32_t>(nodeIndex + 1), node->childOrLightIndex};
@@ -337,8 +339,12 @@ class LTCLightSampler {
         Float lightPDF = sampledLight->p * ls->pdf;
         Float scatterPDF = 0;
         SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
+        SampledSpectrum Ld = f_hat * ls->L;
 
-        samples.Add(SampledLd(f_hat * ls->L, light, ls->pLight, lightPDF, scatterPDF, sampledLight->hint));
+        const Float learningPDF = sampledLight->pLearning * ls->pdf;
+        const Float learningContribution = Ld.MaxComponentValue() / (learningPDF + scatterPDF);
+
+        samples.Add(SampledLd(Ld, light, ls->pLight, lightPDF, scatterPDF, sampledLight->hint, learningContribution));
     }
 
     std::string ToString() const;
@@ -358,10 +364,10 @@ class LTCLightSampler {
         const uint32_t partitionIndex = lightSamplerHint >> clusterIndexPowerTwoCapacity;
         DCHECK_LT(partitionIndex, static_cast<uint32_t>(m_partitions.leaves.size()));
 
-        OnlineLightTreeCut& cut(*m_partitions.leaves[partitionIndex]);
+        OnlineLightTreeCut* cut(m_partitions.leaves[partitionIndex]);
 
-        cut.sumAccumulator[clusterIndex].Add(contribution);
-        cut.visitCountAccumulator[clusterIndex].Add(1);
+        cut->sumAccumulator[clusterIndex].Add(contribution);
+        cut->visitCountAccumulator[clusterIndex].Add(1);
     }
 
   private:

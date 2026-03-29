@@ -852,8 +852,9 @@ SampledSpectrum PathIntegrator::SampleLd(const SurfaceInteraction &intr, uint32_
         const SampledLd& sLd(samplesLd[i]);
 
         ReportLightSampleBeforeShadow(sLd.light);
-        SampledSpectrum finalLd;
-        if (Unoccluded(intr, sLd.pLight, sLd.nLight)) {
+        const bool isUnoccluded = Unoccluded(intr, sLd.pLight, sLd.nLight);
+        if (isUnoccluded) {
+            SampledSpectrum finalLd;
             ReportLightSampleAfterShadowVisible(sLd.light);
 
             Float p_b = sLd.scatterPDF;
@@ -873,7 +874,7 @@ SampledSpectrum PathIntegrator::SampleLd(const SurfaceInteraction &intr, uint32_
         if (isOnlineLightSampler) {
             const LTCLightSampler* ltc = lightSampler.CastOrNullptr<LTCLightSampler>();
             if (ltc) {
-                ltc->AccumulateContribution(finalLd.MaxComponentValue(), sLd.lightSamplerHint);
+                ltc->AccumulateContribution(isUnoccluded * sLd.learningContribution, sLd.lightSamplerHint);
             }
         }
     }
@@ -1508,10 +1509,11 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, uint32_t se
             lightRay = sLd.SpawnShadowRay(si->intr);
         }
 
-        SampledSpectrum finalLd;
-        if (!shouldSkip) {
+        const bool isUnoccluded = !shouldSkip;
+        if (isUnoccluded) {
             ReportLightSampleAfterShadowVisible(sLd.light);
-            
+            SampledSpectrum finalLd;
+
             // Return path contribution function estimate for direct lighting
             r_l *= r_p * sLd.lightPDF;
             if (sLd.scatterPDF == 0) {
@@ -1528,7 +1530,7 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, uint32_t se
         if (isOnlineLightSampler && !firstIterationShadingPoints) {
             const LTCLightSampler* ltc = lightSampler.CastOrNullptr<LTCLightSampler>();
             if (ltc) {
-                ltc->AccumulateContribution(finalLd.MaxComponentValue(), sLd.lightSamplerHint);
+                ltc->AccumulateContribution(isUnoccluded * sLd.learningContribution, sLd.lightSamplerHint);
             }
         }
     }

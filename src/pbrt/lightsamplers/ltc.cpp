@@ -379,6 +379,7 @@ void LTCLightSampler::SetupScenePartitions(pstd::span<ShadingPoint> shadingPoint
             [treeNodes, leaves] PBRT_GPU(int idx) {
             MakeInitialTreeCut(*leaves[idx], treeNodes);
         });
+        GPUWait();
 #else
         LOG_FATAL("Options->useGPU was set without PBRT_BUILD_GPU_RENDERER enabled");
 #endif
@@ -540,6 +541,13 @@ static bool ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& re
 }
 
 void LTCLightSampler::Update(const uint32_t currentIteration) {
+#ifdef PBRT_BUILD_GPU_RENDERER
+    if (Options->useGPU) {
+        // Must wait for the previous work to be completed before accessing it.
+        GPUWait();
+    }
+#endif
+
     const Float t = currentIteration;
     const Float learningRate = 1 / (m_beta * std::pow(t, m_omega));
 
@@ -593,6 +601,8 @@ void LTCLightSampler::Update(const uint32_t currentIteration) {
                 cut.lastUpdateIteration = currentIteration;
             }
         });
+
+        GPUWait();
 #else
         LOG_FATAL("Options->useGPU was set without PBRT_BUILD_GPU_RENDERER enabled");
 #endif

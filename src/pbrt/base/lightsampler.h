@@ -17,12 +17,14 @@ namespace pbrt {
 // SampledLight Definition
 struct SampledLight {
     PBRT_CPU_GPU
-    SampledLight(Light light, Float p = 0, uint32_t hint = std::numeric_limits<uint32_t>::max()) :
-        light(light), p(p), hint(hint) {}
+    SampledLight(Light light, Float p = 0, uint32_t hint = std::numeric_limits<uint32_t>::max(), Float pLearning = 1) :
+        light(light), p(p), hint(hint), pLearning(pLearning) {}
 
     Light light;
     Float p;
     uint32_t hint;
+    Float pLearning;
+
     std::string ToString() const;
 };
 
@@ -36,8 +38,8 @@ struct LightPMF {
 struct SampledLd {
     SampledLd() = default;
 
-    PBRT_CPU_GPU SampledLd(const SampledSpectrum& s, Light light, const Interaction& intr, Float lightPDF, Float scatterPDF, uint32_t lightSamplerHint = std::numeric_limits<uint32_t>::max()) :
-        Ld(s), pLight(intr.pi), nLight(intr.n), lightPDF(lightPDF), scatterPDF(scatterPDF), light(light), lightSamplerHint(lightSamplerHint)  {}
+    PBRT_CPU_GPU SampledLd(const SampledSpectrum& s, Light light, const Interaction& intr, Float lightPDF, Float scatterPDF, uint32_t lightSamplerHint = std::numeric_limits<uint32_t>::max(), Float learningContribution = 0) :
+        Ld(s), pLight(intr.pi), nLight(intr.n), lightPDF(lightPDF), scatterPDF(scatterPDF), light(light), lightSamplerHint(lightSamplerHint), learningContribution(learningContribution)  {}
 
     PBRT_CPU_GPU
     Ray SpawnShadowRay(const Interaction &from) const {
@@ -58,6 +60,7 @@ struct SampledLd {
     Float scatterPDF;
     Light light;
     uint32_t lightSamplerHint;
+    Float learningContribution;
 };
 
 enum ERequiresShadowRays : int {

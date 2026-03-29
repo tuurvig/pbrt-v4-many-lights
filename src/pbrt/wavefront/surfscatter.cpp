@@ -315,7 +315,7 @@ void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQue
 
                     (*shadowRayQueue)[reserveStartIdx + i] =
                         ShadowRayWorkItem{ray, 1 - ShadowEpsilon, lambda, Ld, r_u, r_l,
-                                          w.pixelIndex, sLd.lightSamplerHint};
+                                          w.pixelIndex, sLd.lightSamplerHint, sLd.learningContribution};
 
                     PBRT_DBG("w.index %d spawned shadow ray depth %d Ld/uni %f %f %f %f\n",
                              w.pixelIndex, w.depth, Ld[0], Ld[1], Ld[2], Ld[3],

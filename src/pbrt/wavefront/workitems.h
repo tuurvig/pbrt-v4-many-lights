@@ -210,6 +210,7 @@ struct ShadowRayWorkItem {
     SampledSpectrum Ld, r_u, r_l;
     int pixelIndex;
     uint32_t lightSamplerHint;
+    Float learningContribution;
 };
 
 // GetBSSRDFAndProbeRayWorkItem Definition
