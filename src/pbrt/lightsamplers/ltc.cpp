@@ -174,6 +174,7 @@ uint32_t LTCLightSampler::BuildPartitionTree(pstd::span<ShadingPoint>& items, in
             }
             
             avgPosition /= partitionSize;
+
             m_partitions.representantPoints.emplace_back(avgPosition, Normal3f(cone.w));
 
             return nodeIndex;
@@ -303,7 +304,7 @@ uint32_t LTCLightSampler::BuildPartitionTree(pstd::span<ShadingPoint>& items, in
 }
 
 PBRT_CPU_GPU
-static void MakeInitialTreeCut(OnlineLightTreeCut& cut, const LightcutsTreeNode* nodes) {
+static void MakeInitialTreeCut(OnlineLightTreeCut& cut, ShadingPoint representant, const LightcutsTreeNode* nodes, Bounds3f allLightBounds) {
     constexpr uint32_t initialCutSize = 4;
 
     auto AddCluster = [](OnlineCutData& cluster, uint32_t index, Float importance, uint32_t bitTrail, uint32_t depth) {
@@ -319,6 +320,12 @@ static void MakeInitialTreeCut(OnlineLightTreeCut& cut, const LightcutsTreeNode*
     const LightcutsTreeNode* root = &nodes[0];
     AddCluster(cut.data[0], 0, root->compactLightBounds.PhiOrI(), 0, 0);
     cut.cutSize = 1;
+
+    const Point3f p = representant.point;
+    const Vector3f wo(representant.dir);
+    const Normal3f n(wo);
+
+    const Frame shadingFrame = Frame::FromZ(n);
 
     // iteratively refine the cut until we hit the target size
     while (cut.cutSize < initialCutSize) {
@@ -351,20 +358,28 @@ static void MakeInitialTreeCut(OnlineLightTreeCut& cut, const LightcutsTreeNode*
         const LightcutsTreeNode* leftChild = &nodes[leftChildIndex];
         const LightcutsTreeNode* rightChild = &nodes[rightChildIndex];
 
-        AddCluster(cut.data[maxIdx], leftChildIndex, leftChild->compactLightBounds.PhiOrI(), parentData.bitTrail, parentData.depth + 1);
-        AddCluster(cut.data[cut.cutSize], rightChildIndex, rightChild->compactLightBounds.PhiOrI(), parentData.bitTrail | (1 << parentData.depth), parentData.depth + 1);
+        Float lu0, lu1;
+        if (!ComputeErrorBounds(lu0, lu1, p, wo, n, shadingFrame, nullptr, leftChild, rightChild, allLightBounds)) {
+            lu0 = std::max(leftChild->compactLightBounds.PhiOrI() *  MathEpsilon, MathEpsilon);
+            lu1 = std::max(rightChild->compactLightBounds.PhiOrI() * MathEpsilon, MathEpsilon);
+        }
+
+        if (lu0 == 0) {
+            lu0 = std::max(leftChild->compactLightBounds.PhiOrI() * MathEpsilon, MathEpsilon);
+        }
+
+        if (lu1 == 1) {
+            lu1 = std::max(rightChild->compactLightBounds.PhiOrI() * MathEpsilon, MathEpsilon);
+        }
+
+        AddCluster(cut.data[maxIdx], leftChildIndex, lu0, parentData.bitTrail, parentData.depth + 1);
+        AddCluster(cut.data[cut.cutSize], rightChildIndex, lu1, parentData.bitTrail | (1 << parentData.depth), parentData.depth + 1);
 
         ++cut.cutSize;
     }
 }
 
 void LTCLightSampler::SetupScenePartitions(pstd::span<ShadingPoint> shadingPoints, const Bounds3f& sceneBounds) {
-    for (OnlineLightTreeCut *leaf : m_partitions.leaves)
-        m_partitions.alloc.delete_object(leaf);
-    m_partitions.leaves.clear();
-    m_partitions.innerNodes.clear();
-    m_partitions.representantPoints.clear();
-
     if (shadingPoints.empty())
         return;
 
@@ -374,10 +389,12 @@ void LTCLightSampler::SetupScenePartitions(pstd::span<ShadingPoint> shadingPoint
     if (Options->useGPU) {
 #ifdef PBRT_BUILD_GPU_RENDERER
         const LightcutsTreeNode* treeNodes = m_tree.nodes.data();
+        const ShadingPoint* representants = m_partitions.representantPoints.data();
         OnlineLightTreeCut** leaves = m_partitions.leaves.data();
+        Bounds3f allLightBounds = m_tree.allLightBounds;
         GPUParallelFor("Initialize LTC tree cuts", ProfilerKernelGroup::WAVEFRONT, m_partitions.leaves.size(),
-            [treeNodes, leaves] PBRT_GPU(int idx) {
-            MakeInitialTreeCut(*leaves[idx], treeNodes);
+            [treeNodes, representants, leaves, allLightBounds] PBRT_GPU(int idx) {
+            MakeInitialTreeCut(*leaves[idx], representants[idx], treeNodes, allLightBounds);
         });
         GPUWait();
 #else
@@ -386,7 +403,7 @@ void LTCLightSampler::SetupScenePartitions(pstd::span<ShadingPoint> shadingPoint
     }
     else {
         ParallelFor(0, m_partitions.leaves.size(), [this](int idx) {
-            MakeInitialTreeCut(*m_partitions.leaves[idx], m_tree.nodes.data());
+            MakeInitialTreeCut(*m_partitions.leaves[idx], m_partitions.representantPoints[idx], m_tree.nodes.data(), m_tree.allLightBounds);
         });
     }
 
@@ -444,7 +461,7 @@ static bool ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& re
     const Normal3f n(wo);
     const Frame shadingFrame = Frame::FromZ(n);
 
-    constexpr uint32_t maxToSplit = PBRT_LTC_MAX_CUT_SIZE / 2;
+    constexpr uint32_t maxToSplit = PBRT_LTC_MAX_CUT_SIZE / 4;
     uint32_t toSplit[maxToSplit];
     uint32_t splitCount = 0;
     uint32_t newCutSize = lastCutSize;
@@ -489,13 +506,18 @@ static bool ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& re
         if (!ComputeErrorBounds(lu0, lu1, p, wo, n, shadingFrame, nullptr, child0, child1, allLightBounds, true)) {
             // the representative light could be a bad pick for the cluster of light
             // fallback to the light intensities
-            lu0 = child0->compactLightBounds.PhiOrI();
-            lu1 = child1->compactLightBounds.PhiOrI();
-        } else {
-            lu0 = std::max(lu0, MathEpsilon);
-            lu1 = std::max(lu1, MathEpsilon);
+            lu0 = std::max(child0->compactLightBounds.PhiOrI() * MathEpsilon, MathEpsilon);
+            lu1 = std::max(child1->compactLightBounds.PhiOrI() * MathEpsilon, MathEpsilon);
+        }
+
+        if (lu0 == 0) {
+            lu0 = std::max(MathEpsilon, child0->compactLightBounds.PhiOrI() * MathEpsilon);
         }
         
+        if (lu1 == 0) {
+            lu1 = std::max(MathEpsilon, child1->compactLightBounds.PhiOrI() * MathEpsilon);
+        }
+
         const Float luSum = lu0 + lu1;
         const Float probLeft = std::min(lu0 / luSum, OneMinusEpsilon);
         const Float probRight = 1 - probLeft;

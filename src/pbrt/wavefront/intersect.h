@@ -295,7 +295,7 @@ inline PBRT_CPU_GPU void TraceTransmittance(ShadowRayWorkItem sr,
     }
 
     if (const LTCLightSampler *ltc = lightSampler.CastOrNullptr<LTCLightSampler>()) {
-        ltc->AccumulateContribution(isUnoccluded * sr.learningContributions, sr.lightSamplerHint);
+        ltc->AccumulateContribution(isUnoccluded * sr.learningContribution, sr.lightSamplerHint);
     }
 }
 

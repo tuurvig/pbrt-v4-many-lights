@@ -16,6 +16,8 @@
 namespace pbrt {
 
 struct alignas(16) ShadingPoint {
+    ShadingPoint() = default;
+
     PBRT_CPU_GPU
     ShadingPoint(const Point3f& p, const Normal3f& n) :
         point(p), dir(Vector3f(n)) {}
@@ -66,6 +68,9 @@ class ShadingPointCollector {
 
     PBRT_CPU_GPU
     uint32_t Capacity() const { return capacity; }
+
+    ShadingPoint *Data() { return points; }
+    const ShadingPoint *Data() const { return points; }
 
     pstd::span<const ShadingPoint> Points() const { return {points, Size()}; }
     pstd::span<ShadingPoint> Points() { return {points, Size()}; }

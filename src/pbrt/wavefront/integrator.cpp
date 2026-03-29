@@ -328,23 +328,42 @@ void WavefrontPathIntegrator::OnRenderWaveDone(int waveIndex) {
     }
 
     if (waveIndex == 0 && firstIterationShadingPoints) {
+        ShadingPoint* points = nullptr;
 #ifdef PBRT_BUILD_GPU_RENDERER
-        if (Options->useGPU)
+        if (Options->useGPU) {
             GPUWait();
-#endif
+            points = firstIterationShadingPoints->Data();
+            const uint32_t count = firstIterationShadingPoints->Size();
 
-        uint32_t count = firstIterationShadingPoints->Size();
+            LOG_VERBOSE("Collected %u first-wave wavefront shading points.", count);
+            ShadingPoint* copyPoints = new ShadingPoint[count];
+            GPUCopyToHost(copyPoints, points, count);
+            points = copyPoints;
+        } else
+#endif
+        {
+            points = firstIterationShadingPoints->Data();
+        }
+
+        const uint32_t count = firstIterationShadingPoints->Size();
         LOG_VERBOSE("Collected %u first-wave wavefront shading points.", count);
 
         LTCLightSampler *ltc = lightSampler.CastOrNullptr<LTCLightSampler>();
         if (ltc) {
             Bounds3f sceneBounds = aggregate->Bounds();
-            ltc->SetupScenePartitions(firstIterationShadingPoints->Points(), sceneBounds);
+            ltc->SetupScenePartitions({points, count}, sceneBounds);
         }
 
         Allocator alloc(memoryResource);
         alloc.delete_object(firstIterationShadingPoints);
         firstIterationShadingPoints = nullptr;
+
+#ifdef PBRT_BUILD_GPU_RENDERER
+        if (Options->useGPU) {
+            delete[] points;
+            points = nullptr;
+        }
+#endif
     }
 }
 
