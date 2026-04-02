@@ -246,7 +246,7 @@ public:
 private:
     // LightcutsLightSampler Private Methods
 #ifdef PBRT_BUILD_GPU_RENDERER
-    bool buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights, LightcutsTree& tree, bool isPoint, Float& u);
+    bool buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights, LightcutsTree& tree, bool isPoint);
 #endif
 
     PBRT_CPU_GPU

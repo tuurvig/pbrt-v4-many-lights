@@ -26,11 +26,6 @@ struct alignas(8) LightCandidate {
     Float pmf;
 };
 
-struct ResampledCandidate {
-    SampledLd sLd;
-    Float pmf;
-};
-
 template <typename T, int N>
 struct CountedArray {
     PBRT_CPU_GPU
@@ -252,6 +247,28 @@ struct alignas(32) ResampledTreeNode {
     uint32_t isLeaf; // 4 bytes
 };
 
+struct alignas(32) LTCTreeNode {
+    LTCTreeNode() = default;
+
+    PBRT_CPU_GPU static LTCTreeNode MakeLeaf(uint32_t lightIdx, const CompactLightBounds& bounds) {
+        return LTCTreeNode{bounds, 1, {lightIdx, true}};
+    }
+
+    PBRT_CPU_GPU static LTCTreeNode MakeInterior(uint32_t childIdx, uint32_t lightCount, const CompactLightBounds& bounds) {
+        return LTCTreeNode{bounds, lightCount, {childIdx, false}};
+    }
+
+    std::string ToString() const;
+
+    // LightcutsTreeNode Public Members
+    CompactLightBounds compactLightBounds; // 24 bytes
+    uint32_t lightCount; // 4 bytes
+    struct { // 4 bytes
+        uint32_t childOrLightIndex : 31;
+        uint32_t isLeaf : 1;
+    };
+};
+
 /// Cost functions and evaluators
 //////////////////////////////////////////////////////////
 
@@ -361,7 +378,7 @@ struct RHTBuildContainer : public BuildContainerInterface<SphericalLightBounds> 
 
 // Intermediate BVH node that stores spatial bounds and child references.
 // Leaves store the light index in both child slots and use kInvalidIndex to
-// signal that no further subdivision is needed.
+// signal that no further subdivisions are needed.
 template<typename LightBoundsType>
 struct LightTreeConstructionNodeGPU : public BuildContainerInterface<LightBoundsType> {
     LightTreeConstructionNodeGPU() = default;
@@ -403,7 +420,12 @@ struct ResampledTree {
     Bounds3f allLightBounds;
 };
 
-
+struct LTCLightTree {
+    LTCLightTree(Allocator alloc);
+    pstd::vector<Light> lights;
+    pstd::vector<LTCTreeNode> nodes;
+    Bounds3f allLightBounds;
+};
 
 /// Light Hierarchy Node Emitters
 //////////////////////////////////////////////////////////
@@ -419,32 +441,34 @@ struct LightHierarchyNodeEmitter : public NodeEmitterInterface<LightBVHBuildCont
 
     virtual int ReserveInterior() override;
     virtual LightBVHBuildContainer EmitLeaf(const LightBVHBuildContainer& item, uint32_t bitTrail) override;
-    virtual LightBVHBuildContainer FinalizeInterior(int reservationIndex, const LightBVHBuildContainer& left, const LightBVHBuildContainer& right, Float& u) override;
+    virtual LightBVHBuildContainer FinalizeInterior(int reservationIndex, const LightBVHBuildContainer& left, const LightBVHBuildContainer& right) override;
 };
 
 struct LightcutsNodeEmitter : public NodeEmitterInterface<LightcutsBuildContainer, LightcutsBuildResult> {
     LightcutsNodeEmitter(LightcutsTree& tree, HashMap<Light, LightLocation>& lightToLocation, bool isPoint)
-        : tree(&tree), lightToLocation(&lightToLocation), isPoint(isPoint) {}
+        : tree(&tree), lightToLocation(&lightToLocation), isPoint(isPoint), rng(Hash(tree.allLightBounds.Diagonal())) {}
 
     LightcutsTree* tree;
     HashMap<Light, LightLocation>* lightToLocation;
+    RNG rng;
     bool isPoint;
 
     virtual int ReserveInterior() override;
     virtual LightcutsBuildResult EmitLeaf(const LightcutsBuildContainer& item, uint32_t bitTrail) override;
-    virtual LightcutsBuildResult FinalizeInterior(int reservationIndex, const LightcutsBuildResult& left, const LightcutsBuildResult& right, Float& u) override;
+    virtual LightcutsBuildResult FinalizeInterior(int reservationIndex, const LightcutsBuildResult& left, const LightcutsBuildResult& right) override;
 };
 
 struct SLCNodeEmitter : public NodeEmitterInterface<LightcutsBuildContainer, LightcutsBuildResult> {
     SLCNodeEmitter(LightcutsTree& tree, HashMap<Light, uint32_t>& lightToBitTrail)
-        : tree(&tree), lightToBitTrail(&lightToBitTrail) {}
+        : tree(&tree), lightToBitTrail(&lightToBitTrail), rng(Hash(tree.allLightBounds.Diagonal())) {}
 
     LightcutsTree* tree;
     HashMap<Light, uint32_t>* lightToBitTrail;
+    RNG rng;
 
     virtual int ReserveInterior() override;
     virtual LightcutsBuildResult EmitLeaf(const LightcutsBuildContainer& item, uint32_t bitTrail) override;
-    virtual LightcutsBuildResult FinalizeInterior(int reservationIndex, const LightcutsBuildResult& left, const LightcutsBuildResult& right, Float& u) override;
+    virtual LightcutsBuildResult FinalizeInterior(int reservationIndex, const LightcutsBuildResult& left, const LightcutsBuildResult& right) override;
 };
 
 struct RHTNodeEmitter : public NodeEmitterInterface<RHTBuildContainer, RHTBuildContainer> {
@@ -456,7 +480,19 @@ struct RHTNodeEmitter : public NodeEmitterInterface<RHTBuildContainer, RHTBuildC
 
     virtual int ReserveInterior() override;
     virtual RHTBuildContainer EmitLeaf(const RHTBuildContainer& item, uint32_t bitTrail) override;
-    virtual RHTBuildContainer FinalizeInterior(int reservationIndex, const RHTBuildContainer& left, const RHTBuildContainer& right, Float& u) override;
+    virtual RHTBuildContainer FinalizeInterior(int reservationIndex, const RHTBuildContainer& left, const RHTBuildContainer& right) override;
+};
+
+struct LTCNodeEmitter : public NodeEmitterInterface<LightBVHBuildContainer, LightBVHBuildContainer> {
+    LTCNodeEmitter(LTCLightTree& tree, HashMap<Light, uint32_t>& lightToBitTrail)
+        : tree(&tree), lightToBitTrail(&lightToBitTrail) {}
+
+    LTCLightTree* tree;
+    HashMap<Light, uint32_t>* lightToBitTrail;
+
+    virtual int ReserveInterior() override;
+    virtual LightBVHBuildContainer EmitLeaf(const LightBVHBuildContainer& item, uint32_t bitTrail) override;
+    virtual LightBVHBuildContainer FinalizeInterior(int reservationIndex, const LightBVHBuildContainer& left, const LightBVHBuildContainer& right) override;
 };
 
 /// Light Hierarchy Node Converters
@@ -499,7 +535,7 @@ struct GPUToLightcutsLeaf : public TreeLeafGPUAdapter<LightBounds, LightcutsBuil
 
 struct GPUToRHTLeaf : public TreeLeafGPUAdapter<SphericalLightBounds, RHTBuildContainer> {
     using BaseClass = TreeLeafGPUAdapter<SphericalLightBounds, RHTBuildContainer>;
-    GPUToRHTLeaf(std::vector<LightTreeConstructionNodeGPU<SphericalLightBounds>>& nodes, std::vector<RHTBuildContainer>& lights)
+    GPUToRHTLeaf(std::vector<LightTreeConstructionNodeGPU<SphericalLightBounds>>& nodes)
         : BaseClass(nodes) {};
 
     virtual inline RHTBuildContainer Convert(const LightTreeConstructionNodeGPU<SphericalLightBounds>& node) const override {
@@ -610,7 +646,7 @@ inline Float GeomTermBoundInFrame(Point3f point, const Frame& frame, const Bound
 }
 
 PBRT_CPU_GPU
-inline Float ComputeGeometricBound(const LightcutsTreeNode* node, const Bounds3f& nodeBounds, const Frame& frame, bool isOriented, Point3f point) {
+inline Float ComputeGeometricBound(const CompactLightBounds& lightBounds, const Bounds3f& nodeBounds, const Frame& frame, bool isOriented, Point3f point) {
     Float G = GeomTermBoundInFrame(point, frame, nodeBounds);
     G = std::abs(G);
 
@@ -619,11 +655,11 @@ inline Float ComputeGeometricBound(const LightcutsTreeNode* node, const Bounds3f
         const Point3f refMax = point + (point - nodeBounds.pMin);
         const Bounds3f refBounds(refMin, refMax);
     
-        Frame coneFrame = Frame::FromZ(node->compactLightBounds.W());
+        Frame coneFrame = Frame::FromZ(lightBounds.W());
         const Float cosBound = GeomTermBoundInFrame(point, coneFrame, refBounds);
         const Float sinBound = SafeSqrt(1 - Sqr(cosBound));
 
-        const Float cosHalfAngle = node->compactLightBounds.CosTheta_o();
+        const Float cosHalfAngle = lightBounds.CosTheta_o();
         const Float sinHalfAngle = SafeSqrt(1 - Sqr(cosHalfAngle));
 
         const Float maxCos = SafeSubtractCos(sinBound, cosBound, sinHalfAngle, cosHalfAngle);
@@ -638,17 +674,17 @@ inline Float ComputeGeometricBound(const LightcutsTreeNode* node, const Bounds3f
 //////////////////////////////////////////////////////////
 
 PBRT_CPU_GPU PBRT_NOINLINE
-static bool ComputeErrorBounds(Float &err0, Float &err1, Point3f p, Vector3f wo, Normal3f n, const Frame& frame, const BSDF* bsdf, const LightcutsTreeNode * child0, const LightcutsTreeNode * child1, const Bounds3f& allLightBounds, const bool isOriented = true) {
-    const Float nodeI0 = child0->compactLightBounds.PhiOrI();
-    const Float nodeI1 = child1->compactLightBounds.PhiOrI();
+static bool ComputeErrorBounds(Float &err0, Float &err1, Point3f p, Vector3f wo, Normal3f n, const Frame& frame, const BSDF* bsdf, const CompactLightBounds& cb0, const CompactLightBounds& cb1, const Bounds3f& allLightBounds, const bool isOriented = true) {
+    const Float nodeI0 = cb0.PhiOrI();
+    const Float nodeI1 = cb1.PhiOrI();
 
     BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
     
-    const Bounds3f nodeBound0 = child0->compactLightBounds.Bounds(allLightBounds);
-    const Bounds3f nodeBound1 = child1->compactLightBounds.Bounds(allLightBounds);
+    const Bounds3f nodeBound0 = cb0.Bounds(allLightBounds);
+    const Bounds3f nodeBound1 = cb1.Bounds(allLightBounds);
 
-    Float geomBound0 = ComputeGeometricBound(child0, nodeBound0, frame, isOriented, p);
-    Float geomBound1 = ComputeGeometricBound(child1, nodeBound1, frame, isOriented, p);
+    Float geomBound0 = ComputeGeometricBound(cb0, nodeBound0, frame, isOriented, p);
+    Float geomBound1 = ComputeGeometricBound(cb1, nodeBound1, frame, isOriented, p);
     
     Float ub0 = geomBound0 * nodeI0;
     Float ub1 = geomBound1 * nodeI1; 
@@ -758,7 +794,7 @@ static int ComputeLightcutsTreeCut(Float* errBounds, CutData* data, uint32_t& bi
         const LightcutsTreeNode* leftChild = &treeNodes[dataLeft.nodeIndex];
         const LightcutsTreeNode* rightChild = &treeNodes[dataRight.nodeIndex];
 
-        if (!ComputeErrorBounds(errBoundLeft, errBoundRight, p, wo, n, frame, bsdf, leftChild, rightChild, allLightBounds, isOriented)) {
+        if (!ComputeErrorBounds(errBoundLeft, errBoundRight, p, wo, n, frame, bsdf, leftChild->compactLightBounds, rightChild->compactLightBounds, allLightBounds, isOriented)) {
             continue;
         }
 

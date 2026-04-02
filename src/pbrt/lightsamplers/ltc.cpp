@@ -29,7 +29,7 @@ STAT_MEMORY_COUNTER("Memory/Learning To Cluster Scene Partition", LTCScenePartit
 
 LTCLightSampler::LTCLightSampler(pstd::span<const Light> lights, Allocator alloc, Float beta, Float omega, Float gamma) :
     m_tree(alloc), m_partitions(alloc), m_infiniteLights(alloc), m_lightToBitTrail(alloc), m_beta(beta), m_omega(omega), m_gamma(gamma) {
-    std::vector<LightcutsBuildContainer> treeLights;
+    std::vector<LightBVHBuildContainer> treeLights;
     for (size_t i = 0; i < lights.size(); ++i) {
         // Store $i$th light in either _infiniteLights_ or _treeLights_
         Light light = lights[i];
@@ -38,21 +38,21 @@ LTCLightSampler::LTCLightSampler(pstd::span<const Light> lights, Allocator alloc
             m_infiniteLights.push_back(light);
         }
         else if (lightBounds->phi > 0) {
-            treeLights.emplace_back(*lightBounds, light);
+            const auto lightIdx = static_cast<uint32_t>(m_tree.lights.size());
+            m_tree.lights.emplace_back(light);
+            treeLights.emplace_back(*lightBounds, lightIdx);
             m_tree.allLightBounds = Union(m_tree.allLightBounds, lightBounds->bounds);
         }
     }
 
-    RNG rng;
-    Float u = rng.Uniform<Float>();
     if (!treeLights.empty()) {
 #ifdef PBRT_BUILD_GPU_RENDERER
-        bool buildOnGPU = buildLightTreeGPU(treeLights, u);
+        bool buildOnGPU = buildLightTreeGPU(treeLights);
         if (!buildOnGPU)
 #endif
         {
-            SLCNodeEmitter emitter(m_tree, m_lightToBitTrail);
-            BuildLightTree<16, LightcutsBuildContainer, SAOHCostEvaluator, SLCNodeEmitter>(treeLights, 0, treeLights.size(), 0, 0, SAOHCostEvaluator(), emitter, u);
+            LTCNodeEmitter emitter(m_tree, m_lightToBitTrail);
+            BuildLightTree<16, LightBVHBuildContainer, SAOHCostEvaluator, LTCNodeEmitter>(treeLights, 0, treeLights.size(), 0, 0, SAOHCostEvaluator(), emitter);
         }
     }
 
@@ -66,7 +66,7 @@ class LTCTreeBuilderGPU final : public LightTreeBuilderGPU<LightBounds, uint64_t
   public:
     explicit LTCTreeBuilderGPU(const Bounds3f &bounds) : m_allLightBounds(bounds) {}
 
-    bool Build(std::vector<LightcutsBuildContainer> &lights) {
+    bool Build(std::vector<LightBVHBuildContainer> &lights) {
         if (lights.empty())
             return false;
 
@@ -75,12 +75,12 @@ class LTCTreeBuilderGPU final : public LightTreeBuilderGPU<LightBounds, uint64_t
         LightTreeBuildState<LightBounds> buildState(State());
         std::array<uint8_t, 3> ax = DetermineAxisOrder(buildState.allLightBounds);
 
-        LightcutsBuildContainer* dLightsContainer = GPUAllocAsync<LightcutsBuildContainer>(buildState.nLights);
+        LightBVHBuildContainer* dLightsContainer = GPUAllocAsync<LightBVHBuildContainer>(buildState.nLights);
         GPUCopyToDevice(dLightsContainer, lights.data(), lights.size());
 
         uint64_t* dMortonCodes = MortonCodes();
         MortonCodes() = SortNodesMorton(State(), MortonCodes(), [buildState, ax, dLightsContainer, dMortonCodes] PBRT_GPU(int idx) {
-            LightcutsBuildContainer cont = dLightsContainer[idx];
+            LightBVHBuildContainer cont = dLightsContainer[idx];
             LightTreeConstructionNodeGPU<LightBounds> leaf(cont.bounds, kInvalidIndex, idx);
             Point3f centroid = cont.bounds.Centroid();
             Vector3f offset = buildState.allLightBounds.Offset(centroid);
@@ -101,7 +101,7 @@ class LTCTreeBuilderGPU final : public LightTreeBuilderGPU<LightBounds, uint64_t
         return true;
     }
 
-    void FlattenTree(LightcutsTree& tree, std::vector<LightcutsBuildContainer> &lights, HashMap<Light, uint32_t>& bitTrailContainer, Float& u) {
+    void FlattenTree(LTCLightTree& tree, std::vector<LightBVHBuildContainer> &lights, HashMap<Light, uint32_t>& bitTrailContainer) {
         const LightTreeBuildState<LightBounds> &state(State());
         if (state.nLights == 0)
             return;
@@ -115,17 +115,17 @@ class LTCTreeBuilderGPU final : public LightTreeBuilderGPU<LightBounds, uint64_t
 
         tree.nodes.reserve(nNodes);
 
-        SLCNodeEmitter emitter(tree, bitTrailContainer);
-        GPUToLightcutsLeaf adapter(hostNodes, lights);
+        LTCNodeEmitter emitter(tree, bitTrailContainer);
+        GPUToLightBVHLeaf adapter(hostNodes);
         
-        FlattenLightTree<GPUToLightcutsLeaf, SLCNodeEmitter>(adapter, rootIndex, 0, 0, emitter, u);
+        FlattenLightTree<GPUToLightBVHLeaf, LTCNodeEmitter>(adapter, rootIndex, 0, 0, emitter);
     }
 
 private:
     Bounds3f m_allLightBounds;
 };
 
-bool LTCLightSampler::buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights, Float& u) {
+bool LTCLightSampler::buildLightTreeGPU(std::vector<LightBVHBuildContainer> &lights) {
     if (lights.size() < 100 || !Options->useGPU)
         return false;
 
@@ -133,7 +133,7 @@ bool LTCLightSampler::buildLightTreeGPU(std::vector<LightcutsBuildContainer> &li
     if (!builder.Build(lights))
         return false;
 
-    builder.FlattenTree(m_tree, lights, m_lightToBitTrail, u);
+    builder.FlattenTree(m_tree, lights, m_lightToBitTrail);
     return true;
 }
 #endif
@@ -304,7 +304,7 @@ uint32_t LTCLightSampler::BuildPartitionTree(pstd::span<ShadingPoint>& items, in
 }
 
 PBRT_CPU_GPU
-static void MakeInitialTreeCut(OnlineLightTreeCut& cut, ShadingPoint representant, const LightcutsTreeNode* nodes, Bounds3f allLightBounds) {
+static void MakeInitialTreeCut(OnlineLightTreeCut& cut, ShadingPoint representant, const LTCTreeNode* nodes, Bounds3f allLightBounds) {
     constexpr uint32_t initialCutSize = 4;
 
     auto AddCluster = [&cut](uint32_t cutIndex, uint32_t index, Float importance, uint32_t bitTrail, uint32_t depth) {
@@ -317,9 +317,11 @@ static void MakeInitialTreeCut(OnlineLightTreeCut& cut, ShadingPoint representan
     };
 
     // Initialize the cut with the root node
-    const LightcutsTreeNode* root = &nodes[0];
+    const LTCTreeNode* root = &nodes[0];
     AddCluster(0, 0, root->compactLightBounds.PhiOrI(), 0, 0);
     cut.cutSize = 1;
+    cut.currentIteration = 1;
+    cut.lastUpdateIteration = 0;
 
     const Point3f p = representant.point;
     const Vector3f wo(representant.dir);
@@ -335,7 +337,7 @@ static void MakeInitialTreeCut(OnlineLightTreeCut& cut, ShadingPoint representan
         // Find the node in the current cut with the highest importance
         for (uint32_t i = 0; i < cut.cutSize; ++i) {
             uint32_t nodeIndex = cut.clusterIndex[i];
-            const LightcutsTreeNode* node = &nodes[nodeIndex];
+            const LTCTreeNode* node = &nodes[nodeIndex];
 
             const bool isLeaf = node->isLeaf;
             if (!isLeaf && cut.q[i] > maxImportance) {
@@ -351,16 +353,16 @@ static void MakeInitialTreeCut(OnlineLightTreeCut& cut, ShadingPoint representan
         // expand the selected node
         //OnlineCutData parentData = cut.data[maxIdx];
         const uint32_t clusterIndex = cut.clusterIndex[maxIdx];
-        const LightcutsTreeNode* parentNode = &nodes[clusterIndex];
+        const LTCTreeNode* parentNode = &nodes[clusterIndex];
 
         const uint32_t leftChildIndex = clusterIndex + 1;
         const uint32_t rightChildIndex = parentNode->childOrLightIndex;
 
-        const LightcutsTreeNode* leftChild = &nodes[leftChildIndex];
-        const LightcutsTreeNode* rightChild = &nodes[rightChildIndex];
+        const LTCTreeNode* leftChild = &nodes[leftChildIndex];
+        const LTCTreeNode* rightChild = &nodes[rightChildIndex];
 
         Float lu0, lu1;
-        if (!ComputeErrorBounds(lu0, lu1, p, wo, n, shadingFrame, nullptr, leftChild, rightChild, allLightBounds)) {
+        if (!ComputeErrorBounds(lu0, lu1, p, wo, n, shadingFrame, nullptr, leftChild->compactLightBounds, rightChild->compactLightBounds, allLightBounds)) {
             lu0 = std::max(leftChild->compactLightBounds.PhiOrI() *  MathEpsilon, MathEpsilon);
             lu1 = std::max(rightChild->compactLightBounds.PhiOrI() * MathEpsilon, MathEpsilon);
         }
@@ -397,7 +399,7 @@ void LTCLightSampler::SetupScenePartitions(pstd::span<ShadingPoint> shadingPoint
     
     if (Options->useGPU) {
 #ifdef PBRT_BUILD_GPU_RENDERER
-        const LightcutsTreeNode* treeNodes = m_tree.nodes.data();
+        const LTCTreeNode* treeNodes = m_tree.nodes.data();
         const ShadingPoint* representants = m_partitions.representantPoints.data();
         OnlineLightTreeCut** leaves = m_partitions.leaves.data();
         Bounds3f allLightBounds = m_tree.allLightBounds;
@@ -423,19 +425,40 @@ void LTCLightSampler::SetupScenePartitions(pstd::span<ShadingPoint> shadingPoint
 }
 
 PBRT_CPU_GPU
-static bool ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& representant, const LightcutsTree* tree, const uint32_t currentIteration, uint32_t cutIndex, const Float learningRate) {
+static void ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& representant, const LTCLightTree* tree, uint32_t cutIndex, const Float gamma, const Float beta, const Float omega) {
     const uint32_t lastCutSize = cut.cutSize;
-
-    // Count actual pixel samples influencing this cut
-    uint32_t totalCutSamples = 0;
-    for (uint32_t idx = 0; idx < lastCutSize; ++idx) {
-        totalCutSamples += cut.visitCountAccumulator[idx];
+    
+    // max cut reached
+    if (lastCutSize == PBRT_LTC_MAX_CUT_SIZE - 1) {
+        return;
+    }
+    
+    // stop refining if no updates happen for a while
+    if (cut.currentIteration > cut.lastUpdateIteration &&
+        static_cast<Float>(cut.currentIteration - cut.lastUpdateIteration) / lastCutSize > gamma) {
+        return;
     }
 
     // initial sampling budget for learning
     constexpr Float n0 = 4.0f;
     constexpr Float initialCutSize = 4.0f;
     const Float nt = std::max(lastCutSize / initialCutSize, Float(2)) * n0;
+
+    //Count actual pixel samples influencing this cut
+    uint32_t totalCutSamples = 0;
+    for (uint32_t idx = 0; idx < lastCutSize; ++idx) {
+        totalCutSamples += cut.visitCountAccumulator[idx];
+    }
+
+    if (totalCutSamples < nt) {
+        return;
+    }
+
+    const uint32_t currentIteration = cut.currentIteration;
+    const Float t = currentIteration;
+    const Float learningRate = 1 / (beta * std::pow(t, omega));
+
+    ++cut.currentIteration;
 
     Float sumVariance = 0;
     for (uint32_t idx = 0; idx < lastCutSize; ++idx) {
@@ -456,7 +479,7 @@ static bool ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& re
             var += learningRate * varianceDelta;
             
             const Float visitedRatio = static_cast<Float>(numSamples) / totalCutSamples;
-            const Float scaledVisits = visitedRatio * nt;
+            const uint32_t scaledVisits = visitedRatio * nt;
 
             cut.q[idx] = importance;
             cut.variance[idx] = var;
@@ -468,6 +491,7 @@ static bool ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& re
         cut.visitCountAccumulator[idx] = 0;
         sumVariance += var;
     }
+    sumVariance += MathEpsilon;
 
     uint32_t splitCount = 0;
     if (sumVariance > MathEpsilon) {
@@ -484,7 +508,7 @@ static bool ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& re
         for (uint32_t i = 0; i < lastCutSize; ++i) {
             const uint32_t clusterIndex = cut.clusterIndex[i];
             const uint32_t visitCount = cut.visitCount[i];
-            const LightcutsTreeNode* node = &tree->nodes[clusterIndex];
+            const LTCTreeNode* node = &tree->nodes[clusterIndex];
 
             if (node->isLeaf || newCutSize >= PBRT_LTC_MAX_CUT_SIZE - 1 || visitCount <= 1) {
                 continue;
@@ -513,16 +537,16 @@ static bool ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& re
             const uint32_t parentDepth = cut.depth[cutIdx];
             const Float parentImportance = cut.q[cutIdx];
 
-            const LightcutsTreeNode* node = &tree->nodes[clusterIndex];
+            const LTCTreeNode* node = &tree->nodes[clusterIndex];
             const uint32_t childIndex0 = clusterIndex + 1;
             const uint32_t childIndex1 = node->childOrLightIndex;
             
-            const LightcutsTreeNode* child0 = &tree->nodes[childIndex0];
-            const LightcutsTreeNode* child1 = &tree->nodes[childIndex1];
+            const LTCTreeNode* child0 = &tree->nodes[childIndex0];
+            const LTCTreeNode* child1 = &tree->nodes[childIndex1];
             
             // Child initialization
             Float lu0, lu1;
-            if (!ComputeErrorBounds(lu0, lu1, p, wo, n, shadingFrame, nullptr, child0, child1, allLightBounds, true)) {
+            if (!ComputeErrorBounds(lu0, lu1, p, wo, n, shadingFrame, nullptr, child0->compactLightBounds, child1->compactLightBounds, allLightBounds, true)) {
                 // the representative light could be a bad pick for the cluster of light
                 // fallback to the light intensities
                 lu0 = std::max(child0->compactLightBounds.PhiOrI() * MathEpsilon, MathEpsilon);
@@ -537,8 +561,10 @@ static bool ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& re
                 lu1 = std::max(MathEpsilon, child1->compactLightBounds.PhiOrI() * MathEpsilon);
             }
 
-            const Float luSum = lu0 + lu1;
-            const Float probLeft = std::min(lu0 / luSum, OneMinusEpsilon);
+            Float sqrt0 = std::sqrt(lu0);
+            Float sqrt1 = std::sqrt(lu1);
+            Float sumSqrt = sqrt0 + sqrt1;
+            const Float probLeft = std::min(sqrt0 / sumSqrt, OneMinusEpsilon);
             const Float probRight = 1 - probLeft;
 
             // Approximate visit counts based on the bounds
@@ -584,7 +610,9 @@ static bool ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& re
         cut.prefixSum[idx] = sum;
     }
 
-    return splitCount > 0;
+    if (splitCount > 0) {
+        cut.lastUpdateIteration = currentIteration;
+    }
 }
 
 void LTCLightSampler::Update(const uint32_t currentIteration) {
@@ -595,58 +623,41 @@ void LTCLightSampler::Update(const uint32_t currentIteration) {
     }
 #endif
 
-    const Float t = currentIteration;
-    const Float learningRate = 1 / (m_beta * std::pow(t, m_omega));
-
-    for (int idx = 0; idx < m_partitions.leaves.size(); ++idx) {
-        OnlineLightTreeCut& cut(*m_partitions.leaves[idx]);
-    
-        // max cut reached
-        if (cut.cutSize == PBRT_LTC_MAX_CUT_SIZE - 1) {
-            return;
-        }
-        
-        const uint32_t lastCutSize = cut.cutSize;
-        
-        // stop refining if no updates happen for a while
-        if (currentIteration > cut.lastUpdateIteration &&
-            static_cast<Float>(currentIteration - cut.lastUpdateIteration) / lastCutSize > m_gamma) {
-            return;
-        }
-    
-        if (ApplyIterationUpdate(cut, m_partitions.representantPoints[idx], &m_tree, currentIteration, idx, learningRate)) {
-            cut.lastUpdateIteration = currentIteration;
-        }
-    }
-    
-    return;
+    //for (int idx = 0; idx < m_partitions.leaves.size(); ++idx) {
+    //    OnlineLightTreeCut& cut(*m_partitions.leaves[idx]);
+    //
+    //    // max cut reached
+    //    if (cut.cutSize == PBRT_LTC_MAX_CUT_SIZE - 1) {
+    //        return;
+    //    }
+    //    
+    //    const uint32_t lastCutSize = cut.cutSize;
+    //    
+    //    // stop refining if no updates happen for a while
+    //    if (currentIteration > cut.lastUpdateIteration &&
+    //        static_cast<Float>(currentIteration - cut.lastUpdateIteration) / lastCutSize > m_gamma) {
+    //        return;
+    //    }
+    //
+    //    if (ApplyIterationUpdate(cut, m_partitions.representantPoints[idx], &m_tree, currentIteration, idx, learningRate)) {
+    //        cut.lastUpdateIteration = currentIteration;
+    //    }
+    //}
+    //
+    //return;
 
     if (Options->useGPU) {
 #ifdef PBRT_BUILD_GPU_RENDERER
         OnlineLightTreeCut** leaves = m_partitions.leaves.data();
         ShadingPoint* representants = m_partitions.representantPoints.data();
-        const LightcutsTree* tree = &m_tree;
+        const LTCLightTree* tree = &m_tree;
         const Float gamma = m_gamma;
+        const Float beta = m_beta;
+        const Float omega = m_omega;
         GPUParallelFor("Apply LTC update to partition cuts", ProfilerKernelGroup::WAVEFRONT, m_partitions.leaves.size(),
-            [tree, leaves, representants, currentIteration, learningRate, gamma] PBRT_GPU(int idx) {
+            [tree, leaves, representants, gamma, beta, omega] PBRT_GPU(int idx) {
             OnlineLightTreeCut& cut(*leaves[idx]);
-
-            // max cut reached
-            if (cut.cutSize == PBRT_LTC_MAX_CUT_SIZE - 1) {
-                return;
-            }
-            
-            const uint32_t lastCutSize = cut.cutSize;
-            
-            // stop refining if no updates happen for a while
-            if (currentIteration > cut.lastUpdateIteration &&
-                static_cast<Float>(currentIteration - cut.lastUpdateIteration) / lastCutSize > gamma) {
-                return;
-            }
-
-            if (ApplyIterationUpdate(cut, representants[idx], tree, currentIteration, idx, learningRate)) {
-                cut.lastUpdateIteration = currentIteration;
-            }
+            ApplyIterationUpdate(cut, representants[idx], tree, idx, gamma, beta, omega);
         });
 
         GPUWait();
@@ -655,25 +666,9 @@ void LTCLightSampler::Update(const uint32_t currentIteration) {
 #endif
     }
     else {
-        ParallelFor(0, m_partitions.leaves.size(), [this, currentIteration, learningRate](int idx) {
+        ParallelFor(0, m_partitions.leaves.size(), [this](int idx) {
             OnlineLightTreeCut& cut(*m_partitions.leaves[idx]);
-
-            // max cut reached
-            if (cut.cutSize == PBRT_LTC_MAX_CUT_SIZE - 1) {
-                return;
-            }
-            
-            const uint32_t lastCutSize = cut.cutSize;
-            
-            // stop refining if no updates happen for a while
-            if (currentIteration > cut.lastUpdateIteration &&
-                static_cast<Float>(currentIteration - cut.lastUpdateIteration) / lastCutSize > m_gamma) {
-                return;
-            }
-
-            if (ApplyIterationUpdate(cut, m_partitions.representantPoints[idx], &m_tree, currentIteration, idx, learningRate)) {
-                cut.lastUpdateIteration = currentIteration;
-            }
+            ApplyIterationUpdate(cut, m_partitions.representantPoints[idx], &m_tree, idx, m_gamma, m_beta, m_omega);
         });
     }
 }

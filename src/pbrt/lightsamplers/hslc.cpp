@@ -38,16 +38,16 @@ HSLCLightSampler::HSLCLightSampler(pstd::span<const Light> lights, Allocator all
         }
     }
 
-    RNG rng;
-    Float u = rng.Uniform<Float>();
+    //RNG rng;
+    //Float u = rng.Uniform<Float>();
     if (!treeLights.empty()) {
 #ifdef PBRT_BUILD_GPU_RENDERER
-        bool buildOnGPU = buildLightTreeGPU(treeLights, u);
+        bool buildOnGPU = buildLightTreeGPU(treeLights);
         if (!buildOnGPU)
 #endif
         {
             SLCNodeEmitter emitter(m_tree, m_lightToBitTrail);
-            BuildLightTree<16, LightcutsBuildContainer, SAOHCostEvaluator, SLCNodeEmitter>(treeLights, 0, treeLights.size(), 0, 0, SAOHCostEvaluator(), emitter, u);
+            BuildLightTree<16, LightcutsBuildContainer, SAOHCostEvaluator, SLCNodeEmitter>(treeLights, 0, treeLights.size(), 0, 0, SAOHCostEvaluator(), emitter);
         }
     }
 
@@ -96,7 +96,7 @@ class HSLCTreeBuilderGPU final : public LightTreeBuilderGPU<LightBounds, uint64_
         return true;
     }
 
-    void FlattenTree(LightcutsTree& tree, std::vector<LightcutsBuildContainer> &lights, HashMap<Light, uint32_t>& bitTrailContainer, Float& u) {
+    void FlattenTree(LightcutsTree& tree, std::vector<LightcutsBuildContainer> &lights, HashMap<Light, uint32_t>& bitTrailContainer) {
         const LightTreeBuildState<LightBounds> &state(State());
         if (state.nLights == 0)
             return;
@@ -113,14 +113,14 @@ class HSLCTreeBuilderGPU final : public LightTreeBuilderGPU<LightBounds, uint64_
         SLCNodeEmitter emitter(tree, bitTrailContainer);
         GPUToLightcutsLeaf adapter(hostNodes, lights);
         
-        FlattenLightTree<GPUToLightcutsLeaf, SLCNodeEmitter>(adapter, rootIndex, 0, 0, emitter, u);
+        FlattenLightTree<GPUToLightcutsLeaf, SLCNodeEmitter>(adapter, rootIndex, 0, 0, emitter);
     }
 
 private:
     Bounds3f m_allLightBounds;
 };
 
-bool HSLCLightSampler::buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights, Float& u) {
+bool HSLCLightSampler::buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights) {
     if (lights.size() < 100 || !Options->useGPU)
         return false;
 
@@ -128,7 +128,7 @@ bool HSLCLightSampler::buildLightTreeGPU(std::vector<LightcutsBuildContainer> &l
     if (!builder.Build(lights))
         return false;
 
-    builder.FlattenTree(m_tree, lights, m_lightToBitTrail, u);
+    builder.FlattenTree(m_tree, lights, m_lightToBitTrail);
     return true;
 }
 #endif

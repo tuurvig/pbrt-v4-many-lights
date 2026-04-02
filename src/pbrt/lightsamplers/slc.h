@@ -82,7 +82,7 @@ class SLCLightSampler {
 
             Float errBounds[2] = {1, 1};
 
-            if (!ComputeErrorBounds(errBounds[0], errBounds[1], p, wo, n, shadingFrame, bsdf, children[0], children[1], m_tree.allLightBounds, true)) {
+            if (!ComputeErrorBounds(errBounds[0], errBounds[1], p, wo, n, shadingFrame, bsdf, children[0]->compactLightBounds, children[1]->compactLightBounds, m_tree.allLightBounds, true)) {
                 return {};
             }
 
@@ -168,7 +168,7 @@ class SLCLightSampler {
             const LightcutsTreeNode* children[2] = {&m_tree.nodes[childrenIndices[0]],
                                                     &m_tree.nodes[childrenIndices[1]]};
             Float errBounds[2] = {1, 1};
-            if (!ComputeErrorBounds(errBounds[0], errBounds[1], p, wo, n, shadingFrame, bsdf, children[0], children[1], m_tree.allLightBounds, true)) {
+            if (!ComputeErrorBounds(errBounds[0], errBounds[1], p, wo, n, shadingFrame, bsdf, children[0]->compactLightBounds, children[1]->compactLightBounds, m_tree.allLightBounds, true)) {
                 return 0;
             }
 
@@ -284,7 +284,7 @@ class SLCLightSampler {
 
                 Float errBounds[2] = {1, 1};
 
-                if (!ComputeErrorBounds(errBounds[0], errBounds[1], p, wo, n, shadingFrame, bsdf, children[0], children[1], m_tree.allLightBounds, true)) {
+                if (!ComputeErrorBounds(errBounds[0], errBounds[1], p, wo, n, shadingFrame, bsdf, children[0]->compactLightBounds, children[1]->compactLightBounds, m_tree.allLightBounds, true)) {
                     failed = true;
                     break;
                 }
@@ -328,7 +328,7 @@ class SLCLightSampler {
 
   private:
 #ifdef PBRT_BUILD_GPU_RENDERER
-    bool buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights, Float& u);
+    bool buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights);
 #endif
 
     // LightcutsLightSampler Private Members

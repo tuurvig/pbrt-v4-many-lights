@@ -59,7 +59,7 @@ class LightcutsTreeBuilderGPU final : public LightTreeBuilderGPU<LightBounds, ui
         return true;
     }
 
-    void FlattenTree(LightcutsTree& tree, std::vector<LightcutsBuildContainer> &lights, HashMap<Light, LightLocation>& bitTrailContainer, Float& u) {
+    void FlattenTree(LightcutsTree& tree, std::vector<LightcutsBuildContainer> &lights, HashMap<Light, LightLocation>& bitTrailContainer) {
         const LightTreeBuildState<LightBounds> &state(State());
         if (state.nLights == 0)
             return;
@@ -76,7 +76,7 @@ class LightcutsTreeBuilderGPU final : public LightTreeBuilderGPU<LightBounds, ui
         LightcutsNodeEmitter emitter(tree, bitTrailContainer, m_isPoint);
         GPUToLightcutsLeaf adapter(hostNodes, lights);
         
-        FlattenLightTree<GPUToLightcutsLeaf, LightcutsNodeEmitter>(adapter, rootIndex, 0, 0, emitter, u);
+        FlattenLightTree<GPUToLightcutsLeaf, LightcutsNodeEmitter>(adapter, rootIndex, 0, 0, emitter);
     }
 
 private:
@@ -128,27 +128,25 @@ LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, All
         }
     }
 
-    RNG rng;
-    Float u = rng.Uniform<Float>();
     if (!pointLights.empty()) {
 #ifdef PBRT_BUILD_GPU_RENDERER
-        bool buildOnGPU = buildLightTreeGPU(pointLights, m_pointTree, true, u);
+        bool buildOnGPU = buildLightTreeGPU(pointLights, m_pointTree, true);
         if (!buildOnGPU)
 #endif
         {
             LightcutsNodeEmitter emitter(m_pointTree, m_lightToLocation, true);
-            BuildLightTree<16, LightcutsBuildContainer, LightcutsCostEvaluator, LightcutsNodeEmitter>(pointLights, 0, pointLights.size(), 0, 0, LightcutsCostEvaluator(m_pointTree.allLightBounds, true), emitter, u);
+            BuildLightTree<16, LightcutsBuildContainer, LightcutsCostEvaluator, LightcutsNodeEmitter>(pointLights, 0, pointLights.size(), 0, 0, LightcutsCostEvaluator(m_pointTree.allLightBounds, true), emitter);
         }
     }
 
     if (!spotLights.empty()) {
 #ifdef PBRT_BUILD_GPU_RENDERER
-        bool buildOnGPU = buildLightTreeGPU(spotLights, m_spotTree, false, u);
+        bool buildOnGPU = buildLightTreeGPU(spotLights, m_spotTree, false);
         if (!buildOnGPU)
 #endif
         {
             LightcutsNodeEmitter emitter(m_spotTree, m_lightToLocation, false);
-            BuildLightTree<16, LightcutsBuildContainer, LightcutsCostEvaluator, LightcutsNodeEmitter>(spotLights, 0, spotLights.size(), 0, 0, LightcutsCostEvaluator(m_spotTree.allLightBounds, false), emitter, u);
+            BuildLightTree<16, LightcutsBuildContainer, LightcutsCostEvaluator, LightcutsNodeEmitter>(spotLights, 0, spotLights.size(), 0, 0, LightcutsCostEvaluator(m_spotTree.allLightBounds, false), emitter);
         }
     }
 
@@ -196,7 +194,7 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
 }
 
 #ifdef PBRT_BUILD_GPU_RENDERER
-bool LightcutsLightSampler::buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights, LightcutsTree& tree, bool isPoint, Float& u) {
+bool LightcutsLightSampler::buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights, LightcutsTree& tree, bool isPoint) {
     if (lights.size() < 100 || !Options->useGPU)
         return false;
 
@@ -204,7 +202,7 @@ bool LightcutsLightSampler::buildLightTreeGPU(std::vector<LightcutsBuildContaine
     if (!builder.Build(lights))
         return false;
 
-    builder.FlattenTree(tree, lights, m_lightToLocation, u);
+    builder.FlattenTree(tree, lights, m_lightToLocation);
     return true;
 }
 #endif

@@ -72,9 +72,8 @@ class BVHLightTreeBuilder final : public LightTreeBuilderGPU<LightBounds, uint64
 
         LightHierarchyNodeEmitter emitter(nodes, bitTrailContainer, lights, m_allLightBounds);
         GPUToLightBVHLeaf adapter(hostNodes);
-        Float u = 0;
 
-        FlattenLightTree<GPUToLightBVHLeaf, LightHierarchyNodeEmitter>(adapter, rootIndex, 0, 0, emitter, u);
+        FlattenLightTree<GPUToLightBVHLeaf, LightHierarchyNodeEmitter>(adapter, rootIndex, 0, 0, emitter);
     }
 
     static uint64_t* UploadSortedLeaves(LightTreeBuildState<LightBounds>& buildState, uint64_t* dMortonCodes, const std::vector<LightBVHBuildContainer> &lights) {
@@ -175,8 +174,7 @@ BVHLightSampler::BVHLightSampler(pstd::span<const Light> lights, Allocator alloc
 #endif
         {
             LightHierarchyNodeEmitter nodeEmitter(m_nodes, m_lightToBitTrail, m_lights, m_allLightBounds);
-            Float u = 0;
-            BuildLightTree<16, LightBVHBuildContainer, SAOHCostEvaluator, LightHierarchyNodeEmitter>(bvhLights, 0, bvhLights.size(), 0, 0, SAOHCostEvaluator(), nodeEmitter, u);
+            BuildLightTree<16, LightBVHBuildContainer, SAOHCostEvaluator, LightHierarchyNodeEmitter>(bvhLights, 0, bvhLights.size(), 0, 0, SAOHCostEvaluator(), nodeEmitter);
         }
     }
     

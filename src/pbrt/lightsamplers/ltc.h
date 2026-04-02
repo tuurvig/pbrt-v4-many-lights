@@ -1,6 +1,6 @@
 // ltc.h - LTCLightSampler class is Copyright(c) 2025-2026 Richard Kvasnica.
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
-// The pbrt and lightcuts.h source code is licensed under the Apache License, Version 2.0.
+// The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
 #ifndef  PBRT_LTC_LIGHTSAMPLER_H
@@ -81,6 +81,7 @@ struct OnlineLightTreeCut {
     AtomicInt<uint32_t> visitCountAccumulator[PBRT_LTC_MAX_CUT_SIZE];
     uint32_t cutSize;
     uint32_t lastUpdateIteration;
+    uint32_t currentIteration;
 };
 
 struct PartitionTree {
@@ -121,9 +122,9 @@ class LTCLightSampler {
         if (m_tree.nodes.empty())
             return {};
 
-        Point3f p = ctx.p();
-        Vector3f wo = ctx.wo;
-        Normal3f n = ctx.ns;
+        const Point3f p = ctx.p();
+        const Vector3f wo = ctx.wo;
+        const Normal3f n = ctx.ns;
 
         BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
         Frame shadingFrame(bsdf ? bsdf->shadingFrame : Frame::FromZ(ctx.ns));
@@ -169,25 +170,33 @@ class LTCLightSampler {
             nodeIndex = cut.clusterIndex[offset];
         }
         
-        const LightcutsTreeNode* node = &m_tree.nodes[nodeIndex];
+        const LTCTreeNode* node = &m_tree.nodes[nodeIndex];
         Float clusterPdf = 1;
         while (!node->isLeaf) {
             uint32_t childrenIndices[2] = {static_cast<uint32_t>(nodeIndex + 1), node->childOrLightIndex};
 
-            const LightcutsTreeNode *children[2] = {&m_tree.nodes[childrenIndices[0]],
-                                                    &m_tree.nodes[childrenIndices[1]]};
+            const LTCTreeNode *children[2] = {&m_tree.nodes[childrenIndices[0]],
+                                              &m_tree.nodes[childrenIndices[1]]};
             
             const Float nodeIntensities[2] = {children[0]->compactLightBounds.PhiOrI(),
                                               children[1]->compactLightBounds.PhiOrI()};
             Float errBounds[2] = {1, 1};
 
-            if (!ComputeErrorBounds(errBounds[0], errBounds[1], p, wo, n, shadingFrame, bsdf, children[0], children[1], m_tree.allLightBounds)) {
+            if (!ComputeErrorBounds(errBounds[0], errBounds[1], p, wo, n, shadingFrame, bsdf, children[0]->compactLightBounds, children[1]->compactLightBounds, m_tree.allLightBounds)) {
                 AccumulateContribution(0, lightSamplerHint);
                 return {};
             }
 
             Float weights[2] = {0};
-            weights[0] = std::min(OneMinusEpsilon, errBounds[0] / (errBounds[0] + errBounds[1]));
+            const Float sqrt0 = SafeSqrt(errBounds[0]);
+            const Float sqrt1 = SafeSqrt(errBounds[1]);
+            const Float sumSqrt = sqrt0 + sqrt1;
+
+            if (sumSqrt > 0) {
+                weights[0] = std::min(OneMinusEpsilon, sqrt0 / sumSqrt);
+            } else {
+                weights[0] = 0.5f;
+            }
             weights[1] = 1 - weights[0];
             
             // Randomly sample light BVH child node
@@ -220,9 +229,9 @@ class LTCLightSampler {
 
         // Initialize local variables for BVH traversal for PMF computation
         uint32_t bitTrail = m_lightToBitTrail[light];
-        Point3f p = ctx.p();
-        Normal3f n = ctx.ns;
-        Vector3f wo = ctx.wo;
+        const Point3f p = ctx.p();
+        const Normal3f n = ctx.ns;
+        const Vector3f wo = ctx.wo;
         
         Float pmf = 1 - pInfinite;
 
@@ -257,24 +266,32 @@ class LTCLightSampler {
             pmf *= cut.q[foundIndex] / weightSum;
         }
 
-        const LightcutsTreeNode *node = &m_tree.nodes[nodeIndex];
+        const LTCTreeNode *node = &m_tree.nodes[nodeIndex];
 
         // Compute light's cluster pdf by walking down tree nodes to the light
         while (!node->isLeaf) {
             // Compute child importances and update PMF for current node
             uint32_t childrenIndices[2] = {static_cast<uint32_t>(nodeIndex + 1), node->childOrLightIndex};
 
-            const LightcutsTreeNode *children[2] = {&m_tree.nodes[childrenIndices[0]],
+            const LTCTreeNode *children[2] = {&m_tree.nodes[childrenIndices[0]],
                                                     &m_tree.nodes[childrenIndices[1]]};
 
             Float errBounds[2] = {1, 1};
             
-            if (!ComputeErrorBounds(errBounds[0], errBounds[1], p, wo, n, shadingFrame, bsdf, children[0], children[1], m_tree.allLightBounds)) {
+            if (!ComputeErrorBounds(errBounds[0], errBounds[1], p, wo, n, shadingFrame, bsdf, children[0]->compactLightBounds, children[1]->compactLightBounds, m_tree.allLightBounds)) {
                 return 0;
             }
 
             Float weights[2] = {0};
-            weights[0] = std::min(OneMinusEpsilon, errBounds[0] / (errBounds[0] + errBounds[1]));
+            const Float sqrt0 = SafeSqrt(errBounds[0]);
+            const Float sqrt1 = SafeSqrt(errBounds[1]);
+            const Float sumSqrt = sqrt0 + sqrt1;
+
+            if (sumSqrt > 0) {
+                weights[0] = std::min(OneMinusEpsilon, sqrt0 / sumSqrt);
+            } else {
+                weights[0] = 0.5f;
+            }
             weights[1] = 1 - weights[0];
 
             const int child = bitTrail & 1;
@@ -380,7 +397,7 @@ class LTCLightSampler {
   private:
     // Learning To Cluster Light Sampler Private Methods
 #ifdef PBRT_BUILD_GPU_RENDERER
-    bool buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights, Float& u);
+    bool buildLightTreeGPU(std::vector<LightBVHBuildContainer> &lights);
 #endif
 
     uint32_t BuildPartitionTree(pstd::span<ShadingPoint>& items, int start, int end);
@@ -389,7 +406,7 @@ class LTCLightSampler {
     uint32_t GetPartitionIndex(const Point3f& p, const UniformDiskVector& oct) const;
      
     // Learning To Cluster Light Sampler Private Members
-    LightcutsTree m_tree;
+    LTCLightTree m_tree;
     PartitionTree m_partitions;
     pstd::vector<Light> m_infiniteLights;
     HashMap<Light, uint32_t> m_lightToBitTrail;

@@ -39,7 +39,7 @@ struct NodeEmitterInterface {
     // Since BuildLightTree is recursive and single-threaded the node at reservationIndex should be valid and waiting.
     // We reserve before recursion and finalize after both recursions are finished.
     // This ordering ensures the index of left child node is always at the increment index of current node.
-    virtual ResultType FinalizeInterior(int reservationIndex, const ResultType& left, const ResultType& right, Float& u) = 0;
+    virtual ResultType FinalizeInterior(int reservationIndex, const ResultType& left, const ResultType& right) = 0;
 };
 
 template <typename InputTypeT, typename OutputTypeT>
@@ -71,8 +71,7 @@ typename NodeEmitter::ResultType BuildLightTree(std::vector<BuildContainer>& ite
                                                 uint32_t bitTrail,
                                                 int depth,
                                                 const CostEvaluator& costEval,
-                                                NodeEmitter& emitter,
-                                                Float& u) {
+                                                NodeEmitter& emitter) {
     DCHECK_LT(start, end);
 
     // 1. Base Case: Emit Leaf
@@ -152,11 +151,11 @@ typename NodeEmitter::ResultType BuildLightTree(std::vector<BuildContainer>& ite
     auto reservation = emitter.ReserveInterior();
 
     // 5. Recursion
-    auto leftRes  = BuildLightTree<NBuckets, BuildContainer, CostEvaluator, NodeEmitter>(items, start, mid, bitTrail, depth + 1, costEval, emitter, u);
-    auto rightRes = BuildLightTree<NBuckets, BuildContainer, CostEvaluator, NodeEmitter>(items, mid, end, bitTrail | (1u << depth), depth + 1, costEval, emitter, u);
+    auto leftRes  = BuildLightTree<NBuckets, BuildContainer, CostEvaluator, NodeEmitter>(items, start, mid, bitTrail, depth + 1, costEval, emitter);
+    auto rightRes = BuildLightTree<NBuckets, BuildContainer, CostEvaluator, NodeEmitter>(items, mid, end, bitTrail | (1u << depth), depth + 1, costEval, emitter);
 
     // 6. Finalize Interior
-    return emitter.FinalizeInterior(reservation, leftRes, rightRes, u);
+    return emitter.FinalizeInterior(reservation, leftRes, rightRes);
 }
 
 template <typename TreeNodesAdapter, typename NodeEmitter>
@@ -164,8 +163,7 @@ typename NodeEmitter::ResultType FlattenLightTree(const TreeNodesAdapter& nodes,
                                                   uint32_t nodeIdx,
                                                   uint32_t bitTrail,
                                                   int depth,
-                                                  NodeEmitter& emitter,
-                                                  Float& u) {
+                                                  NodeEmitter& emitter) {
     const auto& node(nodes.At(nodeIdx));
 
     if (nodes.IsLeaf(node)) {
@@ -175,11 +173,12 @@ typename NodeEmitter::ResultType FlattenLightTree(const TreeNodesAdapter& nodes,
     auto reservation = emitter.ReserveInterior();
 
     // Recursively process children
-    auto leftRes = FlattenLightTree(nodes, nodes.Left(node), bitTrail, depth + 1, emitter, u);
-    auto rightRes = FlattenLightTree(nodes, nodes.Right(node), bitTrail | (1u << depth), depth + 1, emitter, u);
+    auto leftRes = FlattenLightTree(nodes, nodes.Left(node), bitTrail, depth + 1, emitter);
+    auto rightRes = FlattenLightTree(nodes, nodes.Right(node), bitTrail | (1u << depth), depth + 1, emitter);
 
-    return emitter.FinalizeInterior(reservation, leftRes, rightRes, u);
+    return emitter.FinalizeInterior(reservation, leftRes, rightRes);
 }
+
 }
 
 #endif //PBRT_UTIL_LIGHTTREE_GENERIC_H

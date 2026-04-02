@@ -60,7 +60,7 @@ class HSLCLightSampler {
                                               children[1]->compactLightBounds.PhiOrI()};
             Float errBounds[2] = {1, 1};
 
-            if (!ComputeErrorBounds(errBounds[0], errBounds[1], p, wo, n, shadingFrame, bsdf, children[0], children[1], m_tree.allLightBounds)) {
+            if (!ComputeErrorBounds(errBounds[0], errBounds[1], p, wo, n, shadingFrame, bsdf, children[0]->compactLightBounds, children[1]->compactLightBounds, m_tree.allLightBounds)) {
                 return {};
             }
 
@@ -118,7 +118,7 @@ class HSLCLightSampler {
 
             Float errBounds[2] = {1, 1};
             
-            if (!ComputeErrorBounds(errBounds[0], errBounds[1], p, wo, n, shadingFrame, bsdf, children[0], children[1], m_tree.allLightBounds)) {
+            if (!ComputeErrorBounds(errBounds[0], errBounds[1], p, wo, n, shadingFrame, bsdf, children[0]->compactLightBounds, children[1]->compactLightBounds, m_tree.allLightBounds)) {
                 return 0;
             }
 
@@ -202,7 +202,7 @@ class HSLCLightSampler {
   private:
     // HierarchicLightcutsLightSampler Private Methods
 #ifdef PBRT_BUILD_GPU_RENDERER
-    bool buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights, Float& u);
+    bool buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights);
 #endif
 
     // HierarchicLightcutsLightSampler Private Members

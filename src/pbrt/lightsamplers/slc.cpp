@@ -38,16 +38,14 @@ SLCLightSampler::SLCLightSampler(pstd::span<const Light> lights, Allocator alloc
         }
     }
 
-    RNG rng;
-    Float u = rng.Uniform<Float>();
     if (!treeLights.empty()) {
 #ifdef PBRT_BUILD_GPU_RENDERER
-        bool buildOnGPU = buildLightTreeGPU(treeLights, u);
+        bool buildOnGPU = buildLightTreeGPU(treeLights);
         if (!buildOnGPU)
 #endif
         {
             SLCNodeEmitter emitter(m_tree, m_lightToBitTrail);
-            BuildLightTree<16, LightcutsBuildContainer, SAOHCostEvaluator, SLCNodeEmitter>(treeLights, 0, treeLights.size(), 0, 0, SAOHCostEvaluator(), emitter, u);
+            BuildLightTree<16, LightcutsBuildContainer, SAOHCostEvaluator, SLCNodeEmitter>(treeLights, 0, treeLights.size(), 0, 0, SAOHCostEvaluator(), emitter);
         }
     }
 
@@ -95,7 +93,7 @@ class SLCTreeBuilderGPU final : public LightTreeBuilderGPU<LightBounds, uint64_t
         return true;
     }
 
-    void FlattenTree(LightcutsTree& tree, std::vector<LightcutsBuildContainer> &lights, HashMap<Light, uint32_t>& bitTrailContainer, Float& u) {
+    void FlattenTree(LightcutsTree& tree, std::vector<LightcutsBuildContainer> &lights, HashMap<Light, uint32_t>& bitTrailContainer) {
         const LightTreeBuildState<LightBounds> &state(State());
         if (state.nLights == 0)
             return;
@@ -112,7 +110,7 @@ class SLCTreeBuilderGPU final : public LightTreeBuilderGPU<LightBounds, uint64_t
         SLCNodeEmitter emitter(tree, bitTrailContainer);
         GPUToLightcutsLeaf adapter(hostNodes, lights);
         
-        FlattenLightTree<GPUToLightcutsLeaf, SLCNodeEmitter>(adapter, rootIndex, 0, 0, emitter, u);
+        FlattenLightTree<GPUToLightcutsLeaf, SLCNodeEmitter>(adapter, rootIndex, 0, 0, emitter);
     }
 
 private:
@@ -120,7 +118,7 @@ private:
 };
 
 #ifdef PBRT_BUILD_GPU_RENDERER
-bool SLCLightSampler::buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights, Float& u) {
+bool SLCLightSampler::buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights) {
     if (lights.size() < 100 || !Options->useGPU)
         return false;
 
@@ -128,7 +126,7 @@ bool SLCLightSampler::buildLightTreeGPU(std::vector<LightcutsBuildContainer> &li
     if (!builder.Build(lights))
         return false;
 
-    builder.FlattenTree(m_tree, lights, m_lightToBitTrail, u);
+    builder.FlattenTree(m_tree, lights, m_lightToBitTrail);
     return true;
 }
 #endif

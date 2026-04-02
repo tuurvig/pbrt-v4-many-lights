@@ -62,9 +62,8 @@ RHTLightSampler::RHTLightSampler(pstd::span<const Light> lights, Allocator alloc
         if (!buildOnGPU)
 #endif
         {
-            Float u = 0; // dummy
             RHTNodeEmitter emitter(m_tree, m_lightToBitTrail);
-            BuildLightTree<16, RHTBuildContainer, SphericalBoundsCostEvaluator, RHTNodeEmitter>(treeLights, 0, treeLights.size(), 0, 0, SphericalBoundsCostEvaluator(), emitter, u);
+            BuildLightTree<16, RHTBuildContainer, SphericalBoundsCostEvaluator, RHTNodeEmitter>(treeLights, 0, treeLights.size(), 0, 0, SphericalBoundsCostEvaluator(), emitter);
         }
     }
 
@@ -117,7 +116,7 @@ class RHTreeBuilderGPU final : public LightTreeBuilderGPU<SphericalLightBounds, 
         return true;
     }
 
-    void FlattenTree(ResampledTree& tree, std::vector<RHTBuildContainer> &lights, HashMap<Light, uint32_t>& bitTrailContainer, Float& u) {
+    void FlattenTree(ResampledTree& tree, std::vector<RHTBuildContainer> &lights, HashMap<Light, uint32_t>& bitTrailContainer) {
         const LightTreeBuildState<SphericalLightBounds> &state(State());
         if (state.nLights == 0)
             return;
@@ -132,9 +131,9 @@ class RHTreeBuilderGPU final : public LightTreeBuilderGPU<SphericalLightBounds, 
         tree.innerNodes.reserve(nNodes);
 
         RHTNodeEmitter emitter(tree, bitTrailContainer);
-        GPUToRHTLeaf adapter(hostNodes, lights);
+        GPUToRHTLeaf adapter(hostNodes);
         
-        FlattenLightTree<GPUToRHTLeaf, RHTNodeEmitter>(adapter, rootIndex, 0, 0, emitter, u);
+        FlattenLightTree<GPUToRHTLeaf, RHTNodeEmitter>(adapter, rootIndex, 0, 0, emitter);
     }
 
 private:
@@ -149,8 +148,7 @@ bool RHTLightSampler::buildLightTreeGPU(std::vector<RHTBuildContainer> &lights) 
     if (!builder.Build(lights))
         return false;
 
-    Float u = 0;
-    builder.FlattenTree(m_tree, lights, m_lightToBitTrail, u);
+    builder.FlattenTree(m_tree, lights, m_lightToBitTrail);
     return true;
 }
 #endif
