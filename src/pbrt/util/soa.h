@@ -138,9 +138,11 @@ struct SOA<SampledSpectrum> {
                 atomicAdd(&ptr1[offset + i], s[i]);
         }
 #else
-        constexpr int kLocks = 1024;
+        constexpr uint32_t kLocks = 1024;
+        static_assert((kLocks & (kLocks - 1)) == 0, "kLocks must be a power of two");
         static std::mutex locks[kLocks];
-        std::lock_guard<std::mutex> g(locks[index % kLocks]);
+        const uint32_t lockIndex = static_cast<uint32_t>(index) & (kLocks - 1);
+        std::lock_guard<std::mutex> g(locks[lockIndex]);
         Store(index, Load(index) + s);
 #endif
     }
