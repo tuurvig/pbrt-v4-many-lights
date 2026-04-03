@@ -399,13 +399,9 @@ void LTCLightSampler::SetupScenePartitions(pstd::span<ShadingPoint> shadingPoint
     
     if (Options->useGPU) {
 #ifdef PBRT_BUILD_GPU_RENDERER
-        const LTCTreeNode* treeNodes = m_tree.nodes.data();
-        const ShadingPoint* representants = m_partitions.representantPoints.data();
-        OnlineLightTreeCut** leaves = m_partitions.leaves.data();
-        Bounds3f allLightBounds = m_tree.allLightBounds;
         GPUParallelFor("Initialize LTC tree cuts", ProfilerKernelGroup::WAVEFRONT, m_partitions.leaves.size(),
-            [treeNodes, representants, leaves, allLightBounds] PBRT_GPU(int idx) {
-            MakeInitialTreeCut(*leaves[idx], representants[idx], treeNodes, allLightBounds);
+            [this] PBRT_GPU(int idx) {
+            MakeInitialTreeCut(*m_partitions.leaves[idx], m_partitions.representantPoints[idx], m_tree.nodes.data(), m_tree.allLightBounds);
         });
         GPUWait();
 #else
@@ -440,7 +436,7 @@ static void ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& re
     }
 
     // initial sampling budget for learning
-    constexpr Float n0 = 4.0f;
+    constexpr Float n0 = 8.0f;
     constexpr Float initialCutSize = 4.0f;
     const Float nt = std::max(lastCutSize / initialCutSize, Float(2)) * n0;
 
@@ -623,41 +619,12 @@ void LTCLightSampler::Update(const uint32_t currentIteration) {
     }
 #endif
 
-    //for (int idx = 0; idx < m_partitions.leaves.size(); ++idx) {
-    //    OnlineLightTreeCut& cut(*m_partitions.leaves[idx]);
-    //
-    //    // max cut reached
-    //    if (cut.cutSize == PBRT_LTC_MAX_CUT_SIZE - 1) {
-    //        return;
-    //    }
-    //    
-    //    const uint32_t lastCutSize = cut.cutSize;
-    //    
-    //    // stop refining if no updates happen for a while
-    //    if (currentIteration > cut.lastUpdateIteration &&
-    //        static_cast<Float>(currentIteration - cut.lastUpdateIteration) / lastCutSize > m_gamma) {
-    //        return;
-    //    }
-    //
-    //    if (ApplyIterationUpdate(cut, m_partitions.representantPoints[idx], &m_tree, currentIteration, idx, learningRate)) {
-    //        cut.lastUpdateIteration = currentIteration;
-    //    }
-    //}
-    //
-    //return;
-
     if (Options->useGPU) {
 #ifdef PBRT_BUILD_GPU_RENDERER
-        OnlineLightTreeCut** leaves = m_partitions.leaves.data();
-        ShadingPoint* representants = m_partitions.representantPoints.data();
-        const LTCLightTree* tree = &m_tree;
-        const Float gamma = m_gamma;
-        const Float beta = m_beta;
-        const Float omega = m_omega;
         GPUParallelFor("Apply LTC update to partition cuts", ProfilerKernelGroup::WAVEFRONT, m_partitions.leaves.size(),
-            [tree, leaves, representants, gamma, beta, omega] PBRT_GPU(int idx) {
-            OnlineLightTreeCut& cut(*leaves[idx]);
-            ApplyIterationUpdate(cut, representants[idx], tree, idx, gamma, beta, omega);
+            [this] PBRT_GPU(int idx) {
+            OnlineLightTreeCut& cut(*m_partitions.leaves[idx]);
+            ApplyIterationUpdate(cut, m_partitions.representantPoints[idx], &m_tree, idx, m_gamma, m_beta, m_omega);
         });
 
         GPUWait();

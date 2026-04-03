@@ -45,8 +45,14 @@ inline PBRT_CPU_GPU void RecordShadowRayResult(const ShadowRayWorkItem w,
         PBRT_DBG("Shadow ray was occluded\n");
     }
     
-    if (const LTCLightSampler *ltc = lightSampler.CastOrNullptr<LTCLightSampler>())
-        ltc->AccumulateContribution(isUnoccluded * w.learningContribution, w.lightSamplerHint);
+    if (const LTCLightSampler *ltc = lightSampler.CastOrNullptr<LTCLightSampler>()) {
+        Float contribution = 0;
+        if (isUnoccluded) {
+            contribution = w.Ld.MaxComponentValue() / (w.r_u + w.r_l / w.pdfCancellationFactor).Average();
+        }
+        ltc->AccumulateContribution(contribution, w.lightSamplerHint);
+    }
+        
 }
 
 inline PBRT_CPU_GPU void EnqueueWorkAfterIntersection(
@@ -282,11 +288,17 @@ inline PBRT_CPU_GPU void TraceTransmittance(ShadowRayWorkItem sr,
              T_ray[2] / (sr.r_u * r_u + sr.r_l * r_l).Average(),
              T_ray[3] / (sr.r_u * r_u + sr.r_l * r_l).Average());
 
+    
+    // FIXME/reconcile: this takes r_l as input while
+    // e.g. VolPathIntegrator::SampleLd() does not...
+    r_u *= sr.r_u;
+    r_l *= sr.r_l;
+
     const bool isUnoccluded = T_ray.IsNonZero();
+    SampledSpectrum unweightedFinalLd = Ld * T_ray;
     if (isUnoccluded) {
-        // FIXME/reconcile: this takes r_l as input while
-        // e.g. VolPathIntegrator::SampleLd() does not...
-        SampledSpectrum finalLd = Ld * (T_ray / (sr.r_u * r_u + sr.r_l * r_l).Average());
+        
+        SampledSpectrum finalLd = unweightedFinalLd / (r_u + r_l).Average();
 
         PBRT_DBG("Setting final Ld for shadow ray pixel index %d = as %f %f %f %f\n",
                  sr.pixelIndex, Ld[0], Ld[1], Ld[2], Ld[3]);
@@ -295,7 +307,11 @@ inline PBRT_CPU_GPU void TraceTransmittance(ShadowRayWorkItem sr,
     }
 
     if (const LTCLightSampler *ltc = lightSampler.CastOrNullptr<LTCLightSampler>()) {
-        ltc->AccumulateContribution(isUnoccluded * sr.learningContribution, sr.lightSamplerHint);
+        Float contribution = 0;
+        if (isUnoccluded) {
+            contribution = unweightedFinalLd.MaxComponentValue() / (r_u + r_l / sr.pdfCancellationFactor).Average();
+        }
+        ltc->AccumulateContribution(contribution, sr.lightSamplerHint);
     }
 }
 

@@ -25,7 +25,7 @@ std::string ResampledTreeNode::ToString() const {
 
 std::string LTCTreeNode::ToString() const {
     return StringPrintf(
-        "[ LTCTreeNode lightBounds: %s lightCount: %d childOrLightIndex: %d isLeaf: %d ]", compactLightBounds, lightCount, childOrLightIndex, isLeaf);
+        "[ LTCTreeNode lightBounds: %s lightCountSqrt: %d childOrLightIndex: %d isLeaf: %d ]", compactLightBounds, lightCountSqrt, childOrLightIndex, isLeaf);
 }
 
 std::string CompactLightBounds::ToString() const {
@@ -172,24 +172,22 @@ int LTCNodeEmitter::ReserveInterior() {
     return index;
 }
 
-LightBVHBuildContainer LTCNodeEmitter::EmitLeaf(const LightBVHBuildContainer& item, uint32_t bitTrail) {
+LTCBuildContainer LTCNodeEmitter::EmitLeaf(const LightBVHBuildContainer& item, uint32_t bitTrail) {
     int nodeIndex = static_cast<int>(tree->nodes.size());
     const LightBVHBuildContainer& container(item);
     CompactLightBounds cb(container.bounds, container.bounds.I, tree->allLightBounds);
     tree->nodes.push_back(LTCTreeNode::MakeLeaf(item.index, cb));
     lightToBitTrail->Insert(tree->lights[item.index], bitTrail);
-    return {item.bounds, nodeIndex};
+    return {item.bounds, nodeIndex, 1};
 }
 
-LightBVHBuildContainer LTCNodeEmitter::FinalizeInterior(int reservationIndex, const LightBVHBuildContainer& left, const LightBVHBuildContainer& right) {
+LTCBuildContainer LTCNodeEmitter::FinalizeInterior(int reservationIndex, const LTCBuildContainer& left, const LTCBuildContainer& right) {
     LightBounds lb = Union(left.bounds, right.bounds);
     CompactLightBounds cb(lb, lb.phi, tree->allLightBounds);
 
-    const LTCTreeNode& leftNode(tree->nodes[left.index]);
-    const LTCTreeNode& rightNode(tree->nodes[right.index]);
-
-    tree->nodes[reservationIndex] = LTCTreeNode::MakeInterior(right.index, leftNode.lightCount + rightNode.lightCount, cb);
-    return {lb, reservationIndex};
+    const int sumLightCount = left.lightCount + right.lightCount;
+    tree->nodes[reservationIndex] = LTCTreeNode::MakeInterior(right.index, std::sqrt(sumLightCount), cb);
+    return {lb, reservationIndex, sumLightCount};
 }
 
 }

@@ -874,7 +874,19 @@ SampledSpectrum PathIntegrator::SampleLd(const SurfaceInteraction &intr, uint32_
         if (isOnlineLightSampler) {
             const LTCLightSampler* ltc = lightSampler.CastOrNullptr<LTCLightSampler>();
             if (ltc) {
-                ltc->AccumulateContribution(isUnoccluded * sLd.learningContribution, sLd.lightSamplerHint);
+                Float contribution = 0;
+                if (isUnoccluded) {
+                    Float clusterPdf = sLd.lightPDF / sLd.pdfCancellationFactor;
+                    if (sLd.scatterPDF == 0) {
+                        contribution = sLd.Ld.MaxComponentValue() / clusterPdf;
+                    }
+                    else {
+                        Float w_l = PowerHeuristic(1, clusterPdf, 1, sLd.scatterPDF);
+                        contribution = w_l * sLd.Ld.MaxComponentValue() / clusterPdf;
+                    }
+                }
+
+                ltc->AccumulateContribution(contribution, sLd.lightSamplerHint);
             }
         }
     }
@@ -1510,18 +1522,20 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, uint32_t se
         }
 
         const bool isUnoccluded = !shouldSkip;
+        SampledSpectrum unweightedFinalLd;
         if (isUnoccluded) {
             ReportLightSampleAfterShadowVisible(sLd.light);
+            unweightedFinalLd = beta * sLd.Ld * T_ray;
             SampledSpectrum finalLd;
 
             // Return path contribution function estimate for direct lighting
             r_l *= r_p * sLd.lightPDF;
             if (sLd.scatterPDF == 0) {
-                finalLd = beta * sLd.Ld * T_ray / r_l.Average();
+                finalLd = unweightedFinalLd / r_l.Average();
             }
             else {
                 r_u *= r_p * sLd.scatterPDF;
-                finalLd = beta * sLd.Ld * T_ray / (r_l + r_u).Average();
+                finalLd = unweightedFinalLd / (r_l + r_u).Average();
             }
 
             resultLd += finalLd;
@@ -1530,7 +1544,18 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, uint32_t se
         if (isOnlineLightSampler && !firstIterationShadingPoints) {
             const LTCLightSampler* ltc = lightSampler.CastOrNullptr<LTCLightSampler>();
             if (ltc) {
-                ltc->AccumulateContribution(isUnoccluded * sLd.learningContribution, sLd.lightSamplerHint);
+                Float contribution = 0;
+                if (isUnoccluded) {
+                    if (sLd.scatterPDF == 0) {
+                        contribution = unweightedFinalLd.MaxComponentValue() * sLd.pdfCancellationFactor / r_l.Average();
+                    }
+                    else {
+                        r_l /= sLd.pdfCancellationFactor;
+                        contribution = unweightedFinalLd.MaxComponentValue() / (r_l + r_u).Average();
+                    }
+                }
+
+                ltc->AccumulateContribution(contribution, sLd.lightSamplerHint);
             }
         }
     }

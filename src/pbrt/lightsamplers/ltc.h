@@ -104,7 +104,7 @@ struct PartitionTree {
 class LTCLightSampler {
   public:
     // Learning To Cluster Light Sampler Public Methods
-    LTCLightSampler(pstd::span<const Light> lights, Allocator alloc, Float beta = 4, Float omega = Float(6)/7, Float gamma = 128);
+    LTCLightSampler(pstd::span<const Light> lights, Allocator alloc, Float beta = 2, Float omega = Float(6)/7, Float gamma = 128);
 
     void SetupScenePartitions(pstd::span<ShadingPoint> shadingPoints, const Bounds3f& sceneBounds);
 
@@ -132,6 +132,7 @@ class LTCLightSampler {
         uint32_t nodeIndex = 0;
         uint32_t lightSamplerHint = std::numeric_limits<uint32_t>::max();
         constexpr uint32_t clusterIndexPowerTwoCapacity = 8;
+        Float clusterSelectionProb = 1;
         if (!m_partitions.leaves.empty() && n != Normal3f(0, 0, 0)) {
             Vector3f nv(n);
             UniformDiskVector diskVector(nv);
@@ -164,7 +165,7 @@ class LTCLightSampler {
             //const OnlineCutData clusterData = cut.data[offset];
             const Float importance = cut.q[offset];
             const Float prevPrefix = (offset > 0) ? cut.prefixSum[offset - 1] : 0;
-            pmf *= importance / weightSum;
+            clusterSelectionProb = importance / weightSum;
             u = std::min((up - prevPrefix) / importance, OneMinusEpsilon);
             lightSamplerHint |= offset;
             nodeIndex = cut.clusterIndex[offset];
@@ -172,6 +173,8 @@ class LTCLightSampler {
         
         const LTCTreeNode* node = &m_tree.nodes[nodeIndex];
         Float clusterPdf = 1;
+        pmf *= clusterSelectionProb;
+
         while (!node->isLeaf) {
             uint32_t childrenIndices[2] = {static_cast<uint32_t>(nodeIndex + 1), node->childOrLightIndex};
 
@@ -188,8 +191,10 @@ class LTCLightSampler {
             }
 
             Float weights[2] = {0};
-            const Float sqrt0 = SafeSqrt(errBounds[0]);
-            const Float sqrt1 = SafeSqrt(errBounds[1]);
+            const Float sqrt0 = errBounds[0];
+            const Float sqrt1 = errBounds[1];
+            //const Float sqrt0 = SafeSqrt(errBounds[0]) / children[0]->lightCountSqrt;
+            //const Float sqrt1 = SafeSqrt(errBounds[1]) / children[1]->lightCountSqrt;
             const Float sumSqrt = sqrt0 + sqrt1;
 
             if (sumSqrt > 0) {
@@ -214,7 +219,7 @@ class LTCLightSampler {
 
         pmf *= clusterPdf;
 
-        return SampledLight(m_tree.lights[node->childOrLightIndex], pmf, lightSamplerHint, clusterPdf);
+        return SampledLight(m_tree.lights[node->childOrLightIndex], pmf, lightSamplerHint, clusterSelectionProb);
     }
 
     PBRT_CPU_GPU PBRT_NOINLINE
@@ -283,8 +288,10 @@ class LTCLightSampler {
             }
 
             Float weights[2] = {0};
-            const Float sqrt0 = SafeSqrt(errBounds[0]);
-            const Float sqrt1 = SafeSqrt(errBounds[1]);
+            const Float sqrt0 = errBounds[0];
+            const Float sqrt1 = errBounds[1];
+            //const Float sqrt0 = SafeSqrt(errBounds[0]) / children[0]->lightCountSqrt;
+            //const Float sqrt1 = SafeSqrt(errBounds[1]) / children[1]->lightCountSqrt;
             const Float sumSqrt = sqrt0 + sqrt1;
 
             if (sumSqrt > 0) {
@@ -365,10 +372,7 @@ class LTCLightSampler {
         SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
         SampledSpectrum Ld = f_hat * ls->L;
 
-        const Float learningPDF = sampledLight->pLearning * ls->pdf;
-        const Float learningContribution = Ld.MaxComponentValue() / (learningPDF + scatterPDF);
-
-        samples.Add(SampledLd(Ld, light, ls->pLight, lightPDF, scatterPDF, sampledLight->hint, learningContribution));
+        samples.Add(SampledLd(Ld, light, ls->pLight, lightPDF, scatterPDF, sampledLight->hint, sampledLight->pLearning));
     }
 
     std::string ToString() const;

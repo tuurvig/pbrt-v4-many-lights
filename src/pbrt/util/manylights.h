@@ -262,7 +262,7 @@ struct alignas(32) LTCTreeNode {
 
     // LightcutsTreeNode Public Members
     CompactLightBounds compactLightBounds; // 24 bytes
-    uint32_t lightCount; // 4 bytes
+    uint32_t lightCountSqrt; // 4 bytes
     struct { // 4 bytes
         uint32_t childOrLightIndex : 31;
         uint32_t isLeaf : 1;
@@ -376,6 +376,15 @@ struct RHTBuildContainer : public BuildContainerInterface<SphericalLightBounds> 
     int index;
 };
 
+struct LTCBuildContainer : public BuildContainerInterface<LightBounds> {
+    PBRT_CPU_GPU
+    LTCBuildContainer(const LightBounds& bounds, int index, int lightCount)
+        : BuildContainerInterface<LightBounds>(bounds), index(index), lightCount(lightCount) {}
+
+    int index;
+    int lightCount;
+};
+
 // Intermediate BVH node that stores spatial bounds and child references.
 // Leaves store the light index in both child slots and use kInvalidIndex to
 // signal that no further subdivisions are needed.
@@ -483,7 +492,7 @@ struct RHTNodeEmitter : public NodeEmitterInterface<RHTBuildContainer, RHTBuildC
     virtual RHTBuildContainer FinalizeInterior(int reservationIndex, const RHTBuildContainer& left, const RHTBuildContainer& right) override;
 };
 
-struct LTCNodeEmitter : public NodeEmitterInterface<LightBVHBuildContainer, LightBVHBuildContainer> {
+struct LTCNodeEmitter : public NodeEmitterInterface<LightBVHBuildContainer, LTCBuildContainer> {
     LTCNodeEmitter(LTCLightTree& tree, HashMap<Light, uint32_t>& lightToBitTrail)
         : tree(&tree), lightToBitTrail(&lightToBitTrail) {}
 
@@ -491,8 +500,8 @@ struct LTCNodeEmitter : public NodeEmitterInterface<LightBVHBuildContainer, Ligh
     HashMap<Light, uint32_t>* lightToBitTrail;
 
     virtual int ReserveInterior() override;
-    virtual LightBVHBuildContainer EmitLeaf(const LightBVHBuildContainer& item, uint32_t bitTrail) override;
-    virtual LightBVHBuildContainer FinalizeInterior(int reservationIndex, const LightBVHBuildContainer& left, const LightBVHBuildContainer& right) override;
+    virtual LTCBuildContainer EmitLeaf(const LightBVHBuildContainer& item, uint32_t bitTrail) override;
+    virtual LTCBuildContainer FinalizeInterior(int reservationIndex, const LTCBuildContainer& left, const LTCBuildContainer& right) override;
 };
 
 /// Light Hierarchy Node Converters
