@@ -54,6 +54,7 @@ SLCLightSampler::SLCLightSampler(pstd::span<const Light> lights, Allocator alloc
                          m_lightToBitTrail.capacity() * (sizeof(Light) + sizeof(uint32_t));
 }
 
+#ifdef PBRT_BUILD_GPU_RENDERER
 class SLCTreeBuilderGPU final : public LightTreeBuilderGPU<LightBounds, uint64_t, SAOHCostEvaluator> {
   public:
     explicit SLCTreeBuilderGPU(const Bounds3f &bounds) : m_allLightBounds(bounds) {}
@@ -117,7 +118,7 @@ private:
     Bounds3f m_allLightBounds;
 };
 
-#ifdef PBRT_BUILD_GPU_RENDERER
+
 bool SLCLightSampler::buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights) {
     if (lights.size() < 100 || !Options->useGPU)
         return false;

@@ -6,7 +6,6 @@
 #define PBRT_WAVEFRONT_WORKQUEUE_H
 
 #include <pbrt/pbrt.h>
-
 #include <pbrt/options.h>
 #ifdef PBRT_BUILD_GPU_RENDERER
 #include <pbrt/gpu/util.h>
@@ -18,6 +17,12 @@
 #include <utility>
 
 namespace pbrt {
+
+#ifndef PBRT_BUILD_GPU_RENDERER
+enum ProfilerKernelGroup {
+    WAVEFRONT, HPLOC, END
+};
+#endif
 
 // WorkQueue Definition
 template <typename WorkItem>
