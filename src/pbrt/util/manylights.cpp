@@ -25,7 +25,7 @@ std::string ResampledTreeNode::ToString() const {
 
 std::string LTCTreeNode::ToString() const {
     return StringPrintf(
-        "[ LTCTreeNode lightBounds: %s lightCountSqrt: %d childOrLightIndex: %d isLeaf: %d ]", compactLightBounds, lightCountSqrt, childOrLightIndex, isLeaf);
+        "[ LTCTreeNode lightBounds: %s pUniformSqrt: %d childOrLightIndex: %d isLeaf: %d ]", compactLightBounds, pUniformSqrt, childOrLightIndex, isLeaf);
 }
 
 std::string CompactLightBounds::ToString() const {
@@ -188,7 +188,12 @@ LTCBuildContainer LTCNodeEmitter::FinalizeInterior(int reservationIndex, const L
     CompactLightBounds cb(lb, lb.phi, tree->allLightBounds);
 
     const int sumLightCount = left.lightCount + right.lightCount;
-    tree->nodes[reservationIndex] = LTCTreeNode::MakeInterior(right.index, std::sqrt(sumLightCount), cb);
+    tree->nodes[reservationIndex] = LTCTreeNode::MakeInterior(right.index, 1, cb);
+
+    const Float leftUniform = std::max(static_cast<Float>(left.lightCount) / sumLightCount, OneMinusEpsilon);
+    tree->nodes[reservationIndex + 1].pUniformSqrt = std::sqrt(leftUniform);
+    tree->nodes[right.index].pUniformSqrt = std::sqrt(1 - leftUniform);
+
     return {lb, reservationIndex, sumLightCount};
 }
 

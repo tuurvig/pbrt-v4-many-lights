@@ -257,7 +257,7 @@ struct alignas(32) ResampledTreeNode {
 /// @brief Node for the Learning To Cluster method (2021 Wang et al. paper).
 /// Includes a sqrt of lightCount to compute the geometric mean between the 
 /// error bounds and the uniform distribution for the cluster's importance.
-/// sqrt(errBound * (1 / lightCount)).
+/// sqrt(errBound * pUniform).
 struct alignas(32) LTCTreeNode {
     LTCTreeNode() = default;
 
@@ -265,15 +265,15 @@ struct alignas(32) LTCTreeNode {
         return LTCTreeNode{bounds, 1, {lightIdx, true}};
     }
 
-    PBRT_CPU_GPU static LTCTreeNode MakeInterior(uint32_t childIdx, uint32_t lightCount, const CompactLightBounds& bounds) {
-        return LTCTreeNode{bounds, lightCount, {childIdx, false}};
+    PBRT_CPU_GPU static LTCTreeNode MakeInterior(uint32_t childIdx, uint32_t pUniformSqrt, const CompactLightBounds& bounds) {
+        return LTCTreeNode{bounds, pUniformSqrt, {childIdx, false}};
     }
 
     std::string ToString() const;
 
     // LightcutsTreeNode Public Members
     CompactLightBounds compactLightBounds; // 24 bytes
-    uint32_t lightCountSqrt; // 4 bytes
+    uint32_t pUniformSqrt; // 4 bytes
     struct { // 4 bytes
         uint32_t childOrLightIndex : 31;
         uint32_t isLeaf : 1;

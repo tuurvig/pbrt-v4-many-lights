@@ -151,8 +151,10 @@ class SLCLightSampler {
         if (foundIndex == std::numeric_limits<uint32_t>::max())
             return 0;
 
-        Float cutNodeProbability = cutErrBounds[foundIndex] / cutWeightSum;
-        Float pmf = (1 - pInfinite) * cutNodeProbability;
+        //Float cutNodeProbability = cutErrBounds[foundIndex] / cutWeightSum;
+        //Float pmf = (1 - pInfinite) * cutNodeProbability;
+
+        Float pmf = (1 - pInfinite);
 
         // Continue exactly with the same heuristic split probabilities as in Sample().
         const Point3f p = ctx.p();
@@ -257,18 +259,21 @@ class SLCLightSampler {
         Normal3f n = ctx.ns;
         
         constexpr uint32_t indexMask = std::numeric_limits<uint32_t>::max() >> 1;
+        Float errBoundSum = 0;
+        for (int i = 0; i < NSamples; ++i) {
+            errBoundSum += errBounds[i];
+        }
 
         Point2f uOffset = GetR2SequenceOffset();
         for (int i = 0; i < NSamples; ++i) {
-            Float errBound = errBounds[i];
-            if (errBound <= 0) continue;
-
             uLight += uOffset;
             if (uLight.x >= 1) uLight.x -= 1;
             if (uLight.y >= 1) uLight.y -= 1;
 
-            CutData clusterData = data[i];
+            Float errBound = errBounds[i];
+            if (errBound <= 0) continue;
 
+            const CutData clusterData = data[i];
             Float pmfLight = pmf;
 
             uint32_t nodeIndex = clusterData.nodeIndex & indexMask;

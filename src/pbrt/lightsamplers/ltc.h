@@ -191,10 +191,8 @@ class LTCLightSampler {
             }
 
             Float weights[2] = {0};
-            const Float sqrt0 = errBounds[0];
-            const Float sqrt1 = errBounds[1];
-            //const Float sqrt0 = SafeSqrt(errBounds[0]) / children[0]->lightCountSqrt;
-            //const Float sqrt1 = SafeSqrt(errBounds[1]) / children[1]->lightCountSqrt;
+            const Float sqrt0 = SafeSqrt(errBounds[0]) * children[0]->pUniformSqrt;
+            const Float sqrt1 = SafeSqrt(errBounds[1]) * children[1]->pUniformSqrt;
             const Float sumSqrt = sqrt0 + sqrt1;
 
             if (sumSqrt > 0) {
@@ -288,10 +286,8 @@ class LTCLightSampler {
             }
 
             Float weights[2] = {0};
-            const Float sqrt0 = errBounds[0];
-            const Float sqrt1 = errBounds[1];
-            //const Float sqrt0 = SafeSqrt(errBounds[0]) / children[0]->lightCountSqrt;
-            //const Float sqrt1 = SafeSqrt(errBounds[1]) / children[1]->lightCountSqrt;
+            const Float sqrt0 = SafeSqrt(errBounds[0]) * children[0]->pUniformSqrt;
+            const Float sqrt1 = SafeSqrt(errBounds[1]) * children[1]->pUniformSqrt;
             const Float sumSqrt = sqrt0 + sqrt1;
 
             if (sumSqrt > 0) {
