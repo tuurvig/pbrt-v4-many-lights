@@ -47,6 +47,10 @@ struct CountedArray {
 
 /// CompactLightBounds Definition
 //////////////////////////////////////////////////////////
+
+/// @brief Compressed representation of light bounds to minimize CPU/GPU memory footprint
+/// It uses a quantized AABB, octahedral mapping for direction vector
+/// and 15-bit quantization for angle cosines.
 class CompactLightBounds {
   public:
     // CompactLightBounds Public Methods
@@ -163,20 +167,21 @@ class CompactLightBounds {
     }
 
     // CompactLightBounds Private Members
-    OctahedralVector w;
-    Float phiOrI = 0;
+    OctahedralVector w;                  ///< Compressed directional vector
+    Float phiOrI = 0;                    ///< Total radiant flux (phi) or intensity (I) of the cluster
     struct {
-        unsigned int qCosTheta_o : 15;
-        unsigned int qCosTheta_e : 15;
-        unsigned int twoSided : 1;
+        unsigned int qCosTheta_o : 15;   ///< Quantized bounding cone half-angle
+        unsigned int qCosTheta_e : 15;   ///< Quantized emission angle
+        unsigned int twoSided : 1;       ///< Flag indicating if the light emission is two-sided
     };
-    uint16_t qb[2][3];
+    uint16_t qb[2][3];                   ///< Quantized spatial bounding box
 };
 
 /// Light Hierarchy Nodes Definitions
 //////////////////////////////////////////////////////////
 
-// LightBVHNode Definition
+/// @brief Standatd node for the Light Bounding Volume Hierarchy used in
+/// Conty and Kulla paper 2018 bvhlights
 struct alignas(32) LightBVHNode {
     // LightBVHNode Public Methods
     LightBVHNode() = default;
@@ -191,19 +196,19 @@ struct alignas(32) LightBVHNode {
         return LightBVHNode{cb, {childIndex, 0}};
     }
 
-    //PBRT_CPU_GPU
-    //pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, Float u) const;
-
     std::string ToString() const;
 
     // LightBVHNode Public Members
     CompactLightBounds lightBounds;
     struct {
-        unsigned int childOrLightIndex : 31;
+        unsigned int childOrLightIndex : 31;  ///< Index to the right child or the light in the leaf array
         unsigned int isLeaf : 1;
     };
 };
 
+/// @brief Extended tree node specific to the Lightcuts algorithms.
+/// Includes an index to a representative light used for evaluating the cluster's contribution
+/// Fits entirely in a 32-byte sized struct. 24 + 4 + 4.
 struct alignas(32) LightcutsTreeNode {
     LightcutsTreeNode() = default;
 
@@ -218,14 +223,16 @@ struct alignas(32) LightcutsTreeNode {
     std::string ToString() const;
 
     // LightcutsTreeNode Public Members
-    CompactLightBounds compactLightBounds; // 24 bytes
-    uint32_t representantIdx; // 4 bytes
-    struct { // 4 bytes
+    CompactLightBounds compactLightBounds; 
+    uint32_t representantIdx;              ///< Index of the light representing this entire cluster 
+    struct { 
         uint32_t childOrLightIndex : 31;
         uint32_t isLeaf : 1;
     };
 };
 
+/// @brief Node for the Resampled Light Tree method (2024 Conty et al. paper)
+/// Uses a more loose spherical bounds instead of AABBs for faster tree traversal
 struct alignas(32) ResampledTreeNode {
     ResampledTreeNode() = default;
 
@@ -247,6 +254,10 @@ struct alignas(32) ResampledTreeNode {
     uint32_t isLeaf; // 4 bytes
 };
 
+/// @brief Node for the Learning To Cluster method (2021 Wang et al. paper).
+/// Includes a sqrt of lightCount to compute the geometric mean between the 
+/// error bounds and the uniform distribution for the cluster's importance.
+/// sqrt(errBound * (1 / lightCount)).
 struct alignas(32) LTCTreeNode {
     LTCTreeNode() = default;
 
@@ -272,7 +283,8 @@ struct alignas(32) LTCTreeNode {
 /// Cost functions and evaluators
 //////////////////////////////////////////////////////////
 
-// Lightcuts original paper (2005) Similarity Metric
+/// @brief Evaluates cluster cost using the original Lightcuts (2005) similarity metric.
+/// Combines the spatial diagonal length with directional similarity, weighted by intensity.
 PBRT_CPU_GPU
 inline Float SimilarityMetric(const LightBounds& bounds, Float sceneDiagonalSqr, bool isPointLight) {
     const Float diagonalLengthSqr = LengthSquared(bounds.bounds.Diagonal());
@@ -288,6 +300,7 @@ inline Float SimilarityMetric(const LightBounds& bounds, Float sceneDiagonalSqr,
     return bounds.I * similarity;
 }
 
+/// @brief Cost Evaluator helper to wrap the computation of similarity metric for lightcuts.
 struct LightcutsCostEvaluator {
     PBRT_CPU_GPU
     LightcutsCostEvaluator(Bounds3f bounds, bool isPoint) :
@@ -302,7 +315,8 @@ struct LightcutsCostEvaluator {
     bool isPoint;
 };
 
-// SAOH heuristic cost from conty and kulla bvh lights paper 2018
+/// @brief Evaluates cluster cost using the Surface Area Orientation Heuristic (SAOH).
+/// Penalizes clusters with large surface areas and wide directional spreads (Conty and Kulla paper 2018)
 PBRT_CPU_GPU
 inline Float CostSAOH(const LightBounds& b) {
     // Evaluate direction bounds measure for _LightBounds_
@@ -324,8 +338,8 @@ struct SAOHCostEvaluator {
     }
 };
 
-// cost from Resampled Tree 2024 paper Conty, et al. 
-// simplified version of CostSAOH without orientation
+/// @brief Simplified cost function for Resampled Light Trees (Conty et al. 2024).
+/// Uses Energy-weighted Surface Area Heuristic (SAH) based purely on spherical bounds.
 PBRT_CPU_GPU
 inline Float CostEnergyWeightedSAH(const SphericalLightBounds& b) {
     return b.Phi() * b.SurfaceArea();
@@ -405,6 +419,8 @@ struct alignas(8) LightLocation {
     uint32_t identifier;
 };
 
+/// @brief A compact pairing of spatial/directional bounds and a pbrt Light instance
+/// Serves as a leaf representation
 struct alignas(32) CompactLight {
     CompactLight(const LightBounds &lb, Float phiOrI, const Bounds3f &allb, Light light)
         : bounds(lb, phiOrI, allb), light(light) {}
@@ -585,6 +601,8 @@ inline Float InfiniteLightSimplePMF(const pstd::vector<Light>& infiniteLights, s
 /// Cluster Estimate function
 //////////////////////////////////////////////////////////
 
+/// @brief Computes an unshadowed estimate of the illumination from a light cluster.
+/// Incorporates distance attenuation (G term), the maximum BSDF value (M term), and the incidence cosine
 PBRT_CPU_GPU PBRT_NOINLINE
 static Float ComputeClusterEstimate(const BSDF* bsdf, BxDFFlags flags, Point3f lightPos, Point3f point, Normal3f n, Vector3f wo, Float I) {
     Float minDistSqr = DistanceSquared(point, lightPos);
@@ -682,6 +700,8 @@ inline Float ComputeGeometricBound(const CompactLightBounds& lightBounds, const 
 /// Compute Error function
 //////////////////////////////////////////////////////////
 
+/// @brief Calculates the upper error bound for both children.
+/// Takes into account the geometric limits and spatial orientation between the shading point and the light cluster.
 PBRT_CPU_GPU PBRT_NOINLINE
 static bool ComputeErrorBounds(Float &err0, Float &err1, Point3f p, Vector3f wo, Normal3f n, const Frame& frame, const BSDF* bsdf, const CompactLightBounds& cb0, const CompactLightBounds& cb1, const Bounds3f& allLightBounds, const bool isOriented = true) {
     const Float nodeI0 = cb0.PhiOrI();
@@ -740,6 +760,9 @@ struct alignas(8) CutData {
     uint32_t nodeIndex;
 };
 
+/// @brief The core Lightcuts algorithm: finds a valid cut through the light hierarchy.
+/// Maintains the priority queue of nodes. In each step, the node with the highest maximum error bound
+/// is expanded into its children until the total error falls below a threshold or the cut size limit is reached.
 template <int CutSize>
 PBRT_CPU_GPU PBRT_NOINLINE
 static int ComputeLightcutsTreeCut(Float* errBounds, CutData* data, uint32_t& bitTrail, const LightSampleContext& ctx, const pstd::vector<LightcutsTreeNode>& treeNodes, const Bounds3f& allLightBounds, const Frame& frame, const BSDF* bsdf, const Float threshold, const bool isOriented = true) {
@@ -753,22 +776,29 @@ static int ComputeLightcutsTreeCut(Float* errBounds, CutData* data, uint32_t& bi
     int cutSize = 1;
     int maxAvailablePositions = CutSize;
     Float sumEstimate = 0, sumErrBound = std::numeric_limits<Float>::max();
+
+    // Initialize the root node in the priority queue.
     errBounds[0] = std::numeric_limits<Float>::max();
+    // The most significant bit (MSB) of nodeIndex acts as a flag indicating if the node is on the tracked bitTrail.
     data[0] = {0, static_cast<uint32_t>(1) << 31};
 
+    // Mask to strip the MSB flag and extract the actual array index.
     constexpr uint32_t indexMask = std::numeric_limits<uint32_t>::max() >> 1;
 
+    // Refinement loop: continues until the queue is empty or the maximum cut size is reached.
     while (lastCutIndex < (maxAvailablePositions - 1) && lastCutIndex >= 0) {
         CutData dataLeft, dataRight;
         int childBit = -1;
         {
+            // 1. Pop the node with the highest error bound from the max-heap.
             const Float errBound = errBounds[0];
             const CutData nodeData = data[0];
 
-            // extract the position on the trail from the index
+            // Extract the position on the trail from the index
             const bool onTrail = nodeData.nodeIndex >> 31;
             const uint32_t nodeIndex = nodeData.nodeIndex & indexMask;
 
+            // Maintain the heap property after popping the root.
             errBounds[0] = errBounds[lastCutIndex];
             data[0] = data[lastCutIndex];
             HeapBubbleDown(errBounds, data, lastCutIndex);
@@ -777,7 +807,10 @@ static int ComputeLightcutsTreeCut(Float* errBounds, CutData* data, uint32_t& bi
             --lastCutIndex;
             
             const LightcutsTreeNode* node = &treeNodes[nodeIndex];
+
+            // 2. Termination check: If it is leaf, or the error is acceptable relative to the total estimate.
             if (node->isLeaf || errBound < threshold * sumEstimate) {
+                // Move the finalized node to the end of the arrays to form the final cut.
                 errBounds[maxAvailablePositions - 1] = errBound;
                 data[maxAvailablePositions - 1] = nodeData;
                 --maxAvailablePositions;
@@ -785,6 +818,7 @@ static int ComputeLightcutsTreeCut(Float* errBounds, CutData* data, uint32_t& bi
                 continue;
             }
             
+            // 3. Refine: the node is split into its two children. Update running totals.
             --cutSize;
             sumErrBound -= errBound;
             sumEstimate -= nodeData.estimate;
@@ -792,6 +826,7 @@ static int ComputeLightcutsTreeCut(Float* errBounds, CutData* data, uint32_t& bi
             dataLeft.nodeIndex = static_cast<uint32_t>(nodeIndex + 1);
             dataRight.nodeIndex = node->childOrLightIndex;
 
+            // Advance the bitTrail if the current node was on it
             if (onTrail) {
                 childBit = bitTrail & 1;
                 bitTrail >>= 1;
@@ -799,19 +834,23 @@ static int ComputeLightcutsTreeCut(Float* errBounds, CutData* data, uint32_t& bi
         }
 
         Float errBoundLeft, errBoundRight;
-
         const LightcutsTreeNode* leftChild = &treeNodes[dataLeft.nodeIndex];
         const LightcutsTreeNode* rightChild = &treeNodes[dataRight.nodeIndex];
 
+        // 4. Evaluate the actual error bounds for both children.
+        // if both bounds are zero, the entire sub-tree contributes nothing and can be skipped.
         if (!ComputeErrorBounds(errBoundLeft, errBoundRight, p, wo, n, frame, bsdf, leftChild->compactLightBounds, rightChild->compactLightBounds, allLightBounds, isOriented)) {
             continue;
         }
 
+        // 5. Process Left Child: If it has non-zero error, estimate its illumination and push to the heap.
         if (errBoundLeft > 0) {
             const LightcutsTreeNode* leftRepr = &treeNodes[leftChild->representantIdx];
             const Float nodeILeft = leftChild->compactLightBounds.PhiOrI();
             dataLeft.estimate = ComputeClusterEstimate(bsdf, bsdfFlags, leftRepr->compactLightBounds.Bound(allLightBounds, false), p, n, wo, nodeILeft);
-            dataLeft.nodeIndex |= (static_cast<uint32_t>(childBit == 0) << 31); // write to the most significant bit on whether it belong to the bit trail
+
+            // Write to the MSB to flag if this child is the next step on the bitTrail.
+            dataLeft.nodeIndex |= (static_cast<uint32_t>(childBit == 0) << 31);
             sumEstimate += dataLeft.estimate;
             sumErrBound += errBoundLeft;
 
@@ -819,14 +858,17 @@ static int ComputeLightcutsTreeCut(Float* errBounds, CutData* data, uint32_t& bi
             ++lastCutIndex;
             errBounds[lastCutIndex] = errBoundLeft;
             data[lastCutIndex] = dataLeft;
-            HeapBubbleUp(errBounds, data, lastCutIndex + 1);
+            HeapBubbleUp(errBounds, data, lastCutIndex + 1); // Restore max-heap property.
         }
         
+        // 6. Process Right Child: Estimate illumination and push to the heap.
         if (errBoundRight > 0) {
             const LightcutsTreeNode* rightRepr = &treeNodes[rightChild->representantIdx];
             const Float nodeIRight = rightChild->compactLightBounds.PhiOrI();
             dataRight.estimate = ComputeClusterEstimate(bsdf, bsdfFlags, rightRepr->compactLightBounds.Bound(allLightBounds, false), p, n, wo, nodeIRight);
-            dataRight.nodeIndex |= (static_cast<uint32_t>(childBit == 1) << 31); // write to the most significant bit on whether it belong to the bit trail
+
+            // Write to the MSB to flag if this child is the next step on the bitTrail.
+            dataRight.nodeIndex |= (static_cast<uint32_t>(childBit == 1) << 31);
             sumEstimate += dataRight.estimate;
             sumErrBound += errBoundRight;
 
@@ -834,7 +876,7 @@ static int ComputeLightcutsTreeCut(Float* errBounds, CutData* data, uint32_t& bi
             ++lastCutIndex;
             errBounds[lastCutIndex] = errBoundRight;
             data[lastCutIndex] = dataRight;
-            HeapBubbleUp(errBounds, data, lastCutIndex + 1);
+            HeapBubbleUp(errBounds, data, lastCutIndex + 1); // Restore max-heap property.
         }
     }
 

@@ -99,7 +99,9 @@ LightcutsBuildResult LightcutsNodeEmitter::EmitLeaf(const LightcutsBuildContaine
     return LightcutsBuildResult(leaf.bounds, nodeIndex, nodeIndex);
 }
 
-LightcutsBuildResult LightcutsNodeEmitter::FinalizeInterior(int reservationIndex, const LightcutsBuildResult& left, const LightcutsBuildResult& right) {    
+LightcutsBuildResult LightcutsNodeEmitter::FinalizeInterior(int reservationIndex, const LightcutsBuildResult& left, const LightcutsBuildResult& right) {
+    // Merges child bounds and stochastically selects a representative light for the cluster.
+    // The selection is based on the proportional intensities of the left and the right children.
     Float intensities[2] = {left.bounds.I, right.bounds.I};
     Float nodePMF;
     int child = SampleDiscrete(intensities, rng.Uniform<Float>(), &nodePMF);
