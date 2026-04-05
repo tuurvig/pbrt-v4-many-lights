@@ -16,6 +16,10 @@
 
 namespace pbrt {
 
+/// @brief Compact descriptor of a shading sample.
+/// Stores world-space position and a quantized normal direction in
+/// `UniformDiskVector` form so spatial and directional clustering can share one
+/// fixed-size record.
 struct alignas(16) ShadingPoint {
     ShadingPoint() = default;
 
@@ -29,10 +33,15 @@ struct alignas(16) ShadingPoint {
 
 STAT_MEMORY_COUNTER("Memory/Shading Point Collector", shadingPointCollectorBytes);
 
+/// @brief Fixed-capacity append-only container for first-wave shading points.
 class ShadingPointCollector {
   public:
     ShadingPointCollector() = default;
 
+    /// @brief Preallocates storage for one render wave.
+    /// @param pixelBounds Rendered pixel bounds used to estimate sample count.
+    /// @param maxDepth Integrator path-depth bound used for estimating the maximum amount of posible samples.
+    /// @param alloc Pbrt allocator.
     explicit ShadingPointCollector(const Bounds2i &pixelBounds, int maxDepth, Allocator alloc)
         : alloc(alloc), points(nullptr), capacity(0) {
         DCHECK_LT(0, pixelBounds.Area());
@@ -55,6 +64,10 @@ class ShadingPointCollector {
         return *this;
     }
 
+    /// @brief Appends one shading-point sample.
+    /// Uses an atomic index so concurrent producers can append safely.
+    /// @param p Shading position.
+    /// @param ns Shading normal.
     PBRT_CPU_GPU
     void Append(Point3f p, Normal3f ns) {
         uint32_t index = AllocateEntry();
@@ -62,11 +75,13 @@ class ShadingPointCollector {
         points[index] = ShadingPoint(p, ns);
     }
 
+    /// @brief Returns the current number of appended points.
     PBRT_CPU_GPU
     uint32_t Size() const {
         return size.Load();
     }
 
+    /// @brief Returns the preallocated maximum number of points.
     PBRT_CPU_GPU
     uint32_t Capacity() const { return capacity; }
 
@@ -76,6 +91,8 @@ class ShadingPointCollector {
     pstd::span<const ShadingPoint> Points() const { return {points, Size()}; }
     pstd::span<ShadingPoint> Points() { return {points, Size()}; }
 protected:
+    /// @brief Reserves one slot and returns its index.
+    /// @return Index of the newly reserved entry.
     PBRT_CPU_GPU
     uint32_t AllocateEntry() {
         return size.FetchAdd(1);

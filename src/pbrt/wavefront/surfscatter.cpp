@@ -289,6 +289,7 @@ void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQue
                 else if (IsTransmissive(flags) && IsReflective(flags))
                     ctx.pi = OffsetRayOrigin(ctx.pi, w.n, -wo);
 
+                // Collect first-wave shading contexts.
                 if (firstIterationShadingPoints)
                     firstIterationShadingPoints->Append(ctx.p(), ctx.ns);
 

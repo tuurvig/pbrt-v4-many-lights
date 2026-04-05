@@ -232,7 +232,9 @@ class PathIntegrator : public RayIntegrator {
     std::string ToString() const;
 
   private:
+    /// @brief Per-wave hook performed before a wave is started.
     virtual void OnRenderWaveStart(int waveIndex, const Bounds2i &pixelBounds) override;
+    /// @brief Per-wave hook performed after a wave has completed.
     virtual void OnRenderWaveDone(int waveIndex) override;
 
     // PathIntegrator Private Methods
@@ -287,6 +289,8 @@ class VolPathIntegrator : public RayIntegrator {
           lightSampler(LightSampler::Create(requiredShadowRays, lightSampleStrategy, lights, Options->discretizeAreaLights > 0, Allocator())),
           regularize(regularize),
           isOnlineLightSampler(false) {
+        // Register the integrator is going to use an online light sampler, that requires
+        // some form of a feedback loop after each wave of samples.
         isOnlineLightSampler = lightSampler.Is<LTCLightSampler>();
     }
 
@@ -300,7 +304,9 @@ class VolPathIntegrator : public RayIntegrator {
     std::string ToString() const;
 
   private:
+    /// @brief Per-wave hook performed before a wave is started.
     virtual void OnRenderWaveStart(int waveIndex, const Bounds2i &pixelBounds) override;
+    /// @brief Per-wave hook performed after a wave has ended.
     virtual void OnRenderWaveDone(int waveIndex) override;
 
     // VolPathIntegrator Private Methods

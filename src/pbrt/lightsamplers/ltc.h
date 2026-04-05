@@ -22,6 +22,10 @@ namespace pbrt {
 
 struct ShadingPoint;
 
+/// @brief Node in the 5D partition tree over shading position and normal.
+/// Interior nodes store one split axis/value and implicit left child
+/// (`nodeIndex + 1`), while right child is encoded in
+/// `rightChildOrLeafIndex`. One leaf node holds a light tree cut for a scene partition.
 struct alignas(8) PartitionTreeNode {
     PartitionTreeNode() = default;
 
@@ -41,49 +45,42 @@ struct alignas(8) PartitionTreeNode {
 
     std::string ToString() const;
 
-    // Partition5DNode Public Members
+    /// Split value for the chosen axis.
     Float splitValue;
     struct {
+        /// Split axis in [0,4] for interior nodes; 7 for leaves.
         uint32_t splitAxis : 3;
+        /// Right-child index (interior) or leaf index (leaf).
         uint32_t rightChildOrLeafIndex : 29;
     };
 };
 
-//struct alignas(32) OnlineCutData {
-//    Float q; // estimated importance
-//    Float variance; // variance estimate
-//    Float visitCount;
-//    Float prefixSum;
-//
-//    uint32_t clusterIndex;
-//    uint32_t bitTrail;
-//    uint32_t depth;
-//    uint32_t _padding1;
-//};
-
 #define PBRT_LTC_MAX_CUT_SIZE 64
 
+/// @brief Per-partition online cut state used by LTC learning updates.
+/// Stores estimated cluster importances and accumulators for contributions
+/// observed during the current render wave.
 struct OnlineLightTreeCut {
     PBRT_CPU_GPU
     OnlineLightTreeCut() : cutSize(0), lastUpdateIteration(0) {}
 
-    //OnlineCutData data[PBRT_LTC_MAX_CUT_SIZE];
-    Float q[PBRT_LTC_MAX_CUT_SIZE];
-    Float variance[PBRT_LTC_MAX_CUT_SIZE];
-    Float visitCount[PBRT_LTC_MAX_CUT_SIZE];
-    Float prefixSum[PBRT_LTC_MAX_CUT_SIZE];
+    Float q[PBRT_LTC_MAX_CUT_SIZE];               ///< Estimated importance of each selected cluster.
+    Float variance[PBRT_LTC_MAX_CUT_SIZE];        ///< Online variance estimate per cluster.
+    Float visitCount[PBRT_LTC_MAX_CUT_SIZE];      ///< Running effective sample count per cluster.
+    Float prefixSum[PBRT_LTC_MAX_CUT_SIZE];       ///< Prefix sums over `q` used for inverse-CDF sampling.
 
-    uint32_t clusterIndex[PBRT_LTC_MAX_CUT_SIZE];
-    uint32_t bitTrail[PBRT_LTC_MAX_CUT_SIZE];
-    uint32_t depth[PBRT_LTC_MAX_CUT_SIZE];
+    uint32_t clusterIndex[PBRT_LTC_MAX_CUT_SIZE]; ///< Light-tree node index of each cut cluster.
+    uint32_t bitTrail[PBRT_LTC_MAX_CUT_SIZE];     ///< Encoded bitTrail from tree root to a cluster.
+    uint32_t depth[PBRT_LTC_MAX_CUT_SIZE];        ///< Depth of each cluster root in the light tree.
 
-    AtomicFloat sumAccumulator[PBRT_LTC_MAX_CUT_SIZE];
-    AtomicInt<uint32_t> visitCountAccumulator[PBRT_LTC_MAX_CUT_SIZE];
-    uint32_t cutSize;
-    uint32_t lastUpdateIteration;
-    uint32_t currentIteration;
+    AtomicFloat sumAccumulator[PBRT_LTC_MAX_CUT_SIZE];                ///< Wave-local accumulated scalar contribution per cluster.
+    AtomicInt<uint32_t> visitCountAccumulator[PBRT_LTC_MAX_CUT_SIZE]; ///< Wave-local visit count per cluster.
+    uint32_t cutSize;                                                 ///< Number of active clusters in the cut.
+    uint32_t lastUpdateIteration;                                     ///< Last learning iteration that updated this cut.
+    uint32_t currentIteration;                                        ///< Current wave index being processed.
 };
 
+/// @brief Partition-tree container and per-leaf online cuts.
 struct PartitionTree {
     explicit PartitionTree(Allocator alloc);
     ~PartitionTree();
@@ -91,23 +88,40 @@ struct PartitionTree {
     PBRT_CPU_GPU
     OnlineLightTreeCut &Leaf(size_t idx) { return *leaves[idx]; }
 
+    /// @brief Appends one empty cut leaf to `leaves`.
     void EmplaceLeaf();
 
     Allocator alloc;
-    pstd::vector<OnlineLightTreeCut*> leaves;
-    pstd::vector<PartitionTreeNode> innerNodes;
-    pstd::vector<ShadingPoint> representantPoints;
-    Vector3f sceneExtent;
+    pstd::vector<OnlineLightTreeCut*> leaves;      ///< One online cut per partition-tree leaf.
+    pstd::vector<PartitionTreeNode> innerNodes;    ///< Flattened partition-tree in implicit left-child layout.
+    pstd::vector<ShadingPoint> representantPoints; ///< Representative shading point for each partition.
+    Vector3f sceneExtent;                          ///< Scene extent used to normalize spatial split dimensions.
 };
 
-// Learning To Cluster Lightsampler Definition
+/// @brief Learning To Cluster (LTC) light sampler implementation based on paper from Wang et al. 2021
+/// Combines a light hierarchy with an online-updated cut per shading partition.
+/// The first render wave collects shading points, builds 5D partitions, and
+/// initializes partition cuts. Subsequent waves update cut importances from
+/// measured direct-light contributions.
 class LTCLightSampler {
   public:
-    // Learning To Cluster Light Sampler Public Methods
+    /// @brief Builds the LTC light hierarchy and initializes runtime state.
+    /// @param lights Scene lights visible to this integrator.
+    /// @param alloc Pbrt allocator used by hierarchy and partition data.
+    /// @param beta Learning rate first parameter.
+    /// @param omega Learning rate second parameter.
+    /// @param gamma Parameter to determine the max iteration where the learning should stop.
     LTCLightSampler(pstd::span<const Light> lights, Allocator alloc, Float beta = 2, Float omega = Float(6)/7, Float gamma = 128);
 
+    /// @brief Builds the shading partition tree and initializes per-leaf cuts.
+    /// Called after the first render wave once shading samples are collected.
+    /// @param shadingPoints First-wave shading points from the integrator.
+    /// @param sceneBounds Scene bounds used to normalize spatial dimensions.
     void SetupScenePartitions(pstd::span<ShadingPoint> shadingPoints, const Bounds3f& sceneBounds);
 
+    /// @brief Samples a light using partition-conditioned LTC traversal.
+    /// The returned hint encodes partition/cluster indices for later
+    /// `AccumulateContribution()` calls.
     PBRT_CPU_GPU PBRT_NOINLINE
     pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t seed, Float u) const {
         Float pmf = 1;
@@ -118,7 +132,6 @@ class LTCLightSampler {
             }
         }
 
-        // Traverse light BVH to sample light
         if (m_tree.nodes.empty())
             return {};
 
@@ -129,11 +142,18 @@ class LTCLightSampler {
         BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
         Frame shadingFrame(bsdf ? bsdf->shadingFrame : Frame::FromZ(ctx.ns));
 
+        // root start
         uint32_t nodeIndex = 0;
+
+        // Encodes `(partitionIndex << 8) | cutOffset`, consumed later by
+        // integrators for `AccumulateContribution()`.
         uint32_t lightSamplerHint = std::numeric_limits<uint32_t>::max();
         constexpr uint32_t clusterIndexPowerTwoCapacity = 8;
+
+        // Probability of selecting the partition cut cluster; multiplied into pmf.
         Float clusterSelectionProb = 1;
         if (!m_partitions.leaves.empty() && n != Normal3f(0, 0, 0)) {
+            // Map shading context to a single 5D partition.
             Vector3f nv(n);
             UniformDiskVector diskVector(nv);
             uint32_t partitionIdx = GetPartitionIndex(p, diskVector);
@@ -141,6 +161,7 @@ class LTCLightSampler {
 
             const OnlineLightTreeCut &cut(*m_partitions.leaves[partitionIdx]);
 
+            // Sample one cut entry by inverting the prefix-sum CDF in `cut.prefixSum`.
             uint32_t offset = 0;
             const uint32_t cutSize = cut.cutSize;
             const Float weightSum = cut.prefixSum[cutSize - 1];
@@ -151,7 +172,7 @@ class LTCLightSampler {
             } else {
                 uint32_t high = cutSize - 1;
 
-                // binary search of the target cluster chosen by a random variable u
+                // Binary search first prefix > up.
                 while (offset < high) {
                     uint32_t mid = offset + ((high - offset) >> 1);
                     const Float prefixSum = cut.prefixSum[mid];
@@ -162,16 +183,21 @@ class LTCLightSampler {
                 DCHECK_LT(offset, cutSize);
             }
 
-            //const OnlineCutData clusterData = cut.data[offset];
+            // Extract selected cut entry and remap u to the selected entry interval.
             const Float importance = cut.q[offset];
             const Float prevPrefix = (offset > 0) ? cut.prefixSum[offset - 1] : 0;
             clusterSelectionProb = importance / weightSum;
             u = std::min((up - prevPrefix) / importance, OneMinusEpsilon);
+
+            // Encode selected cut entry into the hint for online learning updates.
             lightSamplerHint |= offset;
+
+            // Continue traversal from the selected cluster root instead of the tree root.
             nodeIndex = cut.clusterIndex[offset];
         }
         
         const LTCTreeNode* node = &m_tree.nodes[nodeIndex];
+
         Float clusterPdf = 1;
         pmf *= clusterSelectionProb;
 
@@ -185,11 +211,13 @@ class LTCLightSampler {
                                               children[1]->compactLightBounds.PhiOrI()};
             Float errBounds[2] = {1, 1};
 
+            // Compute LTC bound for each child; if it fails, treat as zero signal.
             if (!ComputeErrorBounds(errBounds[0], errBounds[1], p, wo, n, shadingFrame, bsdf, children[0]->compactLightBounds, children[1]->compactLightBounds, m_tree.allLightBounds)) {
                 AccumulateContribution(0, lightSamplerHint);
                 return {};
             }
 
+            // LTC traversal weights are proportional to sqrt(bound) * uniform-prob term.
             Float weights[2] = {0};
             const Float sqrt0 = SafeSqrt(errBounds[0]) * children[0]->pUniformSqrt;
             const Float sqrt1 = SafeSqrt(errBounds[1]) * children[1]->pUniformSqrt;
@@ -202,7 +230,7 @@ class LTCLightSampler {
             }
             weights[1] = 1 - weights[0];
             
-            // Randomly sample light BVH child node
+            // Sample one child and fold its probability into clusterPdf.
             Float nodePMF;
             int child = SampleDiscrete(weights, u, &nodePMF, &u);
             clusterPdf *= nodePMF;
@@ -210,6 +238,7 @@ class LTCLightSampler {
             nodeIndex = childrenIndices[child];
             node = &m_tree.nodes[nodeIndex];
 
+            // Hash scramble `u` between levels to reduce structural correlation.
             const Float scrambleOffset = HashFloat(nodeIndex, seed);
             u += scrambleOffset;
             if (u >= 1) u -= 1;
@@ -217,21 +246,23 @@ class LTCLightSampler {
 
         pmf *= clusterPdf;
 
+        // `clusterSelectionProb` is stored as `pLearning` for integrator-side
+        // contribution normalization during online LTC updates.
         return SampledLight(m_tree.lights[node->childOrLightIndex], pmf, lightSamplerHint, clusterSelectionProb);
     }
 
+    /// @brief Evaluates PMF for a specific light for specific shading point context.
     PBRT_CPU_GPU PBRT_NOINLINE
     LightPMF PMF(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t /*seed*/, Light light) const {
-        // Handle infinite _light_ PMF
+        // Infinite lights are not represented in the finite LTC tree.
         if (!m_lightToBitTrail.HasKey(light))
             return InfiniteLightSimplePMF(m_infiniteLights, m_tree.nodes.size());;
 
-        // Compute infinite light sampling probability _pInfinite_
         Float pInfinite = Float(m_infiniteLights.size()) /
                           Float(m_infiniteLights.size() + (m_tree.nodes.size() == 0 ? 0 : 1));
 
-        // Initialize local variables for BVH traversal for PMF computation
         uint32_t bitTrail = m_lightToBitTrail[light];
+
         const Point3f p = ctx.p();
         const Normal3f n = ctx.ns;
         const Vector3f wo = ctx.wo;
@@ -243,6 +274,7 @@ class LTCLightSampler {
         
         uint32_t nodeIndex = 0;
         if (!m_partitions.leaves.empty() && n != Normal3f(0, 0, 0)) {
+            // Identify the same partition cut that `Sample(...)` would use.
             Vector3f nv(n);
             UniformDiskVector diskVector(nv);
             uint32_t partitionIdx = GetPartitionIndex(p, diskVector);
@@ -251,6 +283,7 @@ class LTCLightSampler {
             const uint32_t cutSize = cut.cutSize;
             const Float weightSum = cut.prefixSum[cutSize - 1];
             uint32_t foundIndex = cutSize;
+            // Find cut entry whose bit prefix matches this light's bit trail.
             for (uint32_t i = 0; i < cutSize; ++i) {
                 const uint32_t currentDepth = cut.depth[i];
                 const uint32_t currentBitTrail = cut.bitTrail[i];
@@ -263,17 +296,20 @@ class LTCLightSampler {
 
             DCHECK_LT(foundIndex, cutSize);
 
+            // Remove matched prefix bits; remaining bits drive subtree replay.
             bitTrail >>= cut.depth[foundIndex];
+
+            // Start replay from the matched cluster root.
             nodeIndex = cut.clusterIndex[foundIndex];
 
+            // Multiply probability of selecting this cut cluster.
             pmf *= cut.q[foundIndex] / weightSum;
         }
 
         const LTCTreeNode *node = &m_tree.nodes[nodeIndex];
 
-        // Compute light's cluster pdf by walking down tree nodes to the light
+        // Replay the hierarchical child decisions from bitTrail until leaf.
         while (!node->isLeaf) {
-            // Compute child importances and update PMF for current node
             uint32_t childrenIndices[2] = {static_cast<uint32_t>(nodeIndex + 1), node->childOrLightIndex};
 
             const LTCTreeNode *children[2] = {&m_tree.nodes[childrenIndices[0]],
@@ -281,6 +317,7 @@ class LTCLightSampler {
 
             Float errBounds[2] = {1, 1};
             
+            // PMF replay uses the same local weighting rule as sampling.
             if (!ComputeErrorBounds(errBounds[0], errBounds[1], p, wo, n, shadingFrame, bsdf, children[0]->compactLightBounds, children[1]->compactLightBounds, m_tree.allLightBounds)) {
                 return 0;
             }
@@ -297,15 +334,17 @@ class LTCLightSampler {
             }
             weights[1] = 1 - weights[0];
 
+            // Next traversal branch comes from current low bit of bitTrail.
             const int child = bitTrail & 1;
             if (weights[child] == 0) {
                 DCHECK_GT(weights[child], 0);
                 return 0;
             }
 
+            // Multiply per-node branch probability.
             pmf *= weights[child];
 
-            // Use _bitTrail_ to find next node index and update its value
+            // Advance to selected child and consume one decision bit.
             nodeIndex = childrenIndices[child];
             node = children[child];
 
@@ -316,6 +355,7 @@ class LTCLightSampler {
         return LightPMF(pmf);
     }
 
+    /// @brief Context-free fallback light sampling path.
     PBRT_CPU_GPU
     pstd::optional<SampledLight> Sample(Float u) const {
         Float pmf = 1;
@@ -331,6 +371,7 @@ class LTCLightSampler {
         return SampledLight{m_tree.lights[index], pmf};
     }
 
+    /// @brief PMF for context-free fallback sampling.
     PBRT_CPU_GPU
     LightPMF PMF(Light light) const {
         // Handle infinite _light_ PMF
@@ -348,6 +389,9 @@ class LTCLightSampler {
         return LightPMF(pmf / m_tree.lights.size()); 
     }
     
+    /// @brief Generates direct-light samples for integrator MIS evaluation.
+    /// Also propagates LTC learning metadata (`hint`, `pLearning`) in
+    /// `SampledLd`.
     template <int NSamples, typename ScatterEval>
     PBRT_CPU_GPU PBRT_NOINLINE void SampleLd(CountedArray<SampledLd, NSamples>& samples, const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const {
         pstd::optional<SampledLight> sampledLight = Sample(ctx, bsdf, seed, u);
@@ -373,8 +417,13 @@ class LTCLightSampler {
 
     std::string ToString() const;
 
+    /// @brief Applies one online-learning update for all partition cuts.
+    /// @param currentIteration Current render-wave index.
     void Update(uint32_t currentIteration);
 
+    /// @brief Accumulates scalar contribution for the sampled cut cluster.
+    /// @param contribution Non-negative scalar proxy of direct illumination.
+    /// @param lightSamplerHint Encoded partition and cluster index from `Sample`.
     PBRT_CPU_GPU
     void AccumulateContribution(Float contribution, const uint32_t lightSamplerHint) const {
         if (m_partitions.leaves.empty() || lightSamplerHint == std::numeric_limits<uint32_t>::max()) {
@@ -397,22 +446,32 @@ class LTCLightSampler {
   private:
     // Learning To Cluster Light Sampler Private Methods
 #ifdef PBRT_BUILD_GPU_RENDERER
+    /// @brief Attempts GPU-based construction of the LTC light tree.
     bool buildLightTreeGPU(std::vector<LightBVHBuildContainer> &lights);
 #endif
 
+    /// @brief Recursively builds the 5D partition tree.
+    /// @param items Mutable shading-point array to split in place.
+    /// @param start Inclusive range start.
+    /// @param end Exclusive range end.
+    /// @return Index of the created partition-tree node.
     uint32_t BuildPartitionTree(pstd::span<ShadingPoint>& items, int start, int end);
 
+    /// @brief Finds partition index for a shading context descriptor.
+    /// @param p Shading position.
+    /// @param oct Encoded shading normal direction.
+    /// @return Index into `m_partitions.leaves`.
     PBRT_CPU_GPU
     uint32_t GetPartitionIndex(const Point3f& p, const UniformDiskVector& oct) const;
      
     // Learning To Cluster Light Sampler Private Members
-    LTCLightTree m_tree;
-    PartitionTree m_partitions;
-    pstd::vector<Light> m_infiniteLights;
-    HashMap<Light, uint32_t> m_lightToBitTrail;
-    Float m_beta;
-    Float m_omega;
-    Float m_gamma;
+    LTCLightTree m_tree;                         ///< Finite-light hierarchy and node bounds.
+    PartitionTree m_partitions;                  ///< 5D shading partitions with per-leaf online cuts.
+    pstd::vector<Light> m_infiniteLights;        ///< Infinite/environment lights sampled separately.
+    HashMap<Light, uint32_t> m_lightToBitTrail;  ///< BitTrail path per each light.
+    Float m_beta;                                ///< LTC update parameter beta.
+    Float m_omega;                               ///< LTC update parameter omega.
+    Float m_gamma;                               ///< LTC update parameter gamma.
 };
 
 }

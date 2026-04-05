@@ -636,6 +636,8 @@ PathIntegrator::PathIntegrator(int maxDepth, Camera camera, Sampler sampler,
       lightSampler(LightSampler::Create(requiredShadowRays, lightSampleStrategy, lights, Options->discretizeAreaLights > 0, Allocator())),
       regularize(regularize),
       isOnlineLightSampler(false) {
+    // Register the integrator is going to use an online light sampler, that requires
+    // some form of a feedback loop after each wave of samples.
     isOnlineLightSampler = lightSampler.Is<LTCLightSampler>();
 }
 
@@ -643,12 +645,16 @@ void PathIntegrator::OnRenderWaveStart(int waveIndex, const Bounds2i &pixelBound
     if (!isOnlineLightSampler || waveIndex != 0)
         return;
 
+    // Allocates first-wave shading-point storage for LTC.
+    // The collector is only needed on wave 0 to create partition cuts.
     firstIterationShadingPoints =
         std::make_unique<ShadingPointCollector>(pixelBounds, maxDepth, Allocator());
 }
 
+/// @brief Completes per-wave maintenance.
 void PathIntegrator::OnRenderWaveDone(int waveIndex) {
     if (isOnlineLightSampler) {
+        // Later waves only apply online updates from accumulated contributions.
         LTCLightSampler* ltc = lightSampler.CastOrNullptr<LTCLightSampler>();
         if (ltc) {
             ltc->Update(waveIndex);
@@ -658,6 +664,7 @@ void PathIntegrator::OnRenderWaveDone(int waveIndex) {
     if (waveIndex != 0 || !firstIterationShadingPoints)
         return;
 
+    // Wave 0 finalizes shading-point collection and builds partition cuts.
     uint32_t count = firstIterationShadingPoints->Size();
     LOG_VERBOSE("Collected %zu first-wave path shading points.", count);
 
@@ -838,6 +845,7 @@ SampledSpectrum PathIntegrator::SampleLd(const SurfaceInteraction &intr, uint32_
     else if (IsTransmissive(flags) && !IsReflective(flags))
         ctx.pi = intr.OffsetRayOrigin(-intr.wo);
 
+    // Record shading contexts from first wave.
     if (firstIterationShadingPoints)
         firstIterationShadingPoints->Append(ctx.p(), ctx.ns);
 
@@ -875,6 +883,7 @@ SampledSpectrum PathIntegrator::SampleLd(const SurfaceInteraction &intr, uint32_
         if (isOnlineLightSampler) {
             const LTCLightSampler* ltc = lightSampler.CastOrNullptr<LTCLightSampler>();
             if (ltc) {
+                // Feed a scalar direct-light estimate back to the sampled LTC cluster.
                 Float contribution = 0;
                 if (isUnoccluded) {
                     Float clusterPdf = sLd.lightPDF / sLd.pdfCancellationFactor;
@@ -1046,18 +1055,23 @@ void VolPathIntegrator::OnRenderWaveStart(int waveIndex, const Bounds2i &pixelBo
     if (!isOnlineLightSampler || waveIndex != 0)
         return;
 
+    // Allocates first-wave shading-point storage.
+    // The collector is only needed on wave 0.
     firstIterationShadingPoints =
         std::make_unique<ShadingPointCollector>(pixelBounds, maxDepth, Allocator());
 }
 
+/// @brief Completes per-wave maintenance.
 void VolPathIntegrator::OnRenderWaveDone(int waveIndex) {
     if (waveIndex != 0 && isOnlineLightSampler) {
+        // Later waves only apply online updates from accumulated contributions
         LTCLightSampler* ltc = lightSampler.CastOrNullptr<LTCLightSampler>();
         if (ltc) {
             ltc->Update(waveIndex);
         }
     }
 
+    // Wave 0 finalizes shading-point collection and builds partition cuts.
     if (waveIndex == 0 && firstIterationShadingPoints) {
         size_t count = firstIterationShadingPoints->Size();
         LOG_VERBOSE("Collected %zu first-wave volpath shading points.", count);
@@ -1437,6 +1451,7 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, uint32_t se
     } else
         ctx = LightSampleContext(intr);
 
+    // Record shading contexts from the first wave.
     if (firstIterationShadingPoints)
         firstIterationShadingPoints->Append(ctx.p(), ctx.ns);
 
@@ -1545,6 +1560,7 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, uint32_t se
         if (isOnlineLightSampler && !firstIterationShadingPoints) {
             const LTCLightSampler* ltc = lightSampler.CastOrNullptr<LTCLightSampler>();
             if (ltc) {
+                // Feed a scalar direct-light estimate back to the sampled LTC cluster.
                 Float contribution = 0;
                 if (isUnoccluded) {
                     if (sLd.scatterPDF == 0) {

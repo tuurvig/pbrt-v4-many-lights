@@ -186,6 +186,9 @@ WavefrontPathIntegrator::WavefrontPathIntegrator(
     if (allLights.size() == 1)
         lightSamplerName = "uniform";
     lightSampler = LightSampler::Create(requiredShadowRays, lightSamplerName, allLights, Options->discretizeAreaLights > 0, alloc);
+    
+    // Register the wavefront integrator is going to use an online light sampler, that requires
+    // some form of a feedback loop after each wave of samples.
     isOnlineLightSampler = lightSampler.Is<LTCLightSampler>();
 
     useBSDFDependentHitAreaQueue =
@@ -319,8 +322,10 @@ void WavefrontPathIntegrator::OnRenderWaveStart(int waveIndex, const Bounds2i &p
         alloc.new_object<ShadingPointCollector>(pixelBounds, maxDepth, alloc);
 }
 
+/// @brief Completes per-wave maintenance.
 void WavefrontPathIntegrator::OnRenderWaveDone(int waveIndex) {
     if (waveIndex != 0 && isOnlineLightSampler) {
+        // Later waves only apply online updates from accumulated contributions.
         LTCLightSampler *ltc = lightSampler.CastOrNullptr<LTCLightSampler>();
         if (ltc) {
             ltc->Update(waveIndex);
@@ -329,9 +334,11 @@ void WavefrontPathIntegrator::OnRenderWaveDone(int waveIndex) {
     }
 
     if (waveIndex == 0 && firstIterationShadingPoints) {
+        // Wave 0 finalizes shading-point collection and builds partition cuts.
         ShadingPoint* points = nullptr;
 #ifdef PBRT_BUILD_GPU_RENDERER
         if (Options->useGPU) {
+            // Ensure first-wave shading points are available on host for partition setup.
             GPUWait();
             points = firstIterationShadingPoints->Data();
             const uint32_t count = firstIterationShadingPoints->Size();

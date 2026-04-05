@@ -25,6 +25,7 @@ namespace pbrt {
 
 STAT_MEMORY_COUNTER("Memory/Resampled Hierarchic Tree", RHTLightTreeBytes);
 
+/// @brief Builds the RHT hierarchy from lights provided by integrator.
 RHTLightSampler::RHTLightSampler(pstd::span<const Light> lights, Allocator alloc, Float gamma) :
     m_tree(alloc), m_infiniteLights(alloc), m_lightToBitTrail(alloc), gamma(gamma) {
     std::vector<RHTBuildContainer> treeLights;
@@ -48,16 +49,17 @@ RHTLightSampler::RHTLightSampler(pstd::span<const Light> lights, Allocator alloc
         treeLights.reserve(lightsForLeaves.size());
         for (size_t i = 0; i < lightsForLeaves.size(); ++i) {
             const LightBVHBuildContainer& container(lightsForLeaves[i]);
-            // For build, use SphericalLightBounds derived from LightBounds
+            // Build phase uses spherical bounds (cheap split/importance evaluation).
             treeLights.emplace_back(SphericalLightBounds(container.bounds.bounds, container.bounds.phi), i);
             Light light = lights[container.index];
-            // Store detailed CompactLightBounds for leaves
+            // Leaf payload keeps tighter compact bounds + original Light handle.
             m_tree.leaves.emplace_back(container.bounds, container.bounds.phi, m_tree.allLightBounds, light);
         }
     }
 
     if (!treeLights.empty()) {
 #ifdef PBRT_BUILD_GPU_RENDERER
+        // Prefer GPU build for larger trees when GPU rendering is enabled.
         bool buildOnGPU = buildLightTreeGPU(treeLights);
         if (!buildOnGPU)
 #endif
@@ -74,10 +76,13 @@ RHTLightSampler::RHTLightSampler(pstd::span<const Light> lights, Allocator alloc
 }
 
 #ifdef PBRT_BUILD_GPU_RENDERER
+/// @brief GPU builder for RHT using spherical bounds and energy-weighted SAH.
 class RHTreeBuilderGPU final : public LightTreeBuilderGPU<SphericalLightBounds, uint32_t, SphericalBoundsCostEvaluator> {
   public:
+    /// @brief Creates a builder for the provided scene bounds.
     explicit RHTreeBuilderGPU(const Bounds3f &bounds) : m_allLightBounds(bounds) {}
 
+    /// @brief Builds temporary GPU hierarchy and merges nodes via spherical cost metric.
     bool Build(std::vector<RHTBuildContainer> &lights) {
         if (lights.empty())
             return false;
@@ -89,6 +94,7 @@ class RHTreeBuilderGPU final : public LightTreeBuilderGPU<SphericalLightBounds, 
         RHTBuildContainer* dLightsContainer = GPUAllocAsync<RHTBuildContainer>(buildState.nLights);
         GPUCopyToDevice(dLightsContainer, lights.data(), lights.size());
 
+        // Kept for parity with related builders; not used directly in the current Morton key.
         const Float largestRadius = Length(buildState.allLightBounds.Diagonal()) * Float(0.5);
         const Float sqrtLargestRadius = std::sqrt(largestRadius);
 
@@ -116,6 +122,7 @@ class RHTreeBuilderGPU final : public LightTreeBuilderGPU<SphericalLightBounds, 
         return true;
     }
 
+    /// @brief Copies merged GPU nodes and emits a flattened `ResampledTree`.
     void FlattenTree(ResampledTree& tree, std::vector<RHTBuildContainer> &lights, HashMap<Light, uint32_t>& bitTrailContainer) {
         const LightTreeBuildState<SphericalLightBounds> &state(State());
         if (state.nLights == 0)
@@ -140,6 +147,7 @@ private:
     Bounds3f m_allLightBounds;
 };
 
+/// @brief Builds the RHT hierarchy on GPU and flattens it to host storage.
 bool RHTLightSampler::buildLightTreeGPU(std::vector<RHTBuildContainer> &lights) {
     if (lights.size() < 100 || !Options->useGPU)
         return false;
@@ -155,6 +163,8 @@ bool RHTLightSampler::buildLightTreeGPU(std::vector<RHTBuildContainer> &lights) 
 
 #define PBRT_RHT_MAX_STACK 32
 
+/// @brief Compact stack element used during candidate collection traversal.
+/// Stores the node index together with normalized traversal scalars in packed form.
 struct alignas(8) PackedTraversalState {
     PackedTraversalState() = default;
 
@@ -167,6 +177,7 @@ struct alignas(8) PackedTraversalState {
     uint16_t PsParent;
 };
 
+/// @brief Expanded traversal state used while processing one active branch.
 struct alignas(16) TraversalState {
     PBRT_CPU_GPU
     TraversalState(uint32_t nodeIndex, Float T, Float PsParent) :
@@ -185,11 +196,13 @@ struct alignas(16) TraversalState {
 };
 
 PBRT_CPU_GPU 
+/// @brief Traverses the RHT and populates heuristic-H reservoirs with light candidates.
+/// The traversal follows the split/no-split model from the paper and evaluates candidate weights.
 void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSet, const LightSampleContext& ctx, uint32_t seed, Float u, const Float uSplit, const Float pmf) const {
     PackedTraversalState stack[PBRT_RHT_MAX_STACK];
     int stackHead = -1;
 
-    //const Float startingSplitProbability = std::max(uSplit, Float(1) - MathEpsilon);
+    // Start from the root with full traversal weight.
     TraversalState state(0, Float(1), Float(1));
 
     Point3f p = ctx.p();
@@ -199,6 +212,7 @@ void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSe
         const ResampledTreeNode* node = &m_tree.innerNodes[state.nodeIndex];
 
         if (node->isLeaf) {
+            // Final proposal density for this leaf under split/no-split process.
             const Float pdf = (state.PsParent + (1 - state.PsParent) * state.T) * pmf;
 
             const uint32_t lightIdx = node->childOrLightIndex;
@@ -223,7 +237,7 @@ void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSe
         const Float PsNode = std::min(node->bounds.SplitProbability(p, gamma), state.PsParent); // Ps(C)
         const Float PsHatNode = 1 - PsNode; // Ps_hat(C)
 
-        // propability of splitting C_parent given that C has not been split
+        // Probability of splitting parent given that current node has not split.
         const Float Pns = (state.PsParent - PsNode) / std::max(PsHatNode, MathEpsilon); // Pns(C)
         const Float T_node = Pns + (1 - Pns) * state.T;
 
@@ -249,12 +263,14 @@ void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSe
         if (uSplit <= PsNode) {
             DCHECK_LT(stackHead, PBRT_RHT_MAX_STACK - 1);
 
+            // Branch split: process left now, defer right on the explicit stack.
             state = TraversalState(childIdxLeft, T_node * pLeft, PsNode);
             stackHead++;
             stack[stackHead] = PackedTraversalState(childIdxRight, T_node * pRight, PsNode);
             continue;
         }
 
+        // No split: stochastically select exactly one child and continue.
         if (u <= pLeft) {
             u /= pLeft;
             state = TraversalState(childIdxLeft, T_node * pLeft, PsNode);
@@ -263,6 +279,7 @@ void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSe
             state = TraversalState(childIdxRight, T_node * pRight, PsNode);
         }
 
+        // Scramble traversal sample after each decision to reduce structured correlation.
         u += HashFloat(seed, state.nodeIndex);
         if (u >= 1) u -= 1;
     }

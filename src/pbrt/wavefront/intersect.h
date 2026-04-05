@@ -47,6 +47,7 @@ inline PBRT_CPU_GPU void RecordShadowRayResult(const ShadowRayWorkItem w,
     }
     
     if (const LTCLightSampler *ltc = lightSampler.CastOrNullptr<LTCLightSampler>()) {
+        // Feed online LTC update with a scalar estimate of this sample's contribution.
         Float contribution = 0;
         if (isUnoccluded) {
             contribution = w.Ld.MaxComponentValue() / (w.r_u + w.r_l / w.pdfCancellationFactor).Average();
@@ -308,6 +309,7 @@ inline PBRT_CPU_GPU void TraceTransmittance(ShadowRayWorkItem sr,
     }
 
     if (const LTCLightSampler *ltc = lightSampler.CastOrNullptr<LTCLightSampler>()) {
+        // Feed online LTC update with a scalar estimate of this sample's contribution.
         Float contribution = 0;
         if (isUnoccluded) {
             contribution = unweightedFinalLd.MaxComponentValue() / (r_u + r_l / sr.pdfCancellationFactor).Average();

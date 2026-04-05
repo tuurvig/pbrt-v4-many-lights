@@ -796,17 +796,20 @@ class InPlaceWeightedReservoirSetSampler {
 
     PBRT_CPU_GPU
     bool Add(const T& sample, Float weight) {
-        // It is needed to compute a new seed for a permutation every N elements
-        if (localIndex == N) {
-            localIndex = 0;
-            ++currentBatch;
-            batchHash = MixBits(batchHash * currentBatch);
+        int index = 0;
+        if constexpr (N > 1) {
+            // It is needed to compute a new seed for a permutation every N elements
+            if (localIndex == N) {
+                localIndex = 0;
+                ++currentBatch;
+                batchHash = MixBits(batchHash * currentBatch);
+            }
+
+            index = PermutationElement(localIndex, N, batchHash);
+            ++localIndex;
         }
 
-        const int index = PermutationElement(localIndex, N, batchHash);
-        ++localIndex;
         ++count;
-
         const Float currentU = u;
         u += GetR1SequenceOffset();
         if (u >= 1) u -= 1;
@@ -827,16 +830,19 @@ class InPlaceWeightedReservoirSetSampler {
     template <typename F>
     PBRT_CPU_GPU
     bool Add(F func, Float weight) {
-        if (localIndex == N) {
-            localIndex = 0;
-            ++currentBatch;
-            batchHash = MixBits(batchHash * currentBatch);
+        int index = 0;
+        if constexpr (N > 1) {
+            if (localIndex == N) {
+                localIndex = 0;
+                ++currentBatch;
+                batchHash = MixBits(batchHash * currentBatch);
+            }
+
+            index = PermutationElement(localIndex, N, batchHash);
+            ++localIndex;
         }
 
-        int index = PermutationElement(localIndex, N, batchHash);
-        ++localIndex;
         ++count;
-
         const Float currentU = u;
         u += GetR1SequenceOffset();
         if (u >= 1) u -= 1;

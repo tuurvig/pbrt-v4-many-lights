@@ -99,7 +99,9 @@ class WavefrontPathIntegrator {
                                  int wavefrontDepth);
 
     void UpdateFilm();
+    /// @brief Per-wave hook performed before a wave is started.
     void OnRenderWaveStart(int waveIndex, const Bounds2i &pixelBounds);
+    /// @brief Per-wave hook performed after a wave has completed.
     void OnRenderWaveDone(int waveIndex);
 
     WavefrontPathIntegrator(pstd::pmr::memory_resource *memoryResource,

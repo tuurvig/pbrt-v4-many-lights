@@ -20,34 +20,28 @@
 
 namespace pbrt {
 
-// Resampled Hierarchic Tree Light Sampler Definition
+/// @brief Resampled Hierarchic Tree (RHT) light sampler.
+/// Implements the stochastic traversal with splitting from Conty et al. (2024)
+/// over a hierarchy of spherical light bounds.
 class RHTLightSampler {
   public:
-    // Resampled Hierarchic Tree Light Sampler Public Methods
+    // RHTLightSampler Public Methods
+    /// @brief Builds the RHT hierarchy and caches bitTrails per-light.
+    /// @param lights Scene lights provided by the integrator.
+    /// @param alloc Pbrt allocator.
+    /// @param gamma Controls the split-probability falloff in `SplitProbability()`.
     RHTLightSampler(pstd::span<const Light> lights, Allocator alloc, Float gamma = 0.2);
 
+    /// @brief Context-dependent sampling entry point.
+    /// Fallsback to the context-free `Sample(u)` path since the result might return more than one sample for resampling.
+    /// Integrators will never use this path, but this must be preserved to keep the TaggedPointer functional.
     PBRT_CPU_GPU PBRT_NOINLINE
     pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t seed, Float u) const {
-        Float pmf = 1;
-        if (!m_infiniteLights.empty()) {
-            pstd::optional<SampledLight> infiniteLightSample = InfiniteLightSimpleSample(m_infiniteLights, m_tree.leaves.size(), pmf, u);
-            if (infiniteLightSample) {
-                return infiniteLightSample;
-            }
-        }
-        
-        if (m_tree.innerNodes.empty())
-            return {};
-
-        // Declare common variables for light BVH traversal
-        Point3f p = ctx.p();
-        Normal3f n = ctx.ns;
-
-        int nodeIndex = 0;
-
         return Sample(u);
     }
 
+    /// @brief Evaluates PMF for context-dependent RHT sampling.
+    /// Replays the stochastic traversal probabilities using the light's bitTrail.
     PBRT_CPU_GPU
     LightPMF PMF(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t seed, Light light) const {
         // Handle infinite _light_ PMF
@@ -109,6 +103,7 @@ class RHTLightSampler {
         return (1 - pInfinite) * (PsParent + (1 - PsParent) * T);
     }
 
+    /// @brief Context-free fallback: uniform sampling over lights in leaves.
     PBRT_CPU_GPU PBRT_NOINLINE
     pstd::optional<SampledLight> Sample(Float u) const {
         Float pmf = 1;
@@ -126,6 +121,7 @@ class RHTLightSampler {
         return SampledLight{m_tree.leaves[index].light, pmf};
     }
 
+    /// @brief PMF for context-free fallback path.
     PBRT_CPU_GPU PBRT_NOINLINE
     LightPMF PMF(Light light) const {
         // Handle infinite _light_ PMF
@@ -143,9 +139,13 @@ class RHTLightSampler {
         return LightPMF(pmf / m_tree.leaves.size()); 
     }
     
+    /// Size of the first-stage candidate reservoir set (heuristic H).
 #define PBRT_RHT_RESERVOIR_SET_H_SIZE 16
-#define PBRT_RHT_RESAMPLED_CANDIDATES 1
 
+    /// @brief Produces direct-light samples using two-stage reservoir resampling.
+    /// Stage H collects candidates from tree traversal; stage F resamples by contribution.
+    /// @tparam NSamples Maximum number of output samples.
+    /// @tparam ScatterEval Callable evaluating BSDF contribution and scatter PDF.
     template <int NSamples, typename ScatterEval>
     PBRT_CPU_GPU PBRT_NOINLINE void SampleLd(CountedArray<SampledLd, NSamples>& samples, const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const {
         Float pmf = 1;
@@ -169,20 +169,21 @@ class RHTLightSampler {
         const Point3f p = ctx.p();
         const Normal3f n = ctx.ns;
 
+        // Heuristic F reservoir: final selection over evaluated direct-light candidates.
         InPlaceWeightedReservoirSetSampler<SampledLd, NSamples> heuristicFSampler(samples.elements, Hash(u, MixBits(seed)));
         {
+            // Heuristic H reservoir set: tree-traversal candidates with proposal PDFs.
             HeuristicHReservoirSet heuristicHSampler(Hash(u, seed));
             CollectLightCandidates(heuristicHSampler, ctx, seed, u, HashFloat(seed), pmf);
             {
                 Point2f uLightOffset = GetR2SequenceOffset();
-            
+             
                 for (int i = 0; i < heuristicHSampler.Size(); ++i) {
-                    // advance the sample unconditionally
                     const Point2f uLightCurrent = uLight;
                     uLight += uLightOffset;
                     if (uLight.x >= 1) uLight.x -= 1;
                     if (uLight.y >= 1) uLight.y -= 1;
-                
+                 
                     const StatelessWeightedReservoirSampler<LightCandidate>& reservoir(heuristicHSampler.GetReservoir(i));
                     if (!reservoir.HasSample()) {
                         continue;
@@ -200,58 +201,65 @@ class RHTLightSampler {
                     const Float lightPDF = sample.pmf * ls->pdf;
                     
                     Float scatterPDF = 0;
-                    SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
-                    f_hat *= ls->L;
+                    SampledSpectrum contribution = ls->L;
+                    contribution *= scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
                 
                     // F(Si) = bsdf * (Li / pdfLight) * misW * hW(Li)
                     const Float denom = std::max(lightPDF * hProb + scatterPDF, MathEpsilon);
-                    const Float fWeight = f_hat.MaxComponentValue() / denom;
+                    const Float fWeight = contribution.MaxComponentValue() / denom;
                     if (fWeight > 0) {
                         heuristicFSampler.Add([&]{
-                            return SampledLd(f_hat / hProb, light, ls->pLight, lightPDF, scatterPDF);
+                            return SampledLd(contribution / hProb, light, ls->pLight, lightPDF, scatterPDF);
                         }, fWeight);
                     }
                 }
             }
         }
         
-        const int addedSamples = heuristicFSampler.Count();
-        if (addedSamples < NSamples) {
-            samples.count = addedSamples;
-            if constexpr (NSamples > 1) {
-                if (addedSamples == 1 && heuristicFSampler.HasSample(1)) {
-                    samples.elements[0] = samples.elements[1];
-                }
-            }
-            return;
-        }
+        // Compact valid F-reservoir entries to the front and always apply
+        // the reservoir selection probability for unbiased normalization.
+        int out = 0;
+        for (int i = 0; i < NSamples; ++i) {
+            if (!heuristicFSampler.HasSample(i))
+                continue;
 
-        samples.count = NSamples;
-        for (int i = 0; i < samples.count; ++i) {
+            if (out != i)
+                samples.elements[out] = samples.elements[i];
+
             const Float fProb = heuristicFSampler.SampleProbability(i);
-            samples.elements[i].Ld /= std::max(fProb, MathEpsilon);
+            samples.elements[out].Ld /= std::max(fProb, MathEpsilon);
+            ++out;
         }
+        samples.count = out;
     }
 
     std::string ToString() const;
 
   private:
 #ifdef PBRT_BUILD_GPU_RENDERER
+    /// @brief Attempts GPU construction of the RHT hierarchy.
     bool buildLightTreeGPU(std::vector<RHTBuildContainer> &lights);
 #endif
 
+    /// Reservoir set type for heuristic H candidate generation.
     using HeuristicHReservoirSet = WeightedReservoirSetSampler<LightCandidate, PBRT_RHT_RESERVOIR_SET_H_SIZE>;
-    //using HeuristicHReservoirSet = RestirSampler<LightCandidate>;
 
     PBRT_CPU_GPU PBRT_NOINLINE
+    /// @brief Traverses the RHT and fills heuristic-H candidate reservoirs.
+    /// @param reservoirSet Output reservoir set receiving candidate leaves.
+    /// @param ctx Shading context.
+    /// @param seed Randomization seed.
+    /// @param u Primary random sample.
+    /// @param uSplit Random sample that decides split vs no-split events.
+    /// @param pmf Prefix probability accumulated before entering RHT sampling.
     void CollectLightCandidates(HeuristicHReservoirSet& reservoirSet, const LightSampleContext& ctx, uint32_t seed, Float u, Float uSplit, Float pmf) const;
 
 
-    // Resampled Hierarchic Tree Light Sampler Private Members
-    ResampledTree m_tree;
-    pstd::vector<Light> m_infiniteLights;
-    HashMap<Light, uint32_t> m_lightToBitTrail;
-    Float gamma;
+    // RHTLightSampler Private Members
+    ResampledTree m_tree;                       ///< Light hierarchy (spherical inner nodes + compact leaves with tighter bounds).
+    pstd::vector<Light> m_infiniteLights;       ///< Infinite/environment lights.
+    HashMap<Light, uint32_t> m_lightToBitTrail; ///< Encoded bitTrail paths for PMF reconstruction.
+    Float gamma;                                ///< Split-probability shape parameter.
 };
 
 }
