@@ -20,15 +20,23 @@
 
 namespace pbrt {
 
-// Stochastic Lightcuts Lightsampler Definition
+/// @brief Stochastic Lightcuts sampler.
+/// Builds a single Lightcuts tree and samples multiple representative lights from a cut.
 class SLCLightSampler {
   public:
-    // LightcutsLightSampler Public Methods
+    // SLCLightSampler Public Methods
+    /// @brief Builds the SLC tree and mapping from light to bit trail.
+    /// @param lights Scene lights provided by the integrator.
+    /// @param alloc Pbrt allocator.
+    /// @param threshold Lightcuts error threshold for cut refinement.
     SLCLightSampler(pstd::span<const Light> lights, Allocator alloc, Float threshold = 0.02);
 
+    /// @brief Samples one light for the given shading context.
+    /// Uses cut-level sampling followed by stochastic descent to a leaf.
     PBRT_CPU_GPU PBRT_NOINLINE
     pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t seed, Float u) const {
         Float pmf = 1;
+        // Infinite lights are sampled separately before tree traversal.
         if (!m_infiniteLights.empty()) {
             pstd::optional<SampledLight> infiniteLightSample = InfiniteLightSimpleSample(m_infiniteLights, m_tree.nodes.size(), pmf, u);
             if (infiniteLightSample) {
@@ -57,6 +65,7 @@ class SLCLightSampler {
             return {};
         }
 
+        // Pick a cut node with probability proportional to its error bound.
         WeightedReservoirSampler<CutData> reservoir(Hash(u));
         for (int i = 0, max = PBRT_LIGHTCUTS_CUT_SIZE; i < max; ++i) {
             Float errBound = errBounds[i];
@@ -73,6 +82,7 @@ class SLCLightSampler {
         uint32_t nodeIndex = nodeData.nodeIndex & indexMask;
         const LightcutsTreeNode* node = &m_tree.nodes[nodeIndex];
         
+        // Traverse from the selected cluster to a representative leaf.
         Float pmfRepresentant = 1;
         while (!node->isLeaf) {
             uint32_t childrenIndices[2] = {static_cast<uint32_t>(nodeIndex + 1), node->childOrLightIndex};
@@ -106,6 +116,8 @@ class SLCLightSampler {
         return SampledLight(m_tree.lights[node->childOrLightIndex], pmf * pmfRepresentant);
     }
 
+    /// @brief Evaluates PMF for context-dependent sampling.
+    /// Reconstructs the same cut and branch decisions used by `Sample()`.
     PBRT_CPU_GPU PBRT_NOINLINE
     LightPMF PMF(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t /*seed*/, Light light) const {
         // Handle infinite _light_ PMF
@@ -190,6 +202,7 @@ class SLCLightSampler {
         return LightPMF(pmf);
     }
 
+    /// @brief Samples one light without context using uniform sampling over tree leaves.
     PBRT_CPU_GPU
     pstd::optional<SampledLight> Sample(Float u) const {
         Float pmf = 1;
@@ -205,6 +218,7 @@ class SLCLightSampler {
         return SampledLight{m_tree.lights[index], pmf};
     }
 
+    /// @brief Returns PMF for context-free sampling path.
     PBRT_CPU_GPU
     LightPMF PMF(Light light) const {
         // Compute infinite light sampling probability _pInfinite_
@@ -221,6 +235,9 @@ class SLCLightSampler {
         return pmf / m_tree.lights.size(); 
     }
 
+    /// @brief Produces up to `NSamples` direct-light candidates via SLC traversal.
+    /// @tparam NSamples Number of cut entries tracked in the fixed-size buffer.
+    /// @tparam ScatterEval Callable evaluating BSDF contribution and scatter PDF.
     template <int NSamples, typename ScatterEval>
     PBRT_CPU_GPU PBRT_NOINLINE void SampleLd(CountedArray<SampledLd, NSamples>& samples, const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const {
         Float pmf = 1;
@@ -245,6 +262,7 @@ class SLCLightSampler {
 
         const Frame shadingFrame(bsdf ? bsdf->shadingFrame : Frame::FromZ(ctx.ns));
 
+        // Build a Lightcuts cut and process each cluster in the cut.
         Float errBounds[NSamples] = {0};
         CutData data[NSamples];
 
@@ -279,6 +297,8 @@ class SLCLightSampler {
             uint32_t nodeIndex = clusterData.nodeIndex & indexMask;
             const LightcutsTreeNode* node = &m_tree.nodes[nodeIndex];
 
+            // Stochastically descend to one representative light in the cluster
+            // and add it as a sample for direct illumination
             Float pmfRepresentant = 1;
             bool failed = false;
             while (!node->isLeaf) {
@@ -333,14 +353,15 @@ class SLCLightSampler {
 
   private:
 #ifdef PBRT_BUILD_GPU_RENDERER
+    /// @brief Attempts GPU construction of the SLC light tree.
     bool buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights);
 #endif
 
-    // LightcutsLightSampler Private Members
-    LightcutsTree m_tree;
-    pstd::vector<Light> m_infiniteLights;
-    HashMap<Light, uint32_t> m_lightToBitTrail;
-    Float m_threshold;
+    // SLCLightSampler Private Members
+    LightcutsTree m_tree;                       ///< Hierarchy over lights.
+    pstd::vector<Light> m_infiniteLights;       ///< Infinite/environment lights.
+    HashMap<Light, uint32_t> m_lightToBitTrail; ///< Bit-trail path encoding for each light.
+    Float m_threshold;                          ///< Relative cut error threshold.
 };
 
 }

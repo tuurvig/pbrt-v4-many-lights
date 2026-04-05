@@ -47,6 +47,7 @@ HSLCLightSampler::HSLCLightSampler(pstd::span<const Light> lights, Allocator all
     //Float u = rng.Uniform<Float>();
     if (!treeLights.empty()) {
 #ifdef PBRT_BUILD_GPU_RENDERER
+        // Prefer GPU build for larger trees when GPU rendering is enabled.
         bool buildOnGPU = buildLightTreeGPU(treeLights);
         if (!buildOnGPU)
 #endif
@@ -62,10 +63,13 @@ HSLCLightSampler::HSLCLightSampler(pstd::span<const Light> lights, Allocator all
 }
 
 #ifdef PBRT_BUILD_GPU_RENDERER
+/// @brief GPU builder for HSLC trees based on SAOH ordering and Morton sorting.
 class HSLCTreeBuilderGPU final : public LightTreeBuilderGPU<LightBounds, uint64_t, SAOHCostEvaluator> {
   public:
+    /// @brief Creates a builder for the provided scene light bounds.
     explicit HSLCTreeBuilderGPU(const Bounds3f &bounds) : m_allLightBounds(bounds) {}
 
+    /// @brief Builds temporary GPU hierarchy and merges nodes with SAOH.
     bool Build(std::vector<LightcutsBuildContainer> &lights) {
         if (lights.empty())
             return false;
@@ -101,6 +105,7 @@ class HSLCTreeBuilderGPU final : public LightTreeBuilderGPU<LightBounds, uint64_
         return true;
     }
 
+    /// @brief Copies merged GPU nodes and emits a flattened `LightcutsTree`.
     void FlattenTree(LightcutsTree& tree, std::vector<LightcutsBuildContainer> &lights, HashMap<Light, uint32_t>& bitTrailContainer) {
         const LightTreeBuildState<LightBounds> &state(State());
         if (state.nLights == 0)
@@ -125,6 +130,7 @@ private:
     Bounds3f m_allLightBounds;
 };
 
+/// @brief Builds the HSLC tree on GPU and flattens it to host memory.
 bool HSLCLightSampler::buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights) {
     if (lights.size() < 100 || !Options->useGPU)
         return false;

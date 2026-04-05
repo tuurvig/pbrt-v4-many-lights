@@ -23,10 +23,13 @@
 namespace pbrt {
 #ifdef PBRT_BUILD_GPU_RENDERER
 
+/// @brief GPU builder that constructs Lightcuts trees from Morton-sorted leaf nodes.
 class LightcutsTreeBuilderGPU final : public LightTreeBuilderGPU<LightBounds, uint32_t, LightcutsCostEvaluator> {
   public:
+    /// @brief Creates a builder configured for either point-light or spot-light costs.
     explicit LightcutsTreeBuilderGPU(const Bounds3f &bounds, bool isPoint) : m_allLightBounds(bounds), m_isPoint(isPoint) {}
 
+    /// @brief Builds the temporary GPU hierarchy and merges nodes using Lightcuts cost.
     bool Build(std::vector<LightcutsBuildContainer> &lights) {
         if (lights.empty())
             return false;
@@ -64,6 +67,7 @@ class LightcutsTreeBuilderGPU final : public LightTreeBuilderGPU<LightBounds, ui
         return true;
     }
 
+    /// @brief Copies GPU nodes to host and emits a flattened `LightcutsTree`.
     void FlattenTree(LightcutsTree& tree, std::vector<LightcutsBuildContainer> &lights, HashMap<Light, LightLocation>& bitTrailContainer) {
         const LightTreeBuildState<LightBounds> &state(State());
         if (state.nLights == 0)
@@ -99,6 +103,8 @@ STAT_MEMORY_COUNTER("Memory/Lightcuts LightTree", lightCutsLightTreeBytes);
 constexpr uint32_t infiniteLightsIndex = 2;
 constexpr uint32_t otherLightsIndex = 3;
 
+/// Builds point/spot Lightcuts trees and classifies unsupported finite lights
+/// into a fallback uniform bucket.
 LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, Allocator alloc, Float threshold) :
     m_pointTree(alloc), m_spotTree(alloc), m_otherLights(alloc), m_infiniteLights(alloc),
     m_lightToLocation(alloc), m_otherLightIntensities(0), m_threshold(threshold) {
@@ -135,6 +141,7 @@ LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, All
 
     if (!pointLights.empty()) {
 #ifdef PBRT_BUILD_GPU_RENDERER
+        // Prefer GPU build for larger trees when GPU rendering is enabled.
         bool buildOnGPU = buildLightTreeGPU(pointLights, m_pointTree, true);
         if (!buildOnGPU)
 #endif
@@ -146,6 +153,7 @@ LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, All
 
     if (!spotLights.empty()) {
 #ifdef PBRT_BUILD_GPU_RENDERER
+        // Prefer GPU build for larger trees when GPU rendering is enabled.
         bool buildOnGPU = buildLightTreeGPU(spotLights, m_spotTree, false);
         if (!buildOnGPU)
 #endif
@@ -173,6 +181,7 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
         return {};
     }
 
+    // Draw one cut entry proportionally to cluster intensity.
     WeightedReservoirSampler<CutData> reservoir(Hash(u));
     for (int i = 0, max = PBRT_LIGHTCUTS_CUT_SIZE; i < max; ++i) {
         Float errBound = errBounds[i];
@@ -199,6 +208,7 @@ pstd::optional<SampledLight> LightcutsLightSampler::SampleLightTree(const LightS
 }
 
 #ifdef PBRT_BUILD_GPU_RENDERER
+/// @brief Builds one Lightcuts tree on GPU and flattens it to host storage.
 bool LightcutsLightSampler::buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights, LightcutsTree& tree, bool isPoint) {
     if (lights.size() < 100 || !Options->useGPU)
         return false;

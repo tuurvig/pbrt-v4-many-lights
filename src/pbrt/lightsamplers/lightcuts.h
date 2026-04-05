@@ -20,16 +20,25 @@
 
 namespace pbrt {
 
-// LightcutsLightSampler Definition
+/// @brief Light sampler implementing the original Lightcuts tree-cut strategy.
+/// Splits lights into dedicated point/spot hierarchies and a fallback bucket
+/// for other light types.
 class LightcutsLightSampler {
     
 public:
     // LightcutsLightSampler Public Methods
+    /// @brief Builds Lightcuts trees for point and spot lights. Implements the original 2005 paper from Walter 
+    /// @param lights Scene lights provided by the integrator.
+    /// @param alloc Pbrt allocator used for handling storage.
+    /// @param threshold Lightcuts error threshold controlling cut refinement.
     LightcutsLightSampler(pstd::span<const Light> lights, Allocator alloc, Float threshold = 0.02);
 
+    /// @brief Importance-samples one light using Lightcuts cut traversal.
+    /// Handles infinite lights first, then selects one of the finite-light groups.
     PBRT_CPU_GPU PBRT_NOINLINE pstd::optional<SampledLight> Sample(const LightSampleContext& ctx, const BSDF* bsdf, uint32_t seed, Float u) const {
         const size_t totalSize = m_pointTree.lights.size() + m_spotTree.lights.size() + m_otherLights.size();
         Float pmf = 1;
+        // Infinite lights are sampled separately.
         if (!m_infiniteLights.empty()) {
             pstd::optional<SampledLight> infiniteLightSample = InfiniteLightSimpleSample(m_infiniteLights, totalSize, pmf, u);
             if (infiniteLightSample) {
@@ -37,6 +46,7 @@ public:
             }
         }
 
+        // Select between spot tree, point tree and "other" lights.
         Float weights[3] = {
             m_spotTree.lights.empty() ? 0 : m_spotTree.nodes[0].compactLightBounds.PhiOrI(),
             m_pointTree.lights.empty() ? 0 : m_pointTree.nodes[0].compactLightBounds.PhiOrI(),
@@ -57,6 +67,7 @@ public:
         return SampledLight{m_otherLights[index], pmf};
     }
 
+    /// @brief Returns PMF for shading point context.
     PBRT_CPU_GPU PBRT_NOINLINE LightPMF PMF(const LightSampleContext& ctx, const BSDF* bsdf, uint32_t /*seed*/, Light light) const {
         const size_t totalSize = m_pointTree.lights.size() + m_spotTree.lights.size() + m_otherLights.size();
 
@@ -82,6 +93,7 @@ public:
         return 0;
     }
 
+    /// @brief Samples one light without shading context by using group-level energy weights.
     PBRT_CPU_GPU PBRT_NOINLINE pstd::optional<SampledLight> Sample(Float u) const {
         const size_t totalSize = m_pointTree.lights.size() + m_spotTree.lights.size() + m_otherLights.size();
         Float pmf = 1;
@@ -113,6 +125,7 @@ public:
         return SampledLight{m_otherLights[index], pmf};
     }
 
+    /// @brief Returns PMF for context-free sampling path.
     PBRT_CPU_GPU PBRT_NOINLINE LightPMF PMF(Light light) const {
         const size_t totalSize = m_pointTree.lights.size() + m_spotTree.lights.size() + m_otherLights.size();
         LightLocation loc = m_lightToLocation[light];
@@ -138,6 +151,9 @@ public:
         return pmf / t.lights.size(); 
     }
     
+    /// @brief Produces up to `NSamples` direct-light samples via Lightcuts clusters.
+    /// @tparam NSamples Max number of cut entries that may contribute.
+    /// @tparam ScatterEval Callable evaluating BSDF contribution and scattering PDF.
     template <int NSamples, typename ScatterEval>
     PBRT_CPU_GPU PBRT_NOINLINE void SampleLd(CountedArray<SampledLd, NSamples>& samples, const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const {
         const size_t totalSize = m_pointTree.lights.size() + m_spotTree.lights.size() + m_otherLights.size();
@@ -191,6 +207,7 @@ public:
 
         const Frame shadingFrame(bsdf ? bsdf->shadingFrame : Frame::FromZ(ctx.ns));
 
+        // Build a Lightcuts cut and sample one representative per surviving cluster.
         Float errBounds[NSamples] = {0};
         CutData data[NSamples];
 
@@ -222,6 +239,7 @@ public:
             const Float repIntensity = representant.compactLightBounds.PhiOrI();
 
             const int representantLightIndex = representant.childOrLightIndex;
+            // Scale representative contribution to preserve cluster energy.
             const Float scale = nodeIntensity / repIntensity;
 
             Light light = selectedTree->lights[representantLightIndex];
@@ -246,20 +264,22 @@ public:
 private:
     // LightcutsLightSampler Private Methods
 #ifdef PBRT_BUILD_GPU_RENDERER
+    /// @brief Attempts GPU tree construction and flattening for one light group.
     bool buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights, LightcutsTree& tree, bool isPoint);
 #endif
 
+    /// @brief Samples from a preselected point/spot Lightcuts tree.
     PBRT_CPU_GPU
     pstd::optional<SampledLight> SampleLightTree(const LightSampleContext& ctx, const LightcutsTree& tree, bool isPoint, const BSDF* bsdf, Float pmf, Float u) const;
 
     // LightcutsLightSampler Private Members
-    LightcutsTree m_pointTree;
-    LightcutsTree m_spotTree;
-    pstd::vector<Light> m_otherLights;
-    pstd::vector<Light> m_infiniteLights;
-    HashMap<Light, LightLocation> m_lightToLocation;
-    Float m_otherLightIntensities;
-    Float m_threshold;
+    LightcutsTree m_pointTree;                       ///< Point-light hierarchy.
+    LightcutsTree m_spotTree;                        ///< Spot/cosine-spot hierarchy.
+    pstd::vector<Light> m_otherLights;               ///< Finite lights not handled by Lightcuts trees.
+    pstd::vector<Light> m_infiniteLights;            ///< Environment/infinite lights.
+    HashMap<Light, LightLocation> m_lightToLocation; ///< Lookup table for light bitTrails used by PMF queries.
+    Float m_otherLightIntensities;                   ///< Total emission weight of the fallback finite bucket.
+    Float m_threshold;                               ///< Lightcuts error threshold.
 };
 
 }

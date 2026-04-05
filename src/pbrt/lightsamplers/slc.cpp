@@ -45,6 +45,7 @@ SLCLightSampler::SLCLightSampler(pstd::span<const Light> lights, Allocator alloc
 
     if (!treeLights.empty()) {
 #ifdef PBRT_BUILD_GPU_RENDERER
+        // Prefer GPU build for larger trees when GPU rendering is enabled.
         bool buildOnGPU = buildLightTreeGPU(treeLights);
         if (!buildOnGPU)
 #endif
@@ -60,10 +61,13 @@ SLCLightSampler::SLCLightSampler(pstd::span<const Light> lights, Allocator alloc
 }
 
 #ifdef PBRT_BUILD_GPU_RENDERER
+/// @brief GPU builder for SLC trees based on SAOH ordering and Morton sorting.
 class SLCTreeBuilderGPU final : public LightTreeBuilderGPU<LightBounds, uint64_t, SAOHCostEvaluator> {
   public:
+    /// @brief Creates a builder for the given scene light bounds.
     explicit SLCTreeBuilderGPU(const Bounds3f &bounds) : m_allLightBounds(bounds) {}
 
+    /// @brief Builds a temporary GPU hierarchy and merges nodes using SAOH.
     bool Build(std::vector<LightcutsBuildContainer> &lights) {
         if (lights.empty())
             return false;
@@ -99,6 +103,7 @@ class SLCTreeBuilderGPU final : public LightTreeBuilderGPU<LightBounds, uint64_t
         return true;
     }
 
+    /// @brief Copies merged GPU nodes back and emits a flattened `LightcutsTree`.
     void FlattenTree(LightcutsTree& tree, std::vector<LightcutsBuildContainer> &lights, HashMap<Light, uint32_t>& bitTrailContainer) {
         const LightTreeBuildState<LightBounds> &state(State());
         if (state.nLights == 0)
@@ -124,6 +129,7 @@ private:
 };
 
 
+/// @brief Builds the SLC tree on GPU and flattens it to host memory.
 bool SLCLightSampler::buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights) {
     if (lights.size() < 100 || !Options->useGPU)
         return false;

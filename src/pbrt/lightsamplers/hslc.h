@@ -20,15 +20,23 @@
 
 namespace pbrt {
 
-// Hierarchic Stochastic Lightcuts Lightsampler Definition
+/// @brief Hierarchic Stochastic Lightcuts (HSLC) sampler.
+/// Unlike `SLCLightSampler`, HSLC does not compute a Lightcuts cut. 
+/// It performs a single stochastic top-down walk from root to leaf guided by cluster's error bounds.
 class HSLCLightSampler {
   public:
-    // HierarchicLightcutsLightSampler Public Methods
+    // HSLCLightSampler Public Methods
+    /// @brief Builds the HSLC hierarchy and the per-light bitTrail lookup.
+    /// @param lights Scene lights provided by the integrator.
+    /// @param alloc Pbrt allocator.
     HSLCLightSampler(pstd::span<const Light> lights, Allocator alloc);
 
+    /// @brief Samples one light for the given shading context.
+    /// Traverses the tree stochastically at each interior split.
     PBRT_CPU_GPU PBRT_NOINLINE
     pstd::optional<SampledLight> Sample(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t seed, Float u) const {
         Float pmf = 1;
+        // Infinite lights are sampled separately before tree traversal.
         if (!m_infiniteLights.empty()) {
             pstd::optional<SampledLight> infiniteLightSample = InfiniteLightSimpleSample(m_infiniteLights, m_tree.lights.size(), pmf, u);
             if (infiniteLightSample) {
@@ -47,6 +55,7 @@ class HSLCLightSampler {
         BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
         Frame shadingFrame(bsdf ? bsdf->shadingFrame : Frame::FromZ(ctx.ns));
 
+        // HSLC: direct root-to-leaf sampling (no intermediate cut sampling stage).
         int nodeIndex = 0;
         const LightcutsTreeNode* node = &m_tree.nodes[nodeIndex];
 
@@ -68,7 +77,7 @@ class HSLCLightSampler {
             weights[0] = std::min(OneMinusEpsilon, errBounds[0] / (errBounds[0] + errBounds[1]));
             weights[1] = 1 - weights[0];
             
-            // Randomly sample light BVH child node
+            // Randomly pick one child and continue descending.
             Float nodePMF;
             int child = SampleDiscrete(weights, u, &nodePMF, &u);
             pmf *= nodePMF;
@@ -84,6 +93,8 @@ class HSLCLightSampler {
         return SampledLight(m_tree.lights[node->childOrLightIndex], pmf);
     }
 
+    /// @brief Evaluates PMF for context-dependent HSLC sampling.
+    /// Replays the same root-to-leaf decisions using the cached bitTrail.
     PBRT_CPU_GPU PBRT_NOINLINE
     LightPMF PMF(const LightSampleContext &ctx, const BSDF* bsdf, uint32_t /*seed*/, Light light) const {
         // Handle infinite _light_ PMF
@@ -145,6 +156,7 @@ class HSLCLightSampler {
         return LightPMF(pmf);
     }
 
+    /// @brief Samples one light without context using uniform sampling over leaves.
     PBRT_CPU_GPU
     pstd::optional<SampledLight> Sample(Float u) const {
         Float pmf = 1;
@@ -160,6 +172,7 @@ class HSLCLightSampler {
         return SampledLight{m_tree.lights[index], pmf};
     }
 
+    /// @brief Returns PMF for context-free HSLC sampling.
     PBRT_CPU_GPU
     LightPMF PMF(Light light) const {
         // Handle infinite _light_ PMF
@@ -177,8 +190,14 @@ class HSLCLightSampler {
         return LightPMF(pmf / m_tree.lights.size()); 
     }
     
+    /// @brief Produces direct-light samples by delegating to single-light `Sample()`.
+    /// @tparam NSamples Maximum number of output slots.
+    /// @tparam ScatterEval Callable evaluating BSDF contribution and scatter PDF.
     template <int NSamples, typename ScatterEval>
     PBRT_CPU_GPU PBRT_NOINLINE void SampleLd(CountedArray<SampledLd, NSamples>& samples, const LightSampleContext& ctx, const SampledWavelengths& lambda, const BSDF* bsdf, uint32_t seed, Float u, Point2f uLight, ScatterEval scatterEval) const {
+        // HSLC emits at most one light sample here, unlike SLC's multi-cluster cut loop.
+        DCHECK_EQ(NSamples, 1);
+
         pstd::optional<SampledLight> sampledLight = Sample(ctx, bsdf, seed, u);
         if (!sampledLight) {
             return;
@@ -200,15 +219,16 @@ class HSLCLightSampler {
     std::string ToString() const;
 
   private:
-    // HierarchicLightcutsLightSampler Private Methods
+    // HSLCLightSampler Private Methods
 #ifdef PBRT_BUILD_GPU_RENDERER
+    /// @brief Attempts GPU construction of the HSLC hierarchy.
     bool buildLightTreeGPU(std::vector<LightcutsBuildContainer> &lights);
 #endif
 
-    // HierarchicLightcutsLightSampler Private Members
-    LightcutsTree m_tree;
-    pstd::vector<Light> m_infiniteLights;
-    HashMap<Light, uint32_t> m_lightToBitTrail;
+    // HSLCLightSampler Private Members
+    LightcutsTree m_tree;                       ///< Hierarchy over lights.
+    pstd::vector<Light> m_infiniteLights;       ///< Infinite/environment lights.
+    HashMap<Light, uint32_t> m_lightToBitTrail; ///< BitTrail tree path encoding for each light.
 };
 
 }
