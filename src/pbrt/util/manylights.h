@@ -1,8 +1,8 @@
+// Copyright(c) 2026 Richard Kvasnica.
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
-// ManyLights util author Copytight(c) 2026 Richard Kvasnica 
 #ifndef PBRT_UTIL_MANYLIGHTS_H
 #define PBRT_UTIL_MANYLIGHTS_H
 

@@ -1,6 +1,6 @@
-// lightcuts.h - LightcutsLightSampler class is Copyright(c) 2025-2026 Richard Kvasnica.
+// Copyright(c) 2026 Richard Kvasnica.
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
-// The pbrt and lightcuts.h source code is licensed under the Apache License, Version 2.0.
+// The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
 #ifndef  PBRT_LIGHTCUTS_LIGHTSAMPLER_H
