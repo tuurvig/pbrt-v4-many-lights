@@ -7,3 +7,5 @@ src/build
 build/
 .cache/
 .vs
+.directory
+.idea

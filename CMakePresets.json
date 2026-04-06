@@ -16,7 +16,6 @@
         //"PBRT_GPU_SHADER_MODEL": "sm_89",
         "PBRT_OPTIX7_PATH": "C:/ProgramData/NVIDIA Corporation/OptiX SDK 7.7.0",
         "VCPKG_TARGET_TRIPLET": "x64-windows"
-        //"VCPKG_PLATFORM_TOOLSET": "v142"
       },
       "condition": {
         "type": "equals",
@@ -30,8 +29,12 @@
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/bin-${presetName}",
       "cacheVariables": {
+        "CMAKE_C_COMPILER": "/usr/bin/gcc",
+        "CMAKE_CXX_COMPILER": "/usr/bin/g++",
+        "CMAKE_CUDA_STANDARD": "17",
+        "CMAKE_CUDA_COMPILER": "/opt/cuda/bin/nvcc",
         "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-        "VCPKG_TARGET_TRIPLET": "x64-linux"
+        "VCPKG_TARGET_TRIPLET": "x64-linux",
       },
       "condition": {
         "type": "equals",
