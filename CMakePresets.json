@@ -6,15 +6,17 @@
       "hidden": true,
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/bin-${presetName}",
-      "toolset": "v142",
       "cacheVariables": {
         "CMAKE_C_COMPILER": "cl.exe",
         "CMAKE_CXX_COMPILER": "cl.exe",
+        "CMAKE_C_FLAGS": "/Zc:preprocessor",
+        "CMAKE_CXX_FLAGS": "/Zc:preprocessor",
         "CMAKE_CUDA_STANDARD": "17",
         "CMAKE_CUDA_COMPILER": "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.8/bin/nvcc.exe",
+        "CMAKE_CUDA_FLAGS": "-Xcompiler=/Zc:preprocessor",
+        "CMAKE_CUDA_ARCHITECTURES": "89",
         "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-        //"PBRT_GPU_SHADER_MODEL": "sm_89",
-        "PBRT_OPTIX7_PATH": "C:/ProgramData/NVIDIA Corporation/OptiX SDK 7.7.0",
+        "PBRT_OPTIX_PATH": "C:/ProgramData/NVIDIA Corporation/OptiX SDK 7.7.0",
         "VCPKG_TARGET_TRIPLET": "x64-windows"
       },
       "condition": {
@@ -34,7 +36,7 @@
         "CMAKE_CUDA_STANDARD": "17",
         "CMAKE_CUDA_COMPILER": "/opt/cuda/bin/nvcc",
         "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-        "VCPKG_TARGET_TRIPLET": "x64-linux",
+        "VCPKG_TARGET_TRIPLET": "x64-linux"
       },
       "condition": {
         "type": "equals",
@@ -47,7 +49,7 @@
       "hidden": true,
       "inherits": "windows-base",
       "cacheVariables": {
-        "PBRT_OPTIX7_PATH": ""
+        "PBRT_OPTIX_PATH": ""
       }
     },
     {
@@ -55,7 +57,7 @@
       "hidden": true,
       "inherits": "linux-base",
       "cacheVariables": {
-        "PBRT_OPTIX7_PATH": ""
+        "PBRT_OPTIX_PATH": ""
       }
     },
     {

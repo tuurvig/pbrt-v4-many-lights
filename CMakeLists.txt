@@ -114,6 +114,49 @@ else ()
                 PROPERTY FOLDER "ext/OpenEXR")
 endif ()
 
+function (pbrt_remove_interface_compile_option target option)
+  if (NOT TARGET "${target}")
+    return ()
+  endif ()
+
+  # If this is an alias target, update the underlying real target.
+  get_target_property (_aliased_target "${target}" ALIASED_TARGET)
+  if (_aliased_target)
+    set (_actual_target "${_aliased_target}")
+  else ()
+    set (_actual_target "${target}")
+  endif ()
+
+  get_target_property (_interface_options "${_actual_target}" INTERFACE_COMPILE_OPTIONS)
+  if (NOT _interface_options)
+    return ()
+  endif ()
+
+  list (REMOVE_ITEM _interface_options "${option}")
+  set_property (TARGET "${_actual_target}" PROPERTY INTERFACE_COMPILE_OPTIONS "${_interface_options}")
+endfunction ()
+
+if (MSVC)
+  # OpenEXR exports `/EHsc` and `/MP` as PUBLIC compile options. When these
+  # propagate into CUDA sources they become raw nvcc arguments and break CUDA
+  # compilation on Visual Studio.
+  foreach (_openexr_target
+      OpenEXR::OpenEXR
+      OpenEXR::OpenEXRUtil
+      OpenEXR::OpenEXRCore
+      OpenEXR::Iex
+      OpenEXR::IlmThread
+      Imath::Imath
+      OpenEXR
+      OpenEXRCore
+      Iex
+      IlmThread
+      Imath)
+    pbrt_remove_interface_compile_option ("${_openexr_target}" "/EHsc")
+    pbrt_remove_interface_compile_option ("${_openexr_target}" "/MP")
+  endforeach ()
+endif ()
+
 ########################################
 # os/compiler-specific stuff
 
@@ -311,6 +354,18 @@ of CUDA installed, please update your PATH.")
         macro (cuda_compile_and_embed output_var cuda_file lib_name)
           add_library ("${lib_name}" OBJECT "${cuda_file}")
           set_property (TARGET "${lib_name}" PROPERTY CUDA_PTX_COMPILATION ON)
+
+          if (MSVC AND CMAKE_CUDA_ARCHITECTURES)
+              # CUDA PTX compilation in Visual Studio expects a single virtual
+              # architecture entry; the default CodeGeneration expansion may
+              # emit multiple entries and fail the build.
+              string (REGEX MATCH "[0-9]+" _pbrt_ptx_arch "${CMAKE_CUDA_ARCHITECTURES}")
+              if (_pbrt_ptx_arch)
+                  set_property (TARGET "${lib_name}" PROPERTY CUDA_ARCHITECTURES "${_pbrt_ptx_arch}-virtual")
+              else ()
+                  set_property (TARGET "${lib_name}" PROPERTY CUDA_ARCHITECTURES OFF)
+              endif ()
+          endif ()
 
           # disable "extern declaration... is treated as a static definition" warning
           if (CUDA_VERSION_MAJOR EQUAL 11 AND CUDA_VERSION_MINOR LESS 2)
