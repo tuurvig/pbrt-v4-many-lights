@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -76,16 +77,6 @@ class BSDF {
         return bs;
     }
 
-    PBRT_CPU_GPU
-    Float PDF(Vector3f woRender, Vector3f wiRender,
-              TransportMode mode = TransportMode::Radiance,
-              BxDFReflTransFlags sampleFlags = BxDFReflTransFlags::All) const {
-        Vector3f wo = RenderToLocal(woRender), wi = RenderToLocal(wiRender);
-        if (wo.z == 0)
-            return 0;
-        return bxdf.PDF(wo, wi, mode, sampleFlags);
-    }
-
     template <typename BxDF>
     PBRT_CPU_GPU pstd::optional<BSDFSample> Sample_f(
         Vector3f woRender, Float u, Point2f u2,
@@ -117,6 +108,62 @@ class BSDF {
     }
 
     template <typename BxDF>
+    PBRT_CPU_GPU Float Max_f(Vector3f woRender, DirectionCone wiConeRender,
+        TransportMode mode = TransportMode::Radiance) const {
+        Vector3f wo = RenderToLocal(woRender);
+        if (wo.z == 0) {
+            return {};
+        }
+
+        DirectionCone wiCone = wiConeRender;
+        wiCone.w = RenderToLocal(wiCone.w);
+        const BxDF *specificBxDF = bxdf.Cast<BxDF>();
+        return specificBxDF->Max_f(wo, wiCone, mode);
+    }
+
+    PBRT_CPU_GPU Float Max_f(Vector3f woRender, DirectionCone wiConeRender,
+        TransportMode mode = TransportMode::Radiance) const {
+        Vector3f wo = RenderToLocal(woRender);
+        if (wo.z == 0) {
+            return {};
+        }
+
+        DirectionCone wiCone = wiConeRender;
+        wiCone.w = RenderToLocal(wiCone.w);
+        return bxdf.Max_f(wo, wiCone, mode);
+    }
+
+    template <typename BxDF>
+    PBRT_CPU_GPU Float Max_f(Vector3f woRender, Bounds3f wiBoundsRender,
+        Point3f p, TransportMode mode = TransportMode::Radiance) const {
+        if (Dot(woRender, shadingFrame.z) == 0) {
+            return {};
+        }
+
+        const BxDF *specificBxDF = bxdf.Cast<BxDF>();
+        return specificBxDF->Max_f(woRender, wiBoundsRender, p, shadingFrame, mode);
+    }
+
+    PBRT_CPU_GPU Float Max_f(Vector3f woRender, Bounds3f wiBoundsRender,
+        Point3f p, TransportMode mode = TransportMode::Radiance) const {
+        if (Dot(woRender, shadingFrame.z) == 0) {
+            return {};
+        }
+
+        return bxdf.Max_f(woRender, wiBoundsRender, p, shadingFrame, mode);
+    }
+
+    PBRT_CPU_GPU
+    Float PDF(Vector3f woRender, Vector3f wiRender,
+              TransportMode mode = TransportMode::Radiance,
+              BxDFReflTransFlags sampleFlags = BxDFReflTransFlags::All) const {
+        Vector3f wo = RenderToLocal(woRender), wi = RenderToLocal(wiRender);
+        if (wo.z == 0)
+            return 0;
+        return bxdf.PDF(wo, wi, mode, sampleFlags);
+    }
+
+    template <typename BxDF>
     PBRT_CPU_GPU Float
     PDF(Vector3f woRender, Vector3f wiRender,
         TransportMode mode = TransportMode::Radiance,
@@ -145,10 +192,23 @@ class BSDF {
     PBRT_CPU_GPU
     void Regularize() { bxdf.Regularize(); }
 
-  private:
-    // BSDF Private Members
+    // BSDF Members
     BxDF bxdf;
     Frame shadingFrame;
+};
+
+struct BSDFScatterEval {
+    PBRT_CPU_GPU
+    BSDFScatterEval(const BSDF* bsdf, Normal3f ns) : bsdf(bsdf), ns(ns) {}
+    const BSDF* bsdf;
+    Normal3f ns;
+
+    PBRT_CPU_GPU
+    SampledSpectrum operator()(Float& scatterPDF, Vector3f wo, Vector3f wi, bool isDeltaLight) const {
+        SampledSpectrum f = bsdf->f(wo, wi) * AbsDot(wi, ns);
+        scatterPDF = isDeltaLight ? 0.f : bsdf->PDF(wo, wi);
+        return f;
+    }
 };
 
 }  // namespace pbrt

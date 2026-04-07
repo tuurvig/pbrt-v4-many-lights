@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -109,22 +110,8 @@ PBRT_CPU_GPU Float LightBounds::Importance(Point3f p, Normal3f n) const {
     // Compute clamped squared distance to reference point
     Point3f pc = (bounds.pMin + bounds.pMax) / 2;
     Float d2 = DistanceSquared(p, pc);
-    d2 = std::max(d2, Length(bounds.Diagonal()) / 2);
-
-    // Define cosine and sine clamped subtraction lambdas
-    auto cosSubClamped = [](Float sinTheta_a, Float cosTheta_a, Float sinTheta_b,
-                            Float cosTheta_b) -> Float {
-        if (cosTheta_a > cosTheta_b)
-            return 1;
-        return cosTheta_a * cosTheta_b + sinTheta_a * sinTheta_b;
-    };
-
-    auto sinSubClamped = [](Float sinTheta_a, Float cosTheta_a, Float sinTheta_b,
-                            Float cosTheta_b) -> Float {
-        if (cosTheta_a > cosTheta_b)
-            return 0;
-        return sinTheta_a * cosTheta_b - cosTheta_a * sinTheta_b;
-    };
+    d2 = std::max(d2, LengthSquared(bounds.Diagonal()) / 4);
+    d2 = std::max(d2, MathEpsilon);
 
     // Compute sine and cosine of angle to vector _w_, $\theta_\roman{w}$
     Vector3f wi = Normalize(p - pc);
@@ -139,9 +126,9 @@ PBRT_CPU_GPU Float LightBounds::Importance(Point3f p, Normal3f n) const {
 
     // Compute $\cos\,\theta'$ and test against $\cos\,\theta_\roman{e}$
     Float sinTheta_o = SafeSqrt(1 - Sqr(cosTheta_o));
-    Float cosTheta_x = cosSubClamped(sinTheta_w, cosTheta_w, sinTheta_o, cosTheta_o);
-    Float sinTheta_x = sinSubClamped(sinTheta_w, cosTheta_w, sinTheta_o, cosTheta_o);
-    Float cosThetap = cosSubClamped(sinTheta_x, cosTheta_x, sinTheta_b, cosTheta_b);
+    Float cosTheta_x = SafeSubtractCos(sinTheta_w, cosTheta_w, sinTheta_o, cosTheta_o);
+    Float sinTheta_x = SafeSubtractSin(sinTheta_w, cosTheta_w, sinTheta_o, cosTheta_o);
+    Float cosThetap = SafeSubtractCos(sinTheta_x, cosTheta_x, sinTheta_b, cosTheta_b);
     if (cosThetap <= cosTheta_e)
         return 0;
 
@@ -152,12 +139,65 @@ PBRT_CPU_GPU Float LightBounds::Importance(Point3f p, Normal3f n) const {
     if (n != Normal3f(0, 0, 0)) {
         Float cosTheta_i = AbsDot(wi, n);
         Float sinTheta_i = SafeSqrt(1 - Sqr(cosTheta_i));
-        Float cosThetap_i = cosSubClamped(sinTheta_i, cosTheta_i, sinTheta_b, cosTheta_b);
+        Float cosThetap_i = SafeSubtractCos(sinTheta_i, cosTheta_i, sinTheta_b, cosTheta_b);
         importance *= cosThetap_i;
     }
 
     importance = std::max<Float>(importance, 0);
     return importance;
+}
+
+std::string SphericalLightBounds::ToString() const {
+    return StringPrintf("[ SphericalLightBounds center: %s radius: %s phi: %f ]",
+                        center, radius, phi);
+}
+
+PBRT_CPU_GPU Float SphericalLightBounds::Importance(Point3f p, Normal3f n) const {
+    Vector3f wi = center - p;
+    const Float d2 = LengthSquared(wi);
+    const Float r2 = Sqr(radius);
+    
+    const Float sqrtPhi = std::sqrt(phi);
+    
+    //  Case where p is inside the cluster bounds to avoid singularities
+    if (d2 <= r2 || n == Normal3f(0, 0, 0)) {
+        return sqrtPhi / std::max(r2, MathEpsilon);
+    }
+    
+    const Float d = std::max(MathEpsilon, std::sqrt(d2));
+    wi /= d;
+    
+    // Theta_b (angle subtended by a sphere)
+    const Float sinTheta_b = radius / d;
+    const Float cosTheta_b = SafeSqrt(1 - Sqr(sinTheta_b));
+    
+    const Float cosTheta_n = AbsDot(wi, n);
+    const Float sinTheta_n = SafeSqrt(1 - Sqr(cosTheta_n));
+    
+    const Float Icp = SafeSubtractCos(sinTheta_n, cosTheta_n, sinTheta_b, cosTheta_b);
+    
+    Float importance = (Icp * sqrtPhi) / std::max(d2, MathEpsilon);
+    DCHECK_GE(importance, -1e-3);
+    
+    return std::max(importance, Float(0));
+}
+
+
+PBRT_CPU_GPU Float SphericalLightBounds::SplitProbability(Point3f p, Float gamma) const {
+    if (radius <= MathEpsilon) {
+        return 0;
+    }
+
+    // distance fromt he shading point to the cluster center
+    Float d = Distance(center, p);
+
+    // distance to cluster boundary normalized by radius
+    Float t = std::max(Float(0), d - radius) / radius;
+
+    // Cauchy bell-shaped curve
+    Float splitProb = 1 / (1 + Sqr(t) / Sqr(gamma));
+
+    return splitProb;
 }
 
 // PointLight Method Definitions
@@ -167,8 +207,9 @@ SampledSpectrum PointLight::Phi(SampledWavelengths lambda) const {
 
 pstd::optional<LightBounds> PointLight::Bounds() const {
     Point3f p = renderFromLight(Point3f(0, 0, 0));
-    Float phi = 4 * Pi * scale * I->MaxValue();
-    return LightBounds(Bounds3f(p, p), Vector3f(0, 0, 1), phi, std::cos(Pi),
+    Float boundI = scale * I->MaxValue();
+    Float phi = 4 * Pi * boundI;
+    return LightBounds(Bounds3f(p, p), Vector3f(0, 0, 1), phi, boundI, std::cos(Pi),
                        std::cos(Pi / 2), false);
 }
 
@@ -395,7 +436,7 @@ pstd::optional<LightBounds> ProjectionLight::Bounds() const {
 
     Point3f p = renderFromLight(Point3f(0, 0, 0));
     Vector3f w = Normalize(renderFromLight(Vector3f(0, 0, 1)));
-    return LightBounds(Bounds3f(p, p), w, phi, std::cos(0.f), cosTotalWidth, false);
+    return LightBounds(Bounds3f(p, p), w, phi, phi, std::cos(0.f), cosTotalWidth, false);
 }
 
 PBRT_CPU_GPU pstd::optional<LightLeSample> ProjectionLight::SampleLe(Point2f u1, Point2f u2,
@@ -565,12 +606,13 @@ pstd::optional<LightBounds> GoniometricLight::Bounds() const {
     for (int y = 0; y < image.Resolution().y; ++y)
         for (int x = 0; x < image.Resolution().x; ++x)
             sumY += image.GetChannel({x, y}, 0);
-    Float phi = scale * Iemit->MaxValue() * 4 * Pi * sumY /
-                (image.Resolution().x * image.Resolution().y);
+    Float boundI = scale * Iemit->MaxValue() * sumY / (image.Resolution().x * image.Resolution().y);
+    Float phi = 4 * Pi * boundI;
+                
 
     Point3f p = renderFromLight(Point3f(0, 0, 0));
     // Bound it as an isotropic point light.
-    return LightBounds(Bounds3f(p, p), Vector3f(0, 0, 1), phi, std::cos(Pi),
+    return LightBounds(Bounds3f(p, p), Vector3f(0, 0, 1), phi, boundI, std::cos(Pi),
                        std::cos(Pi / 2), false);
 }
 
@@ -787,22 +829,24 @@ SampledSpectrum DiffuseAreaLight::Phi(SampledWavelengths lambda) const {
 
 pstd::optional<LightBounds> DiffuseAreaLight::Bounds() const {
     // Compute _phi_ for diffuse area light bounds
-    Float phi = 0;
+    Float boundI = 0;
     if (image) {
         // Compute average _DiffuseAreaLight_ image channel value
         // Assume no distortion in the mapping, FWIW...
         for (int y = 0; y < image.Resolution().y; ++y)
             for (int x = 0; x < image.Resolution().x; ++x)
                 for (int c = 0; c < 3; ++c)
-                    phi += image.GetChannel({x, y}, c);
-        phi /= 3 * image.Resolution().x * image.Resolution().y;
+                    boundI += image.GetChannel({x, y}, c);
+        boundI /= 3 * image.Resolution().x * image.Resolution().y;
 
     } else
-        phi = Lemit->MaxValue();
-    phi *= scale * area * Pi;
+        boundI = Lemit->MaxValue();
+    boundI *= scale * area;
+
+    Float phi = boundI * Pi;
 
     DirectionCone nb = shape.NormalBounds();
-    return LightBounds(shape.Bounds(), nb.w, phi, nb.cosTheta, std::cos(Pi / 2),
+    return LightBounds(shape.Bounds(), nb.w, phi, boundI, nb.cosTheta, std::cos(Pi / 2),
                        twoSided);
 }
 
@@ -1370,13 +1414,15 @@ SampledSpectrum SpotLight::Phi(SampledWavelengths lambda) const {
 pstd::optional<LightBounds> SpotLight::Bounds() const {
     Point3f p = renderFromLight(Point3f(0, 0, 0));
     Vector3f w = Normalize(renderFromLight(Vector3f(0, 0, 1)));
-    Float phi = scale * Iemit->MaxValue() * 4 * Pi;
+    //Float phi = scale * Iemit->MaxValue() * 4 * Pi;
+    Float boundI = scale * Iemit->MaxValue();
+    Float phi = boundI * 2 * Pi * ((1 - cosFalloffStart) + (cosFalloffStart - cosFalloffEnd) / 2);
     Float cosTheta_e = std::cos(std::acos(cosFalloffEnd) - std::acos(cosFalloffStart));
     // Allow a little slop here to deal with fp round-off error in the computation of
     // cosTheta_p in the importance function.
     if (cosTheta_e == 1 && cosFalloffEnd != cosFalloffStart)
         cosTheta_e = 0.999f;
-    return LightBounds(Bounds3f(p, p), w, phi, cosFalloffStart, cosTheta_e, false);
+    return LightBounds(Bounds3f(p, p), w, phi, boundI, cosFalloffStart, cosTheta_e, false);
 }
 
 PBRT_CPU_GPU pstd::optional<LightLeSample> SpotLight::SampleLe(Point2f u1, Point2f u2,
@@ -1463,6 +1509,113 @@ SpotLight *SpotLight::Create(const Transform &renderFromLight, Medium medium,
                                        coneangle - conedelta);
 }
 
+// CosineSpotLight Method Definitions
+
+CosineSpotLight::CosineSpotLight(const Transform &renderFromLight,
+                                 const MediumInterface &mediumInterface, Spectrum Iemit,
+                                 Float scale)
+    : LightBase(LightType::DeltaPosition, renderFromLight, mediumInterface),
+      Iemit(LookupSpectrum(Iemit)),
+      scale(scale) {
+}
+
+PBRT_CPU_GPU Float CosineSpotLight::PDF_Li(LightSampleContext, Vector3f,
+                                           bool allowIncompletePDF) const {
+    return 0.f; // Delta position lights have 0 PDF for random intersection
+}
+
+PBRT_CPU_GPU SampledSpectrum CosineSpotLight::I(Vector3f w,
+                                                SampledWavelengths lambda) const {
+    // Standard Cosine Emission Law: I = I_0 * cos(theta)
+    // In light space, the light points down +Z, so cos(theta) is just w.z
+    Float cosTheta = CosTheta(w);
+    
+    // Clamp to 0 for the back hemisphere
+    if (cosTheta <= 0) return SampledSpectrum(0.f);
+    
+    return scale * cosTheta * Iemit->Sample(lambda);
+}
+
+SampledSpectrum CosineSpotLight::Phi(SampledWavelengths lambda) const {
+    // Total Power of a Lambertian emitter = Peak Intensity * Pi
+    // \int_{H^2} cos(theta) dw = Pi
+    return scale * Iemit->Sample(lambda) * Pi;
+}
+
+pstd::optional<LightBounds> CosineSpotLight::Bounds() const {
+    Point3f p = renderFromLight(Point3f(0, 0, 0));
+    Vector3f w = Normalize(renderFromLight(Vector3f(0, 0, 1)));
+    
+    // Bounds calculation for a cosine lobe
+    // Power roughly scales with Pi
+    Float boundI = scale * Iemit->MaxValue();
+    Float phi = boundI * Pi; 
+    
+    // cosTheta_o is the opening angle of the bounding cone
+    // cosTheta_e is 0 because the light covers the full 90 degrees (hemisphere)
+    return LightBounds(Bounds3f(p, p), w, phi, boundI, 1.f, 0.f, false);
+}
+
+PBRT_CPU_GPU pstd::optional<LightLeSample> CosineSpotLight::SampleLe(
+    Point2f u1, Point2f u2, SampledWavelengths &lambda, Float time) const {
+    
+    // Sample direction using Cosine-Weighted Hemisphere sampling
+    Vector3f wLight = SampleCosineHemisphere(u1);
+    Float pdfDir = CosineHemispherePDF(wLight.z);
+
+    // Return sampled ray
+    Ray ray = renderFromLight(
+        Ray(Point3f(0, 0, 0), wLight, time, mediumInterface.outside));
+        
+    return LightLeSample(I(wLight, lambda), ray, 1, pdfDir);
+}
+
+PBRT_CPU_GPU void CosineSpotLight::PDF_Le(const Ray &ray, Float *pdfPos,
+                                          Float *pdfDir) const {
+    *pdfPos = 0;
+    
+    // Transform ray direction to light space
+    Vector3f w = renderFromLight.ApplyInverse(ray.d);
+    
+    // PDF is simply CosineHemispherePDF (z / Pi)
+    if (CosTheta(w) > 0)
+        *pdfDir = CosineHemispherePDF(CosTheta(w));
+    else
+        *pdfDir = 0;
+}
+
+std::string CosineSpotLight::ToString() const {
+    return StringPrintf("[ CosineSpotLight %s Iemit: %s scale: %f ]",
+                        BaseToString(), Iemit, scale);
+}
+
+// TODO: Create method to use it from scene files
+CosineSpotLight *CosineSpotLight::Create(const Transform &renderFromLight, Medium medium,
+                                         const ParameterDictionary &parameters,
+                                         const RGBColorSpace *colorSpace,
+                                         const FileLoc *loc, Allocator alloc) {
+    Spectrum I = parameters.GetOneSpectrum("I", &colorSpace->illuminant,
+                                           SpectrumType::Illuminant, alloc);
+    Float sc = parameters.GetOneFloat("scale", 1);
+    
+    // Standard Photometric normalization
+    if (I) sc /= SpectrumToPhotometric(I);
+    
+    // Apply power parameter if present
+    Float phi_v = parameters.GetOneFloat("power", -1);
+    if (phi_v > 0) {
+        // For a cosine lobe, Phi = I_peak * Pi. So scale = Phi / Pi.
+        sc *= phi_v / Pi;
+    }
+
+    if (!I) {
+        I = parameters.GetOneSpectrum("L", &colorSpace->illuminant, SpectrumType::Illuminant, alloc);
+        if (I) sc /= SpectrumToPhotometric(I);
+    }
+
+    return alloc.new_object<CosineSpotLight>(renderFromLight, medium, I, sc);
+}
+
 SampledSpectrum Light::Phi(SampledWavelengths lambda) const {
     auto phi = [&](auto ptr) { return ptr->Phi(lambda); };
     return DispatchCPU(phi);
@@ -1515,6 +1668,9 @@ Light Light::Create(const std::string &name, const ParameterDictionary &paramete
     else if (name == "spot")
         light = SpotLight::Create(renderFromLight, outsideMedium, parameters,
                                   parameters.ColorSpace(), loc, alloc);
+    else if (name == "cosinespot")
+        light = CosineSpotLight::Create(renderFromLight, outsideMedium, parameters,
+                                        parameters.ColorSpace(), loc, alloc);
     else if (name == "goniometric")
         light = GoniometricLight::Create(renderFromLight, outsideMedium, parameters,
                                          parameters.ColorSpace(), loc, alloc);

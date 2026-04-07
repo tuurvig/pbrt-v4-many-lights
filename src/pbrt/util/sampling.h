@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -340,34 +341,31 @@ PBRT_CPU_GPU inline Point2f SampleUniformDiskConcentric(Point2f u) {
     return r * Point2f(std::cos(theta), std::sin(theta));
 }
 
+// https://jojendersie.de/wp-content/uploads/2013/06/sfcsurvey.pdf
 PBRT_CPU_GPU
 inline Point2f InvertUniformDiskConcentricSample(Point2f p) {
-    Float theta = std::atan2(p.y, p.x);  // -pi -> pi
+    Float phi = std::atan2(p.y, p.x);  // -pi -> pi
     Float r = std::sqrt(Sqr(p.x) + Sqr(p.y));
 
+    if (phi < -PiOver4)
+        phi += 2 * Pi;
+
     Point2f uo;
-    // TODO: can we make this less branchy?
-    if (std::abs(theta) < PiOver4 || std::abs(theta) > 3 * PiOver4) {
-        uo.x = r = pstd::copysign(r, p.x);
-        if (p.x < 0) {
-            if (p.y < 0) {
-                uo.y = (Pi + theta) * r / PiOver4;
-            } else {
-                uo.y = (theta - Pi) * r / PiOver4;
-            }
-        } else {
-            uo.y = (theta * r) / PiOver4;
-        }
+    if (phi < PiOver4) {
+        uo.x = r;
+        uo.y = 4 * InvPi * r * phi;
+    } else if (phi < 3 * PiOver4) {
+        uo.x = 4 * InvPi * r * (PiOver2 - phi);
+        uo.y = r;
+    } else if (phi < 5 * PiOver4) {
+        uo.x = -r;
+        uo.y = 4 * InvPi * r * (Pi - phi);
     } else {
-        uo.y = r = pstd::copysign(r, p.y);
-        if (p.y < 0) {
-            uo.x = -(PiOver2 + theta) * r / PiOver4;
-        } else {
-            uo.x = (PiOver2 - theta) * r / PiOver4;
-        }
+        uo.x = 4 * InvPi * r * (phi - 3 * PiOver2);
+        uo.y = -r;
     }
 
-    return {(uo.x + 1) / 2, (uo.y + 1) / 2};
+    return {(uo.x + 1.f) * 0.5f, (uo.y + 1.f) * 0.5f};
 }
 
 PBRT_CPU_GPU inline Vector3f SampleUniformHemisphere(Point2f u) {
@@ -479,6 +477,36 @@ inline Vector3f SampleUniformHemisphereConcentric(Point2f u) {
                     std::sin(theta) * r * std::sqrt(2 - r * r), 1 - r * r);
 }
 
+//https://extremelearning.com.au/unreasonable-effectiveness-of-quasirandom-sequences/
+// R-sequence offset using generalized golden ratio (g) for multiple dimensions.
+// Used for offseting random variable
+PBRT_CPU_GPU inline Float GetR1SequenceOffset() {
+    constexpr double g = 1.6180339887498948482;
+    constexpr double gInv = 1 / g;
+    constexpr Float gInvFloat = Float(gInv);
+    return gInvFloat;
+}
+
+PBRT_CPU_GPU inline Point2f GetR2SequenceOffset() {
+    constexpr double g = 1.32471795724474602596;
+    constexpr double gInv = 1 / g;
+    constexpr double g2Inv = 1 / (g * g);
+    constexpr Float gInvFloat = Float(gInv);
+    constexpr Float g2InvFloat = Float(g2Inv);
+    return Point2f(gInvFloat, g2InvFloat);
+}
+
+PBRT_CPU_GPU inline Point3f GetR3SequenceOffset() {
+    constexpr double g = 1.22074408460575947536;
+    constexpr double gInv = 1 / g;
+    constexpr double g2Inv = 1 / (g * g);
+    constexpr double g3Inv = 1 / (g * g * g);
+    constexpr Float gInvFloat = Float(gInv);
+    constexpr Float g2InvFloat = Float(g2Inv);
+    constexpr Float g3InvFloat = Float(g3Inv);
+    return Point3f(gInvFloat, g2InvFloat, g3InvFloat);
+}
+
 // VarianceEstimator Definition
 template <typename Float = Float>
 class VarianceEstimator {
@@ -517,6 +545,80 @@ class VarianceEstimator {
     // VarianceEstimator Private Members
     Float mean = 0, S = 0;
     int64_t n = 0;
+};
+
+// WeightedReservoirSampler Definition
+template <typename T>
+class StatelessWeightedReservoirSampler {
+  public:
+    // WeightedReservoirSampler Public Methods
+    StatelessWeightedReservoirSampler() = default;
+
+    PBRT_CPU_GPU
+    inline bool Add(const T &sample, Float weight, const Float u) {
+        weightSum += weight;
+        // Randomly add _sample_ to reservoir
+        Float p = weight / weightSum;
+        if (u < p) {
+            reservoir = sample;
+            reservoirWeight = weight;
+            return true;
+        }
+        DCHECK_LT(weightSum, 1e80);
+        return false;
+    }
+
+    template <typename F>
+    PBRT_CPU_GPU bool Add(F func, Float weight, const Float u) {
+        // Process weighted reservoir sample via callback
+        weightSum += weight;
+        Float p = weight / weightSum;
+        if (u < p) {
+            reservoir = func();
+            reservoirWeight = weight;
+            return true;
+        }
+        DCHECK_LT(weightSum, 1e80);
+        return false;
+    }
+
+    PBRT_CPU_GPU
+    void Copy(const StatelessWeightedReservoirSampler &wrs) {
+        weightSum = wrs.weightSum;
+        reservoir = wrs.reservoir;
+        reservoirWeight = wrs.reservoirWeight;
+    }
+
+    PBRT_CPU_GPU
+    int HasSample() const { return weightSum > 0; }
+    PBRT_CPU_GPU
+    const T &GetSample() const { return reservoir; }
+    PBRT_CPU_GPU
+    Float SampleProbability() const { return reservoirWeight / weightSum; }
+    PBRT_CPU_GPU
+    Float WeightSum() const { return weightSum; }
+
+    PBRT_CPU_GPU
+    void Reset() { reservoirWeight = weightSum = 0; }
+
+    PBRT_CPU_GPU
+    void Merge(const StatelessWeightedReservoirSampler &wrs) {
+        DCHECK_LE(weightSum + wrs.WeightSum(), 1e80);
+        if (wrs.HasSample() && Add(wrs.reservoir, wrs.weightSum))
+            reservoirWeight = wrs.reservoirWeight;
+    }
+
+    std::string ToString() const {
+        return StringPrintf("[ WeightedReservoirSampler "
+                            "weightSum: %f reservoir: %s reservoirWeight: %f ]",
+                            weightSum, reservoir, reservoirWeight);
+    }
+
+  private:
+    // StrippedWeightedReservoirSampler Private Members
+    Float weightSum = 0;
+    Float reservoirWeight = 0;
+    T reservoir{};
 };
 
 // WeightedReservoirSampler Definition
@@ -571,7 +673,7 @@ class WeightedReservoirSampler {
     PBRT_CPU_GPU
     const T &GetSample() const { return reservoir; }
     PBRT_CPU_GPU
-    Float SampleProbability() const { return reservoirWeight / weightSum; }
+    Float SampleProbability() const { return reservoirWeight / std::max(weightSum, MathEpsilon); }
     PBRT_CPU_GPU
     Float WeightSum() const { return weightSum; }
 
@@ -597,6 +699,194 @@ class WeightedReservoirSampler {
     Float weightSum = 0;
     Float reservoirWeight = 0;
     T reservoir{};
+};
+
+// RestirSetSampler Definition
+template <typename T, uint32_t N>
+class WeightedReservoirSetSampler {
+  public:
+    // restirSetSampler Public Methods
+    WeightedReservoirSetSampler() = default;
+
+    PBRT_CPU_GPU
+    explicit WeightedReservoirSetSampler(uint64_t baseSeed) :
+        u(HashFloat(baseSeed)), batchHash(MixBits(baseSeed)), count(0), localIndex(0), currentBatch(1) {
+    }
+
+    PBRT_CPU_GPU
+    bool Add(const T& sample, Float weight) {
+        // It is needed to compute a new seed for a permutation every N elements
+        if (localIndex == N) {
+            localIndex = 0;
+            ++currentBatch;
+            batchHash = MixBits(batchHash * currentBatch);
+        }
+
+        const int index = PermutationElement(localIndex, N, batchHash);
+        ++localIndex;
+        ++count;
+
+        const Float currentU = u;
+        u += GetR1SequenceOffset();
+        if (u >= 1) u -= 1;
+
+        return reservoirs[index].Add(sample, weight, currentU);
+    }
+
+    template <typename F>
+    PBRT_CPU_GPU
+    bool Add(F func, Float weight) {
+        if (localIndex == N) {
+            localIndex = 0;
+            ++currentBatch;
+            batchHash = MixBits(batchHash * currentBatch);
+        }
+
+        int index = PermutationElement(localIndex, N, batchHash);
+        ++localIndex;
+        ++count;
+
+        const Float currentU = u;
+        u += GetR1SequenceOffset();
+        if (u >= 1) u -= 1;
+
+        return reservoirs[index].Add(func, weight, currentU);
+    }
+
+    PBRT_CPU_GPU
+    inline const StatelessWeightedReservoirSampler<T>& GetReservoir(int index) const {
+        return reservoirs[index];
+    }
+
+    PBRT_CPU_GPU
+    inline int Size() {
+        return N;
+    }
+
+    PBRT_CPU_GPU
+    inline int ProcessedSamples() {
+        return count;
+    }
+
+  private:
+    // WeightedReservoirSetSampler Private Members
+    pstd::array<StatelessWeightedReservoirSampler<T>, N> reservoirs;
+    Float u;
+    uint64_t batchHash;
+    uint32_t count;
+    uint32_t localIndex;
+    uint32_t currentBatch;
+};
+
+struct ReservoirSetElem {
+    Float weightSum = 0;
+    Float weight = 0;
+};
+
+template <typename T, int N>
+class InPlaceWeightedReservoirSetSampler {
+  public:
+     // restirSetSampler Public Methods
+    InPlaceWeightedReservoirSetSampler() = default;
+
+    PBRT_CPU_GPU
+    explicit InPlaceWeightedReservoirSetSampler(T* reservoirArray, uint64_t baseSeed) :
+        inPlaceReservoirs(reservoirArray), u(HashFloat(baseSeed)), batchHash(MixBits(baseSeed)),
+        localIndex(0), count(0), currentBatch(1) {}
+
+    PBRT_CPU_GPU
+    bool Add(const T& sample, Float weight) {
+        int index = 0;
+        if constexpr (N > 1) {
+            // It is needed to compute a new seed for a permutation every N elements
+            if (localIndex == N) {
+                localIndex = 0;
+                ++currentBatch;
+                batchHash = MixBits(batchHash * currentBatch);
+            }
+
+            index = PermutationElement(localIndex, N, batchHash);
+            ++localIndex;
+        }
+
+        ++count;
+        const Float currentU = u;
+        u += GetR1SequenceOffset();
+        if (u >= 1) u -= 1;
+
+        ReservoirSetElem& elem(weights[index]);
+        elem.weightSum += weight;
+        // Randomly add _sample_ to reservoir
+        const Float p = weight / elem.weightSum;
+        if (currentU < p) {
+            inPlaceReservoirs[index] = sample;
+            elem.weight = weight;
+            return true;
+        }
+        DCHECK_LT(elem.weightSum, 1e80);
+        return false;
+    }
+
+    template <typename F>
+    PBRT_CPU_GPU
+    bool Add(F func, Float weight) {
+        int index = 0;
+        if constexpr (N > 1) {
+            if (localIndex == N) {
+                localIndex = 0;
+                ++currentBatch;
+                batchHash = MixBits(batchHash * currentBatch);
+            }
+
+            index = PermutationElement(localIndex, N, batchHash);
+            ++localIndex;
+        }
+
+        ++count;
+        const Float currentU = u;
+        u += GetR1SequenceOffset();
+        if (u >= 1) u -= 1;
+
+        ReservoirSetElem& elem(weights[index]);
+        elem.weightSum += weight;
+        // Randomly add _sample_ to reservoir
+        const Float p = weight / elem.weightSum;
+        if (currentU < p) {
+            inPlaceReservoirs[index] = func();
+            elem.weight = weight;
+            return true;
+        }
+        DCHECK_LT(elem.weightSum, 1e80);
+        return false;
+    }
+
+    PBRT_CPU_GPU
+    int HasSample(int index) const { return weights[index].weightSum > 0; }
+
+    PBRT_CPU_GPU
+    Float SampleProbability(int index) const {
+        const ReservoirSetElem& elem(weights[index]);
+        return elem.weight / std::max(elem.weightSum, MathEpsilon);
+    }
+
+    PBRT_CPU_GPU
+    inline int Size() const {
+        return N;
+    }
+
+    PBRT_CPU_GPU
+    inline int Count() const {
+        return count;
+    }
+  private:
+    // InPlaceWeightedReservoirSetSample
+    T* inPlaceReservoirs = nullptr;
+    pstd::array<ReservoirSetElem, N> weights;
+    Float u = 0;
+    uint64_t batchHash;
+    uint32_t localIndex;
+    uint32_t count;
+    uint32_t currentBatch;
 };
 
 // PiecewiseConstant1D Definition
@@ -1311,7 +1601,8 @@ class PiecewiseLinear2D {
         : m_param_values(alloc),
           m_data(alloc),
           m_marginal_cdf(alloc),
-          m_conditional_cdf(alloc) {
+          m_conditional_cdf(alloc),
+          m_max_samples(alloc) {
         for (int i = 0; i < ArraySize; ++i)
             m_param_values.emplace_back(alloc);
     }
@@ -1336,14 +1627,15 @@ class PiecewiseLinear2D {
     PiecewiseLinear2D(Allocator alloc, const float *data, int xSize, int ySize,
                       pstd::array<int, Dimension> param_res = {},
                       pstd::array<const float *, Dimension> param_values = {},
-                      bool normalize = true, bool build_cdf = true)
+                      bool normalize = true, bool build_cdf = true, bool compute_max = false)
         : m_size(xSize, ySize),
           m_patch_size(1.f / (xSize - 1), 1.f / (ySize - 1)),
           m_inv_patch_size(m_size - Vector2i(1, 1)),
           m_param_values(alloc),
           m_data(alloc),
           m_marginal_cdf(alloc),
-          m_conditional_cdf(alloc) {
+          m_conditional_cdf(alloc),
+          m_max_samples(alloc) {
         if (build_cdf && !normalize)
             LOG_FATAL("PiecewiseLinear2D: build_cdf implies normalize=true");
 
@@ -1371,18 +1663,32 @@ class PiecewiseLinear2D {
             m_marginal_cdf = FloatStorage(slices * m_size.y);
             m_conditional_cdf = FloatStorage(slices * n_values);
 
+            if (compute_max) {
+                m_max_samples = FloatStorage(slices * 2);
+            }
+
             float *marginal_cdf = m_marginal_cdf.data(),
                   *conditional_cdf = m_conditional_cdf.data(), *data_out = m_data.data();
 
+            float *max_sample = m_max_samples.data();
+
             for (uint32_t slice = 0; slice < slices; ++slice) {
                 /* Construct conditional CDF */
+                int max_x = 0, max_y = 0;
+                float max_value = 0.f;
                 for (int y = 0; y < m_size.y; ++y) {
                     double sum = 0.0;
                     size_t i = y * xSize;
                     conditional_cdf[i] = 0.f;
                     for (int x = 0; x < m_size.x - 1; ++x, ++i) {
-                        sum += .5 * ((double)data[i] + (double)data[i + 1]);
+                        float value = data[i];
+                        sum += .5 * ((double)value + (double)data[i + 1]);
                         conditional_cdf[i + 1] = (float)sum;
+                        if (compute_max && value > max_value) {
+                            max_value = value;
+                            max_x = x;
+                            max_y = y;
+                        }
                     }
                 }
 
@@ -1404,6 +1710,14 @@ class PiecewiseLinear2D {
                 for (size_t i = 0; i < n_values; ++i)
                     data_out[i] = data[i] * normalization;
 
+                if (compute_max) {
+                    const float max_u = static_cast<float>(max_x) / static_cast<float>(m_size.x - 1);
+                    const float max_v = static_cast<float>(max_y) / static_cast<float>(m_size.y - 1);
+                    max_sample[0] = Clamp(max_u, 1 - OneMinusEpsilon, OneMinusEpsilon);
+                    max_sample[1] = Clamp(max_v, 1 - OneMinusEpsilon, OneMinusEpsilon);
+                    max_sample += 2;
+                }
+                
                 marginal_cdf += m_size.y;
                 conditional_cdf += n_values;
                 data_out += n_values;
@@ -1699,6 +2013,78 @@ class PiecewiseLinear2D {
                HProd(m_inv_patch_size);
     }
 
+    template <typename... Ts>
+    PBRT_CPU_GPU Point2f ArgMax(bool interpolate, Ts... params) const {
+        static_assert((std::is_arithmetic_v<Ts> && ...),
+                      "Additional parameters must be numeric values");
+        static_assert(sizeof...(Ts) == Dimension,
+                      "Incorrect number of additional parameters passed");
+        pstd::array<Float, Dimension> param = {params...};
+
+        DCHECK(!m_max_samples.empty());
+
+        /* In ArgMax, the size is 2, because we store only u and v per slice */
+        const uint32_t stride = 2;
+
+        /* There needs to be a case to handle Valley of Death, between two interpolated value */
+        /* Let user decide, which distribution can be interpolated and which not */
+        if (!interpolate) {
+            uint32_t slice_offset = 0;
+
+            for (size_t dim = 0; dim < Dimension; ++dim) {
+                if (m_param_size[dim] <= 1) continue;
+
+                uint32_t param_index = FindInterval(m_param_size[dim], [&](uint32_t idx) {
+                    return m_param_values[dim].data()[idx] <= param[dim];
+                });
+
+                Float p0 = m_param_values[dim][param_index];
+                Float p1 = m_param_values[dim][param_index + 1];
+
+                if ((param[dim] - p0) > (p1 - p0) * 0.5f) {
+                    param_index = std::min(param_index + 1, m_param_size[dim] - 1);
+                }
+
+                slice_offset += m_param_strides[dim] * param_index;
+            }
+
+            uint32_t offset = slice_offset * stride;
+            return Point2f(m_max_samples[offset], m_max_samples[offset + 1]);
+        }
+
+        /* Look up parameter-related indices and weights (if Dimension != 0) */
+        float param_weight[2 * ArraySize];
+        uint32_t slice_offset = 0u;
+        for (size_t dim = 0; dim < Dimension; ++dim) {
+            if (m_param_size[dim] == 1) {
+                param_weight[2 * dim] = 1.f;
+                param_weight[2 * dim + 1] = 0.f;
+                continue;
+            }
+
+            uint32_t param_index = FindInterval(m_param_size[dim], [&](uint32_t idx) {
+                return m_param_values[dim].data()[idx] <= param[dim];
+            });
+
+            Float p0 = m_param_values[dim][param_index],
+                  p1 = m_param_values[dim][param_index + 1];
+
+            param_weight[2 * dim + 1] = Clamp((param[dim] - p0) / (p1 - p0), 0, 1);
+            param_weight[2 * dim] = 1.f - param_weight[2 * dim + 1];
+            slice_offset += m_param_strides[dim] * param_index;
+        }
+
+        /* Sample the row first */
+        uint32_t base_index = 0;
+        if (Dimension != 0)
+            base_index = slice_offset * stride;
+
+        Float u = lookup<Dimension>(m_max_samples.data(), base_index, stride, param_weight);
+        Float v = lookup<Dimension>(m_max_samples.data(), base_index + 1, stride, param_weight);
+
+        return Point2f(u, v);
+    }
+
     PBRT_CPU_GPU
     size_t BytesUsed() const {
         size_t sum = 4 * (m_data.capacity() + m_marginal_cdf.capacity() +
@@ -1748,6 +2134,7 @@ class PiecewiseLinear2D {
     /// Marginal and conditional PDFs
     FloatStorage m_marginal_cdf;
     FloatStorage m_conditional_cdf;
+    FloatStorage m_max_samples;
 };
 
 }  // namespace pbrt

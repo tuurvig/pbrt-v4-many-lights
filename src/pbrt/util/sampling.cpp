@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -78,7 +79,7 @@ PBRT_CPU_GPU pstd::array<Float, 3> SampleSphericalTriangle(const pstd::array<Poi
     Vector3f cp = cosBp * a + sinBp * Normalize(GramSchmidt(c, a));
 
     // Compute sampled spherical triangle direction and return barycentrics
-    Float cosTheta = 1 - u[1] * (1 - Dot(cp, b));
+    Float cosTheta = std::min(1 - u[1] * (1 - Dot(cp, b)), Float(1));
     Float sinTheta = SafeSqrt(1 - Sqr(cosTheta));
     Vector3f w = cosTheta * b + sinTheta * Normalize(GramSchmidt(cp, b));
     // Find barycentric coordinates for sampled direction _w_
@@ -213,7 +214,7 @@ PBRT_CPU_GPU Point3f SampleSphericalRectangle(Point3f pRef, Point3f s, Vector3f 
     Float h0 = y0 / std::sqrt(Sqr(dd) + Sqr(y0));
     Float h1 = y1 / std::sqrt(Sqr(dd) + Sqr(y1));
     Float hv = h0 + u[1] * (h1 - h0), hvsq = Sqr(hv);
-    Float yv = (hvsq < 1 - 1e-6f) ? (hv * dd) / std::sqrt(1 - hvsq) : y1;
+    Float yv = (hvsq < 1 - MathEpsilon) ? (hv * dd) / std::sqrt(1 - hvsq) : y1;
 
     // Return spherical triangle sample in original coordinate system
     return pRef + R.FromLocal(Vector3f(xu, yv, z0));

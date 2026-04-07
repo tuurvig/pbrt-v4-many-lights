@@ -1,13 +1,14 @@
 // -*- mode: c++ -*-
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
 flat int;
 flat Float;
 flat bool;
-flat BxDF;
 flat Medium;
+flat Material;
 flat LayeredBxDFConfig;
 
 soa SampledSpectrum;
@@ -39,10 +40,6 @@ soa SubsurfaceInteraction {
     Vector3f dpdus, dpdvs;
 };
 
-soa Frame {
-    Vector3f x, y, z;
-};
-
 soa VisibleSurface {
     bool set;
     Point3f p;
@@ -69,4 +66,18 @@ soa TabulatedBSSRDF {
 soa LightSampleContext {
     Point3fi pi;
     Normal3f n, ns;
+    Vector3f wo;
+};
+
+soa ProcessedMaterialContext {
+    Material material;
+    Vector3f dpdus;
+    Point2f uv;
+    Float dudx;
+    Float dudy;
+    Float dvdx;
+    Float dvdy;
+    int faceIndex;
+    int isBasicTextureEvaluator;
+    int regularized;
 };

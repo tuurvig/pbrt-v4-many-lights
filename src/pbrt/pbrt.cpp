@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -21,6 +22,7 @@
 #include <pbrt/util/print.h>
 #include <pbrt/util/spectrum.h>
 #include <pbrt/util/stats.h>
+#include <pbrt/util/perlightstats.h>
 
 #include <ImfThreading.h>
 
@@ -137,6 +139,9 @@ void CleanupPBRT() {
 
     if (Options->recordPixelStatistics)
         StatsWritePixelImages();
+
+    if (Options->recordPerLightStatistics)
+        StatsWritePerLightStatistics();
 
     if (Options->printStatistics) {
         PrintStats(stdout);

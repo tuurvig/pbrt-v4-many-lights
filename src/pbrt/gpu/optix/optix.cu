@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -145,6 +146,7 @@ static __forceinline__ __device__ void ProcessClosestIntersection(
 
     EnqueueWorkAfterIntersection(r, rayMedium, optixGetRayTmax(), intr, params.mediumSampleQueue,
                                  params.nextRayQueue, params.hitAreaLightQueue,
+                                 params.hitAreaMaterialLightQueue,
                                  params.basicEvalMaterialQueue,
                                  params.universalEvalMaterialQueue);
 }
@@ -258,7 +260,7 @@ extern "C" __global__ void __raygen__shadow() {
     uint32_t missed = 0;
     Trace(params.traversable, sr.ray, sr.tMax, OPTIX_RAY_FLAG_NONE, missed);
 
-    RecordShadowRayResult(sr, &params.pixelSampleState, !missed);
+    RecordShadowRayResult(sr, &params.pixelSampleState, !missed, params.lightSampler);
 }
 
 extern "C" __global__ void __miss__shadow() {
@@ -288,7 +290,8 @@ extern "C" __global__ void __raygen__shadow_Tr() {
                        },
                        [&](Point3f p) -> Ray {
                            return ctx.SpawnRayTo(p);
-                       });
+                       },
+                       params.lightSampler);
 }
 
 extern "C" __global__ void __miss__shadow_Tr() {

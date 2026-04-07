@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -174,7 +175,7 @@ TEST(ProjectionLight, Sampling) {
 
 TEST(LightBounds, Basics) {
     LightBounds bounds(Bounds3f(Point3f(0, 0, 0), Point3f(.1, .1, .01)),
-                       Vector3f(0, 0, 1), 1.f /* phi */,
+                       Vector3f(0, 0, 1), 1.f /* phi */, 1.f /* I */,
                        std::cos(0.f) /* theta_o: normal spread */,
                        std::cos(Pi / 2) /* theta_e: falloff given visible normal */,
                        false /* two-sided */);

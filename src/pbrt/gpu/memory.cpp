@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -14,22 +15,20 @@
 namespace pbrt {
 
 void *CUDAMemoryResource::do_allocate(size_t size, size_t alignment) {
-    void *ptr;
-    CUDA_CHECK(cudaMallocManaged(&ptr, size));
+    uint8_t* ptr = GPUAllocUnified<uint8_t>(size);
     CHECK_EQ(0, intptr_t(ptr) % alignment);
     return ptr;
 }
 
 void CUDAMemoryResource::do_deallocate(void *p, size_t bytes, size_t alignment) {
-    CUDA_CHECK(cudaFree(p));
+    GPUFree(p);
 }
 
 void *CUDATrackedMemoryResource::do_allocate(size_t size, size_t alignment) {
     if (size == 0)
         return nullptr;
 
-    void *ptr;
-    CUDA_CHECK(cudaMallocManaged(&ptr, size));
+    uint8_t *ptr = GPUAllocUnified<uint8_t>(size);
     DCHECK_EQ(0, intptr_t(ptr) % alignment);
 
     std::lock_guard<std::mutex> lock(mutex);
@@ -43,7 +42,7 @@ void CUDATrackedMemoryResource::do_deallocate(void *p, size_t size, size_t align
     if (!p)
         return;
 
-    CUDA_CHECK(cudaFree(p));
+    GPUFree(p);
 
     std::lock_guard<std::mutex> lock(mutex);
     auto iter = allocations.find(p);
@@ -73,7 +72,7 @@ void CUDATrackedMemoryResource::PrefetchToGPU() const {
     #endif
         bytes += iter.second;
     }
-    CUDA_CHECK(cudaDeviceSynchronize());
+    GPUWait();
     LOG_VERBOSE("Done prefetching: %d bytes total", bytes);
 }
 

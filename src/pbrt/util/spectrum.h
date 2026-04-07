@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -196,6 +197,14 @@ class SampledSpectrum {
     }
 
     PBRT_CPU_GPU
+    bool IsNonZero() const {
+        for (int i = 0; i < NSpectrumSamples; ++i)
+            if (values[i] != 0)
+                return true;
+        return false;
+    }
+
+    PBRT_CPU_GPU
     XYZ ToXYZ(const SampledWavelengths &lambda) const;
     PBRT_CPU_GPU
     RGB ToRGB(const SampledWavelengths &lambda, const RGBColorSpace &cs) const;
@@ -205,6 +214,11 @@ class SampledSpectrum {
     SampledSpectrum() = default;
     PBRT_CPU_GPU
     explicit SampledSpectrum(Float c) { values.fill(c); }
+    PBRT_CPU_GPU
+    SampledSpectrum& operator=(Float c) {
+        values.fill(c);
+        return *this;
+    }
     PBRT_CPU_GPU
     SampledSpectrum(pstd::span<const Float> v) {
         DCHECK_EQ(NSpectrumSamples, v.size());
@@ -239,6 +253,17 @@ class SampledSpectrum {
     }
 
     PBRT_CPU_GPU
+    SampledSpectrum& MixMax(const SampledSpectrum &s) {
+        for (int i = 0; i < NSpectrumSamples; ++i) {
+            Float otherVal = s.values[i];
+            if (otherVal < values[i]) {
+                values[i] = otherVal;
+            }
+        }
+        return *this;
+    }
+
+    PBRT_CPU_GPU
     Float MinComponentValue() const {
         Float m = values[0];
         for (int i = 1; i < NSpectrumSamples; ++i)
@@ -259,7 +284,6 @@ class SampledSpectrum {
             sum += values[i];
         return sum / NSpectrumSamples;
     }
-
   private:
     friend struct SOA<SampledSpectrum>;
     pstd::array<Float, NSpectrumSamples> values;

@@ -1,5 +1,6 @@
 // -*- mode: c++ -*-
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -9,8 +10,8 @@ flat Light;
 flat Material;
 flat Medium;
 flat int;
+flat uint32_t;
 
-soa BSDF;
 soa LightSampleContext;
 soa MediumInterface;
 soa Normal3f;
@@ -23,6 +24,7 @@ soa RaySamples;
 soa SampledSpectrum;
 soa SampledWavelengths;
 soa SubsurfaceInteraction;
+soa ProcessedMaterialContext;
 soa TabulatedBSSRDF;
 soa Vector3f;
 soa VisibleSurface;
@@ -44,6 +46,7 @@ soa RayWorkItem {
     SampledWavelengths lambda;
     SampledSpectrum beta, r_u, r_l;
     LightSampleContext prevIntrCtx;
+    ProcessedMaterialContext prevMaterialCtx;
     Float etaScale;
     int specularBounce;
     int anyNonSpecularBounces;
@@ -74,12 +77,30 @@ soa HitAreaLightWorkItem {
     int pixelIndex;
 };
 
+soa HitAreaMaterialLightWorkItem<ConcreteMaterial> {
+    const ConcreteMaterial *material;
+    Light areaLight;
+    SampledWavelengths lambda;
+    SampledSpectrum beta, r_u, r_l;
+    Point3f p;
+    Normal3f n;
+    Point2f uv;
+    Vector3f wo;
+    int depth;
+    LightSampleContext prevIntrCtx;
+    ProcessedMaterialContext prevMaterialCtx;
+    int specularBounce;
+    int pixelIndex;
+};
+
 soa ShadowRayWorkItem {
     Ray ray;
     Float tMax;
     SampledWavelengths lambda;
     SampledSpectrum Ld, r_u, r_l;
     int pixelIndex;
+    uint32_t lightSamplerHint;
+    Float pdfCancellationFactor;
 };
 
 soa GetBSSRDFAndProbeRayWorkItem {
@@ -129,6 +150,7 @@ soa MediumSampleWorkItem {
     Vector3f wo;
     Point2f uv;
     LightSampleContext prevIntrCtx;
+    ProcessedMaterialContext prevMaterialCtx;
     int specularBounce;
     Material material;
     Normal3f ns;

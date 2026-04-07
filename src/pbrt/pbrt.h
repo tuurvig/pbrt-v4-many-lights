@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -28,6 +29,7 @@
 #endif
 #define PBRT_CPU_GPU __host__ __device__
 #define PBRT_GPU __device__
+#define PBRT_GPU_INLINE __forceinline__ __device__ 
 #if defined(PBRT_IS_GPU_CODE)
 #define PBRT_CONST __device__ const
 #else
@@ -37,6 +39,7 @@
 #define PBRT_CONST const
 #define PBRT_CPU_GPU
 #define PBRT_GPU
+#define PBRT_GPU_INLINE
 #endif
 
 #ifdef PBRT_IS_WINDOWS
@@ -130,6 +133,9 @@ template <typename T>
 class Bounds3;
 using Bounds3f = Bounds3<Float>;
 using Bounds3i = Bounds3<int>;
+
+template <typename T, int N>
+struct CountedArray;
 
 class AnimatedTransform;
 class BilinearPatchMesh;

@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -17,6 +18,8 @@
 #include <pbrt/shapes.h>
 #include <pbrt/textures.h>
 #include <pbrt/util/colorspace.h>
+#include <pbrt/util/file.h>
+#include <pbrt/util/perlightstats.h>
 #include <pbrt/util/parallel.h>
 
 namespace pbrt {
@@ -154,6 +157,9 @@ void RenderCPU(BasicScene &parsedScene) {
 
         return;
     }
+
+    if (Options->recordPerLightStatistics)
+        StatsEnablePerLightStatistics(lights, RemoveExtension(film.GetFilename()));
 
     // Render!
     integrator->Render();

@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -109,6 +110,13 @@ class Interaction {
     PBRT_CPU_GPU
     Ray SpawnRayTo(const Interaction &it) const {
         Ray r = pbrt::SpawnRayTo(pi, n, time, it.pi, it.n);
+        r.medium = GetMedium(r.d);
+        return r;
+    }
+
+    PBRT_CPU_GPU
+    Ray SpawnRayTo(const Point3fi& pi, const Normal3f& n) const {
+        Ray r = pbrt::SpawnRayTo(pi, n, time, pi, n);
         r.medium = GetMedium(r.d);
         return r;
     }

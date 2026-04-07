@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -35,16 +36,19 @@ class CPUAggregate : public WavefrontAggregate {
     void IntersectClosest(int maxRays, const RayQueue *rayQueue,
                           EscapedRayQueue *escapedRayQueue,
                           HitAreaLightQueue *hitAreaLightQueue,
+                          HitAreaMaterialLightQueue *hitAreaMaterialLightQueue,
                           MaterialEvalQueue *basicEvalMaterialQueue,
                           MaterialEvalQueue *universalEvalMaterialQueue,
                           MediumSampleQueue *mediumSampleQueue,
                           RayQueue *nextRayQueue) const;
 
     void IntersectShadow(int maxRays, ShadowRayQueue *shadowRayQueue,
-                         SOA<PixelSampleState> *pixelSampleState) const;
+                         SOA<PixelSampleState> *pixelSampleState,
+                         const LightSampler &lightSampler) const;
 
     void IntersectShadowTr(int maxRays, ShadowRayQueue *shadowRayQueue,
-                           SOA<PixelSampleState> *pixelSampleState) const;
+                           SOA<PixelSampleState> *pixelSampleState,
+                           const LightSampler &lightSampler) const;
 
     void IntersectOneRandom(int maxRays,
                             SubsurfaceScatterQueue *subsurfaceScatterQueue) const;

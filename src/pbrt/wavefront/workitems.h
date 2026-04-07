@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -8,6 +9,7 @@
 #include <pbrt/pbrt.h>
 
 #include <pbrt/base/sampler.h>
+#include <pbrt/bsdf.h>
 #include <pbrt/film.h>
 #include <pbrt/lightsamplers.h>
 #include <pbrt/materials.h>
@@ -124,6 +126,7 @@ struct RayWorkItem {
     int pixelIndex;
     SampledSpectrum beta, r_u, r_l;
     LightSampleContext prevIntrCtx;
+    ProcessedMaterialContext prevMaterialCtx;
     Float etaScale;
     int specularBounce;
     int anyNonSpecularBounces;
@@ -159,8 +162,46 @@ struct HitAreaLightWorkItem {
     int pixelIndex;
 };
 
+// HitAreaMaterialLightWorkItem Definition
+template <typename ConcreteMaterial>
+struct HitAreaMaterialLightWorkItem {
+    // HitAreaMaterialLightWorkItem Public Members
+    const ConcreteMaterial *material;
+    Light areaLight;
+    Point3f p;
+    Normal3f n;
+    Point2f uv;
+    Vector3f wo;
+    SampledWavelengths lambda;
+    int depth;
+    SampledSpectrum beta, r_u, r_l;
+    LightSampleContext prevIntrCtx;
+    ProcessedMaterialContext prevMaterialCtx;
+    int specularBounce;
+    int pixelIndex;
+
+    PBRT_CPU_GPU
+    MaterialEvalContext GetMaterialEvalContext() const {
+        MaterialEvalContext ctx;
+        ctx.wo = prevIntrCtx.wo;
+        ctx.p = prevIntrCtx.p();
+        ctx.n = prevIntrCtx.n;
+        ctx.ns = prevIntrCtx.ns;
+        ctx.dpdus = prevMaterialCtx.dpdus;
+        ctx.uv = prevMaterialCtx.uv;
+        ctx.dudx = prevMaterialCtx.dudx;
+        ctx.dudy = prevMaterialCtx.dudy;
+        ctx.dvdx = prevMaterialCtx.dvdx;
+        ctx.dvdy = prevMaterialCtx.dvdy;
+        ctx.faceIndex = prevMaterialCtx.faceIndex;
+        return ctx;
+    };
+};
+
 // HitAreaLightQueue Definition
 using HitAreaLightQueue = WorkQueue<HitAreaLightWorkItem>;
+using HitAreaMaterialLightQueue =
+    MultiWorkQueue<typename MapType<HitAreaMaterialLightWorkItem, typename Material::Types>::type>;
 
 // ShadowRayWorkItem Definition
 struct ShadowRayWorkItem {
@@ -169,6 +210,8 @@ struct ShadowRayWorkItem {
     SampledWavelengths lambda;
     SampledSpectrum Ld, r_u, r_l;
     int pixelIndex;
+    uint32_t lightSamplerHint;
+    Float pdfCancellationFactor;
 };
 
 // GetBSSRDFAndProbeRayWorkItem Definition
@@ -227,6 +270,7 @@ struct MediumSampleWorkItem {
     SampledSpectrum r_l;
     int pixelIndex;
     LightSampleContext prevIntrCtx;
+    ProcessedMaterialContext prevMaterialCtx;
     int specularBounce;
     int anyNonSpecularBounces;
     Float etaScale;
@@ -336,6 +380,7 @@ class RayQueue : public WorkQueue<RayWorkItem> {
 
     PBRT_CPU_GPU
     int PushIndirectRay(const Ray &ray, int depth, const LightSampleContext &prevIntrCtx,
+                        const ProcessedMaterialContext &prevMaterialCtx,
                         const SampledSpectrum &beta, const SampledSpectrum &r_u,
                         const SampledSpectrum &r_l, const SampledWavelengths &lambda,
                         Float etaScale, bool specularBounce, bool anyNonSpecularBounces,
@@ -350,6 +395,7 @@ PBRT_CPU_GPU inline int RayQueue::PushCameraRay(const Ray &ray, const SampledWav
     this->ray[index] = ray;
     this->depth[index] = 0;
     this->pixelIndex[index] = pixelIndex;
+    this->prevMaterialCtx[index] = ProcessedMaterialContext();
     this->lambda[index] = lambda;
     this->beta[index] = SampledSpectrum(1.f);
     this->etaScale[index] = 1.f;
@@ -363,6 +409,7 @@ PBRT_CPU_GPU inline int RayQueue::PushCameraRay(const Ray &ray, const SampledWav
 PBRT_CPU_GPU
 inline int RayQueue::PushIndirectRay(
     const Ray &ray, int depth, const LightSampleContext &prevIntrCtx,
+    const ProcessedMaterialContext &prevMaterialCtx,
     const SampledSpectrum &beta, const SampledSpectrum &r_u,
     const SampledSpectrum &r_l, const SampledWavelengths &lambda, Float etaScale,
     bool specularBounce, bool anyNonSpecularBounces, int pixelIndex) {
@@ -372,6 +419,7 @@ inline int RayQueue::PushIndirectRay(
     this->depth[index] = depth;
     this->pixelIndex[index] = pixelIndex;
     this->prevIntrCtx[index] = prevIntrCtx;
+    this->prevMaterialCtx[index] = prevMaterialCtx;
     this->beta[index] = beta;
     this->r_u[index] = r_u;
     this->r_l[index] = r_l;
@@ -467,7 +515,8 @@ class MediumSampleQueue : public WorkQueue<MediumSampleWorkItem> {
     PBRT_CPU_GPU
     int Push(Ray ray, Float tMax, SampledWavelengths lambda, SampledSpectrum beta,
              SampledSpectrum r_u, SampledSpectrum r_l, int pixelIndex,
-             LightSampleContext prevIntrCtx, int specularBounce,
+             LightSampleContext prevIntrCtx, ProcessedMaterialContext prevMaterialCtx,
+             int specularBounce,
              int anyNonSpecularBounces, Float etaScale) {
         int index = AllocateEntry();
         this->ray[index] = ray;
@@ -478,6 +527,7 @@ class MediumSampleQueue : public WorkQueue<MediumSampleWorkItem> {
         this->r_l[index] = r_l;
         this->pixelIndex[index] = pixelIndex;
         this->prevIntrCtx[index] = prevIntrCtx;
+        this->prevMaterialCtx[index] = prevMaterialCtx;
         this->specularBounce[index] = specularBounce;
         this->anyNonSpecularBounces[index] = anyNonSpecularBounces;
         this->etaScale[index] = etaScale;
@@ -487,7 +537,8 @@ class MediumSampleQueue : public WorkQueue<MediumSampleWorkItem> {
     PBRT_CPU_GPU
     int Push(RayWorkItem r, Float tMax) {
         return Push(r.ray, tMax, r.lambda, r.beta, r.r_u, r.r_l, r.pixelIndex,
-                    r.prevIntrCtx, r.specularBounce, r.anyNonSpecularBounces, r.etaScale);
+                    r.prevIntrCtx, r.prevMaterialCtx, r.specularBounce,
+                    r.anyNonSpecularBounces, r.etaScale);
     }
 };
 

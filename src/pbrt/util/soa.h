@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -18,6 +19,8 @@
 #include <pbrt/util/pstd.h>
 #include <pbrt/util/spectrum.h>
 #include <pbrt/util/vecmath.h>
+
+#include <atomic>
 
 namespace pbrt {
 
@@ -116,6 +119,34 @@ struct SOA<SampledSpectrum> {
     SampledSpectrum Load(int i) const { return (*this)[i]; }
     PBRT_CPU_GPU
     void Store(int i, const SampledSpectrum &s) { (*this)[i] = s; }
+
+    PBRT_CPU_GPU
+    void AtomicAdd(int index, const SampledSpectrum &s) {
+#ifdef PBRT_IS_GPU_CODE
+        if constexpr ((NSpectrumSamples % 4) == 0) {
+            int offset = n4 * index;
+            DCHECK_LT(offset, nAlloc);
+            for (int i = 0; i < n4; ++i, ++offset) {
+                atomicAdd(&ptr4[offset].v[0], s[4 * i]);
+                atomicAdd(&ptr4[offset].v[1], s[4 * i + 1]);
+                atomicAdd(&ptr4[offset].v[2], s[4 * i + 2]);
+                atomicAdd(&ptr4[offset].v[3], s[4 * i + 3]);
+            }
+        } else {
+            int offset = index * NSpectrumSamples;
+            DCHECK_LT(offset, nAlloc);
+            for (int i = 0; i < NSpectrumSamples; ++i)
+                atomicAdd(&ptr1[offset + i], s[i]);
+        }
+#else
+        constexpr uint32_t kLocks = 1024;
+        static_assert((kLocks & (kLocks - 1)) == 0, "kLocks must be a power of two");
+        static std::mutex locks[kLocks];
+        const uint32_t lockIndex = static_cast<uint32_t>(index) & (kLocks - 1);
+        std::lock_guard<std::mutex> g(locks[lockIndex]);
+        Store(index, Load(index) + s);
+#endif
+    }
 
   private:
     // number of float4s needed per SampledSpectrum

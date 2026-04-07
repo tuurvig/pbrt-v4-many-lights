@@ -40,6 +40,8 @@ foreach(obj ${OBJECTS})
                     OUTPUT_VARIABLE output
                     ERROR_VARIABLE error_var
                     )
+    # Append a null byte to the array to ensure valid C string (null-terminated)
+    string(REGEX REPLACE "};" ", 0x00 };" output "${output}")
     set(file_contents "${file_contents} \n${output}")
   endif()
 endforeach()

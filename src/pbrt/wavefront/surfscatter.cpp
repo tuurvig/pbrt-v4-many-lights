@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -22,6 +23,7 @@
 namespace pbrt {
 
 // EvaluateMaterialCallback Definition
+template <int NShadowRays>
 struct EvaluateMaterialCallback {
     int wavefrontDepth;
     WavefrontPathIntegrator *integrator;
@@ -30,7 +32,7 @@ struct EvaluateMaterialCallback {
     template <typename ConcreteMaterial>
     void operator()() {
         if constexpr (!std::is_same_v<ConcreteMaterial, MixMaterial>)
-            integrator->EvaluateMaterialAndBSDF<ConcreteMaterial>(wavefrontDepth,
+            integrator->EvaluateMaterialAndBSDF<ConcreteMaterial, NShadowRays>(wavefrontDepth,
                                                                   movingFromCamera);
     }
 };
@@ -38,23 +40,33 @@ struct EvaluateMaterialCallback {
 // WavefrontPathIntegrator Surface Scattering Methods
 void WavefrontPathIntegrator::EvaluateMaterialsAndBSDFs(int wavefrontDepth,
                                                         Transform movingFromCamera) {
-    ForEachType(EvaluateMaterialCallback{wavefrontDepth, this, movingFromCamera},
+    switch (requiredShadowRays) {
+        case E_TWO_SHADOW_RAYS: EvaluateMaterialsAndBSDFs<E_TWO_SHADOW_RAYS>(wavefrontDepth, movingFromCamera); break;
+        case E_LIGHTCUTS_SHADOW_RAYS: EvaluateMaterialsAndBSDFs<E_LIGHTCUTS_SHADOW_RAYS>(wavefrontDepth, movingFromCamera); break;
+        default: EvaluateMaterialsAndBSDFs<E_DEFAULT_SHADOW_RAYS>(wavefrontDepth, movingFromCamera); break;
+    }
+}
+
+template <int NShadowRays>
+void WavefrontPathIntegrator::EvaluateMaterialsAndBSDFs(int wavefrontDepth,
+                                                        Transform movingFromCamera) {
+    ForEachType(EvaluateMaterialCallback<NShadowRays>{wavefrontDepth, this, movingFromCamera},
                 Material::Types());
 }
 
-template <typename ConcreteMaterial>
+template <typename ConcreteMaterial, int NShadowRays>
 void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(int wavefrontDepth,
                                                       Transform movingFromCamera) {
     int index = Material::TypeIndex<ConcreteMaterial>();
     if (haveBasicEvalMaterial[index])
-        EvaluateMaterialAndBSDF<ConcreteMaterial, BasicTextureEvaluator>(
+        EvaluateMaterialAndBSDF<ConcreteMaterial, BasicTextureEvaluator, NShadowRays>(
             basicEvalMaterialQueue, movingFromCamera, wavefrontDepth);
     if (haveUniversalEvalMaterial[index])
-        EvaluateMaterialAndBSDF<ConcreteMaterial, UniversalTextureEvaluator>(
+        EvaluateMaterialAndBSDF<ConcreteMaterial, UniversalTextureEvaluator, NShadowRays>(
             universalEvalMaterialQueue, movingFromCamera, wavefrontDepth);
 }
 
-template <typename ConcreteMaterial, typename TextureEvaluator>
+template <typename ConcreteMaterial, typename TextureEvaluator, int NShadowRays>
 void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQueue,
                                                       Transform movingFromCamera,
                                                       int wavefrontDepth) {
@@ -63,11 +75,15 @@ void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQue
     std::string desc = StringPrintf(
         "%s + BxDF eval (%s tex)", ConcreteMaterial::Name(),
         std::is_same_v<TextureEvaluator, BasicTextureEvaluator> ? "Basic" : "Universal");
+    constexpr bool isBasicTextureEvaluator =
+        std::is_same_v<TextureEvaluator, BasicTextureEvaluator>;
+
+    const int sampleIndex = currentSampleIndex;
 
     RayQueue *nextRayQueue = NextRayQueue(wavefrontDepth);
     auto queue = evalQueue->Get<MaterialEvalWorkItem<ConcreteMaterial>>();
     ForAllQueued(
-        desc.c_str(), queue, maxQueueSize,
+        desc.c_str(), ProfilerKernelGroup::WAVEFRONT, queue, maxQueueSize,
         PBRT_CPU_GPU_LAMBDA(const MaterialEvalWorkItem<ConcreteMaterial> w) {
             // Evaluate material and BSDF for ray intersection
             TextureEvaluator texEval;
@@ -131,17 +147,18 @@ void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQue
 
             // Get BSDF at intersection point
             SampledWavelengths lambda = w.lambda;
-            MaterialEvalContext ctx =
+            MaterialEvalContext materialCtx =
                 w.GetMaterialEvalContext(dudx, dudy, dvdx, dvdy, ns, dpdus);
             using ConcreteBxDF = typename ConcreteMaterial::BxDF;
-            ConcreteBxDF bxdf = w.material->GetBxDF(texEval, ctx, lambda);
-            BSDF bsdf(ctx.ns, ctx.dpdus, &bxdf);
+            ConcreteBxDF bxdf = w.material->GetBxDF(texEval, materialCtx, lambda);
+            BSDF bsdf(materialCtx.ns, materialCtx.dpdus, &bxdf);
             // Handle terminated secondary wavelengths after BSDF creation
             if (lambda.SecondaryTerminated())
                 pixelSampleState.lambda[w.pixelIndex] = lambda;
 
             // Regularize BSDF, if appropriate
-            if (regularize && w.anyNonSpecularBounces)
+            bool bsdfRegularized = regularize && w.anyNonSpecularBounces;
+            if (bsdfRegularized)
                 bsdf.Regularize();
 
             // Initialize _VisibleSurface_ at first intersection if necessary
@@ -239,9 +256,12 @@ void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQue
                         bool anyNonSpecularBounces =
                             !bsdfSample->IsSpecular() || w.anyNonSpecularBounces;
                         // NOTE: slightly different than context below. Problem?
-                        LightSampleContext ctx(w.pi, w.n, ns);
+                        LightSampleContext lightCtx(w.pi, w.n, ns, w.wo);
+                        ProcessedMaterialContext prevMaterialCtx(
+                            Material(w.material), materialCtx, isBasicTextureEvaluator,
+                            bsdfRegularized);
                         nextRayQueue->PushIndirectRay(
-                            ray, w.depth + 1, ctx, beta, r_u, r_l, lambda,
+                            ray, w.depth + 1, lightCtx, prevMaterialCtx, beta, r_u, r_l, lambda,
                             etaScale, bsdfSample->IsSpecular(), anyNonSpecularBounces,
                             w.pixelIndex);
 
@@ -263,66 +283,48 @@ void WavefrontPathIntegrator::EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQue
             BxDFFlags flags = bsdf.Flags();
             if (IsNonSpecular(flags)) {
                 // Choose a light source using the _LightSampler_
-                LightSampleContext ctx(w.pi, w.n, ns);
+                LightSampleContext ctx(w.pi, w.n, ns, w.wo);
                 if (IsReflective(flags) && !IsTransmissive(flags))
                     ctx.pi = OffsetRayOrigin(ctx.pi, w.n, wo);
                 else if (IsTransmissive(flags) && IsReflective(flags))
                     ctx.pi = OffsetRayOrigin(ctx.pi, w.n, -wo);
-                pstd::optional<SampledLight> sampledLight =
-                    lightSampler.Sample(ctx, raySamples.direct.uc);
-                if (!sampledLight)
-                    return;
-                Light light = sampledLight->light;
 
-                // Sample light source and evaluate BSDF for direct lighting
-                pstd::optional<LightLiSample> ls =
-                    light.SampleLi(ctx, raySamples.direct.u, lambda, true);
-                if (!ls || !ls->L || ls->pdf == 0)
-                    return;
-                Vector3f wi = ls->wi;
-                SampledSpectrum f = bsdf.f<ConcreteBxDF>(wo, wi);
-                if (!f)
-                    return;
+                // Collect first-wave shading contexts.
+                if (firstIterationShadingPoints)
+                    firstIterationShadingPoints->Append(ctx.p(), ctx.ns);
 
-                // Compute path throughput and path PDFs for light sample
-                SampledSpectrum beta = w.beta * f * AbsDot(wi, ns);
-                PBRT_DBG("w.beta %f %f %f %f f %f %f %f %f dot %f\n", w.beta[0],
-                         w.beta[1], w.beta[2], w.beta[3], f[0], f[1], f[2], f[3],
-                         AbsDot(wi, ns));
+                BSDFScatterEval scatterEval(&bsdf, ns);
+                CountedArray<SampledLd, NShadowRays> samplesLd;
+                lightSampler.SampleLd(samplesLd, ctx, lambda, &bsdf, Hash(sampleIndex, w.pixelIndex, (w.depth + 1)),
+                                      raySamples.direct.uc, raySamples.direct.u, scatterEval);
 
-                PBRT_DBG(
-                    "me index %d depth %d beta %f %f %f %f f %f %f %f %f ls.L %f %f %f "
-                    "%f ls.pdf %f\n",
-                    w.pixelIndex, w.depth, beta[0], beta[1], beta[2], beta[3], f[0], f[1],
-                    f[2], f[3], ls->L[0], ls->L[1], ls->L[2], ls->L[3], ls->pdf);
+                int reserveStartIdx = shadowRayQueue->ReserveEntries(samplesLd.count);
+                for (int i = 0; i < samplesLd.count; ++i) {
+                    const SampledLd& sLd(samplesLd[i]);
 
-                Float lightPDF = ls->pdf * sampledLight->p;
-                // This causes r_u to be zero for the shadow ray, so that
-                // part of MIS just becomes a no-op.
-                Float bsdfPDF =
-                    IsDeltaLight(light.Type()) ? 0.f : bsdf.PDF<ConcreteBxDF>(wo, wi);
-                SampledSpectrum r_u = w.r_u * bsdfPDF;
-                SampledSpectrum r_l = w.r_u * lightPDF;
+                    // Compute path throughput and path PDFs for light sample
+                    SampledSpectrum r_u = w.r_u * sLd.scatterPDF;
+                    SampledSpectrum r_l = w.r_u * sLd.lightPDF;
 
-                // Enqueue shadow ray with tentative radiance contribution
-                SampledSpectrum Ld = beta * ls->L;
-                Ray ray = SpawnRayTo(w.pi, w.n, w.time, ls->pLight.pi, ls->pLight.n);
-                // Initialize _ray_ medium if media are present
-                if (haveMedia)
-                    ray.medium = Dot(ray.d, w.n) > 0 ? w.mediumInterface.outside
-                                                     : w.mediumInterface.inside;
+                    SampledSpectrum Ld = w.beta * sLd.Ld;
+                    
+                    // Enqueue shadow ray with tentative radiance contribution
+                    Ray ray = sLd.SpawnShadowRay(w.pi, w.n, w.time);
+                    // Initialize _ray_ medium if media are present
+                    if (haveMedia)
+                        ray.medium = Dot(ray.d, w.n) > 0 ? w.mediumInterface.outside
+                                                         : w.mediumInterface.inside;
 
-                shadowRayQueue->Push(ShadowRayWorkItem{ray, 1 - ShadowEpsilon, lambda, Ld,
-                                                       r_u, r_l, w.pixelIndex});
+                    (*shadowRayQueue)[reserveStartIdx + i] =
+                        ShadowRayWorkItem{ray, 1 - ShadowEpsilon, lambda, Ld, r_u, r_l,
+                                          w.pixelIndex, sLd.lightSamplerHint, sLd.pdfCancellationFactor};
 
-                PBRT_DBG("w.index %d spawned shadow ray depth %d Ld %f %f %f %f "
-                         "new beta %f %f %f %f beta/uni %f %f %f %f Ld/uni %f %f %f %f\n",
-                         w.pixelIndex, w.depth, Ld[0], Ld[1], Ld[2], Ld[3], beta[0],
-                         beta[1], beta[2], beta[3], SafeDiv(beta, r_u)[0],
-                         SafeDiv(beta, r_u)[1], SafeDiv(beta, r_u)[2],
-                         SafeDiv(beta, r_u)[3], SafeDiv(Ld, r_u)[0],
-                         SafeDiv(Ld, r_u)[1], SafeDiv(Ld, r_u)[2],
-                         SafeDiv(Ld, r_u)[3]);
+                    PBRT_DBG("w.index %d spawned shadow ray depth %d Ld/uni %f %f %f %f\n",
+                             w.pixelIndex, w.depth, Ld[0], Ld[1], Ld[2], Ld[3],
+                             SafeDiv(Ld, r_u)[0], SafeDiv(Ld, r_u)[1],
+                             SafeDiv(Ld, r_u)[2], SafeDiv(Ld, r_u)[3]);
+                }
+                
             }
         });
 }

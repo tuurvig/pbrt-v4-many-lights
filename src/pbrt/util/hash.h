@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -63,6 +64,14 @@ PBRT_CPU_GPU inline uint64_t MurmurHash64A(const unsigned char *key, size_t len,
     return h;
 }
 
+// PCG Fast Hashing function usable on GPU
+// https://www.reedbeta.com/blog/hash-functions-for-gpu-rendering/
+PBRT_CPU_GPU inline uint32_t HashPCG(uint32_t input) {
+    uint32_t state = input * 747796405u + 2891336453u;
+    uint32_t word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
 // Hashing Inline Functions
 // http://zimbry.blogspot.ch/2011/09/better-bit-mixing-improving-on.html
 PBRT_CPU_GPU inline uint64_t MixBits(uint64_t v);
@@ -109,6 +118,21 @@ PBRT_CPU_GPU inline uint64_t Hash(Args... args) {
 template <typename... Args>
 PBRT_CPU_GPU inline Float HashFloat(Args... args) {
     return uint32_t(Hash(args...)) * 0x1p-32f;
+}
+
+PBRT_CPU_GPU inline uint32_t FastIntegerHash(uint32_t input) {
+    return HashPCG(input);
+}
+
+PBRT_CPU_GPU inline uint16_t PackNormalizedFloat(const Float val) {
+    DCHECK_LE(val, 1);
+    DCHECK_LE(0, val);
+    return static_cast<uint16_t>(val * std::numeric_limits<uint16_t>::max());
+}
+
+template <typename IntType>
+PBRT_CPU_GPU inline Float UnpackToFloat(IntType val) {
+    return static_cast<Float>(val) / static_cast<Float>(std::numeric_limits<IntType>::max());
 }
 
 }  // namespace pbrt

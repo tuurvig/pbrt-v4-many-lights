@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -1288,6 +1289,9 @@ class Bounds3 {
     }
 
     PBRT_CPU_GPU
+    Point3<T> Centroid() const { return (pMax + pMin) * static_cast<T>(0.5); }
+
+    PBRT_CPU_GPU
     Vector3<T> Diagonal() const { return pMax - pMin; }
 
     PBRT_CPU_GPU
@@ -1519,6 +1523,32 @@ PBRT_CPU_GPU inline bool InsideExclusive(Point3<T> p, const Bounds3<T> &b) {
             p.z >= b.pMin.z && p.z < b.pMax.z);
 }
 
+template <typename T>
+PBRT_CPU_GPU inline auto ClosestPoint(Point3<T> p, const Bounds3<T> &b) {
+    // Clamp p to bounds
+    T x = std::max<T>(b.pMin.x, std::min<T>(p.x, b.pMax.x));
+    T y = std::max<T>(b.pMin.y, std::min<T>(p.y, b.pMax.y));
+    T z = std::max<T>(b.pMin.z, std::min<T>(p.z, b.pMax.z));
+    return Point3<T>(x, y, z);
+}
+
+template <typename T>
+PBRT_CPU_GPU inline auto FurthestPoint(Point3<T> p, const Bounds3<T> &b) {
+    T x = std::abs(p.x - b.pMin.x) > std::abs(p.x - b.pMax.x) ? b.pMin.x : b.pMax.x;
+    T y = std::abs(p.y - b.pMin.y) > std::abs(p.y - b.pMax.y) ? b.pMin.y : b.pMax.y;
+    T z = std::abs(p.z - b.pMin.z) > std::abs(p.z - b.pMax.z) ? b.pMin.z : b.pMax.z;
+    return Point3<T>(x, y, z);
+}
+
+template <typename T, typename U>
+PBRT_CPU_GPU inline auto DistanceSquared(const Bounds3<T>& a, const Bounds3<U>& b) {
+    using TDist = decltype(T{} - U{});
+    TDist dx = std::max<TDist>({0, b.pMin.x - a.pMax.x, a.pMin.x - b.pMax.x});
+    TDist dy = std::max<TDist>({0, b.pMin.y - a.pMax.y, a.pMin.y - b.pMax.y});
+    TDist dz = std::max<TDist>({0, b.pMin.z - a.pMax.z, a.pMin.z - b.pMax.z});
+    return Sqr(dx) + Sqr(dy) + Sqr(dz);
+}
+
 template <typename T, typename U>
 PBRT_CPU_GPU inline auto DistanceSquared(Point3<T> p, const Bounds3<U> &b) {
     using TDist = decltype(T{} - U{});
@@ -1526,6 +1556,13 @@ PBRT_CPU_GPU inline auto DistanceSquared(Point3<T> p, const Bounds3<U> &b) {
     TDist dy = std::max<TDist>({0, b.pMin.y - p.y, p.y - b.pMax.y});
     TDist dz = std::max<TDist>({0, b.pMin.z - p.z, p.z - b.pMax.z});
     return Sqr(dx) + Sqr(dy) + Sqr(dz);
+}
+
+template <typename T, typename U>
+PBRT_CPU_GPU inline auto Distance(const Bounds3<T>& a, const Bounds3<U>& b) {
+    auto dist2 = DistanceSquared(a, b);
+    using TDist = typename TupleLength<decltype(dist2)>::type;
+    return std::sqrt(TDist(dist2));
 }
 
 template <typename T, typename U>
@@ -1541,6 +1578,35 @@ PBRT_CPU_GPU inline Bounds3<T> Expand(const Bounds3<T> &b, U delta) {
     ret.pMin = b.pMin - Vector3<T>(delta, delta, delta);
     ret.pMax = b.pMax + Vector3<T>(delta, delta, delta);
     return ret;
+}
+
+template <typename T>
+PBRT_CPU_GPU inline bool IntersectOrAdjust(Vector3f& out, const Bounds3<T>& bounds, Point3f origin, Vector3f direction) {
+    if (bounds.IntersectP(origin, direction)) {
+        out = direction;
+        return true;
+    }
+
+    Float maxDot = -1;
+    bool foundValid = false;
+    for (int i = 0; i < 8; ++i) {
+        Vector3f toCorner = bounds.Corner(i) - origin;
+        
+        Float len2 = LengthSquared(toCorner);
+        if (len2 <= MachineEpsilon) continue;
+
+        toCorner /= std::sqrt(len2); // Normalize
+        
+        Float d = Dot(toCorner, direction);
+
+        if (d > maxDot) {
+            maxDot = d;
+            out = toCorner;
+            foundValid = true;
+        }
+    }
+
+    return foundValid;
 }
 
 template <typename T>
@@ -1729,6 +1795,27 @@ inline bool SameHemisphere(Vector3f w, Normal3f wp) {
     return w.z * wp.z > 0;
 }
 
+enum HemisphereIntersection : uint8_t {
+    SAME = 1,
+    DIFF = 2,
+    BOTH = SAME | DIFF
+};
+
+PBRT_CPU_GPU inline HemisphereIntersection WhichHemisphere(Vector3f w, Vector3f wp, Float cosTheta) {
+    if (cosTheta < 0) return BOTH;
+
+    bool isUpper = w.z > 0;
+
+    Float sinTheta = SafeSqrt(1 - cosTheta * cosTheta);
+    if (std::abs(wp.z) <= sinTheta) {
+        return BOTH;
+    } else if (wp.z > sinTheta) {
+        return isUpper ? SAME : DIFF;
+    }
+
+    return isUpper ? DIFF : SAME;
+}
+
 // OctahedralVector Definition
 class OctahedralVector {
   public:
@@ -1770,7 +1857,7 @@ class OctahedralVector {
   private:
     // OctahedralVector Private Methods
     PBRT_CPU_GPU
-    static Float Sign(Float v) { return std::copysign(1.f, v); }
+    static Float Sign(Float v) { return std::copysign((Float)1, v); }
 
     PBRT_CPU_GPU
     static uint16_t Encode(Float f) {
@@ -1779,6 +1866,30 @@ class OctahedralVector {
 
     // OctahedralVector Private Members
     uint16_t x, y;
+};
+
+// OctahedralVector Definition
+class UniformDiskVector {
+  public:
+    // OctahedralVector Public Methods
+    UniformDiskVector() = default;
+
+    PBRT_CPU_GPU
+    UniformDiskVector(Vector3f v);
+
+    PBRT_CPU_GPU
+    explicit operator Vector3f() const;
+
+    PBRT_CPU_GPU
+    uint16_t operator[](int dim) const {
+        return vec[dim];
+    }
+
+    std::string ToString() const;
+
+  private:
+    // UniformDiskVector Private Members
+    Point2<uint16_t> vec;
 };
 
 // DirectionCone Definition
@@ -1810,6 +1921,10 @@ class DirectionCone {
 // DirectionCone Inline Functions
 PBRT_CPU_GPU inline bool Inside(const DirectionCone &d, Vector3f w) {
     return !d.IsEmpty() && Dot(d.w, Normalize(w)) >= d.cosTheta;
+}
+
+PBRT_CPU_GPU inline bool InsideNormalized(const DirectionCone &d, Vector3f w) {
+    return !d.IsEmpty() && Dot(d.w, w) >= d.cosTheta;
 }
 
 PBRT_CPU_GPU inline DirectionCone BoundSubtendedDirections(const Bounds3f &b, Point3f p) {

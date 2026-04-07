@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -36,11 +37,13 @@ struct BasicPBRTOptions {
 // PBRTOptions Definition
 struct PBRTOptions : BasicPBRTOptions {
     int nThreads = 0;
+    int discretizeAreaLights = 0;
     LogLevel logLevel = LogLevel::Error;
     std::string logFile;
     bool logUtilization = false;
     bool writePartialImages = false;
     bool recordPixelStatistics = false;
+    bool recordPerLightStatistics = false;
     bool printStatistics = false;
     pstd::optional<int> pixelSamples;
     pstd::optional<int> gpuDevice;

@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -47,7 +48,7 @@ void RenderWavefront(BasicScene &scene) {
     if (Options->printStatistics) {
 #ifdef PBRT_BUILD_GPU_RENDERER
         if (Options->useGPU)
-            ReportKernelStats();
+            ReportKernelStats(ProfilerKernelGroup::WAVEFRONT);
 #endif  // PBRT_BUILD_GPU_RENDERER
 
         Printf("Wavefront integrator statistics:\n");

@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -38,7 +39,7 @@ std::string PBRTOptions::ToString() const {
         "disableWavelengthJitter: %s disableTextureFiltering: %s disableImageTextures: %s "
         "forceDiffuse: %s useGPU: %s wavefront: %s interactive: %s fullscreen %s "
         "renderingSpace: %s nThreads: %s logLevel: %s logFile: %s logUtilization: %s "
-        "writePartialImages: %s recordPixelStatistics: %s "
+        "writePartialImages: %s recordPixelStatistics: %s recordPerLightStatistics: %s"
         "printStatistics: %s pixelSamples: %s gpuDevice: %s quickRender: %s upgrade: %s "
         "imageFile: %s mseReferenceImage: %s mseReferenceOutput: %s debugStart: %s "
         "displayServer: %s cropWindow: %s pixelBounds: %s pixelMaterial: %s "
@@ -46,7 +47,7 @@ std::string PBRTOptions::ToString() const {
         seed, quiet, disablePixelJitter, disableWavelengthJitter, disableTextureFiltering,
         disableImageTextures, forceDiffuse, useGPU, wavefront, interactive, fullscreen,
         renderingSpace, nThreads, logLevel, logFile, logUtilization, writePartialImages,
-        recordPixelStatistics, printStatistics, pixelSamples, gpuDevice, quickRender, upgrade,
+        recordPixelStatistics, recordPerLightStatistics, printStatistics, pixelSamples, gpuDevice, quickRender, upgrade,
         imageFile, mseReferenceImage, mseReferenceOutput, debugStart, displayServer, cropWindow,
         pixelBounds, pixelMaterial, displacementEdgeScale);
 }

@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -181,6 +182,14 @@ class BxDF
     PBRT_CPU_GPU inline pstd::optional<BSDFSample> Sample_f(
         Vector3f wo, Float uc, Point2f u, TransportMode mode = TransportMode::Radiance,
         BxDFReflTransFlags sampleFlags = BxDFReflTransFlags::All) const;
+
+    PBRT_CPU_GPU inline Float Max_f(
+        Vector3f wo, DirectionCone wiCone, TransportMode mode,
+        BxDFReflTransFlags flags = BxDFReflTransFlags::All) const;
+
+    PBRT_CPU_GPU inline Float Max_f(
+        Vector3f woGlobal, Bounds3f wiBoundsGlobal, Point3f p, const Frame& localFrame,
+        TransportMode mode, BxDFReflTransFlags flags = BxDFReflTransFlags::All) const;
 
     PBRT_CPU_GPU inline Float PDF(
         Vector3f wo, Vector3f wi, TransportMode mode,

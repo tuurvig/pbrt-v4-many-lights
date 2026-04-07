@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -172,6 +173,8 @@ int main(int argc, char *argv[]) {
                      &options.disableWavelengthJitter, onError) ||
             ParseArg(&iter, args.end(), "displacement-edge-scale",
                      &options.displacementEdgeScale, onError) ||
+            ParseArg(&iter, args.end(), "discretize-area-lights",
+                     &options.discretizeAreaLights, onError) ||
             ParseArg(&iter, args.end(), "display-server", &options.displayServer,
                      onError) ||
             ParseArg(&iter, args.end(), "force-diffuse", &options.forceDiffuse,
@@ -189,8 +192,8 @@ int main(int argc, char *argv[]) {
                      onError) ||
             ParseArg(&iter, args.end(), "nthreads", &options.nThreads, onError) ||
             ParseArg(&iter, args.end(), "outfile", &options.imageFile, onError) ||
-            ParseArg(&iter, args.end(), "pixelstats", &options.recordPixelStatistics,
-                     onError) ||
+            ParseArg(&iter, args.end(), "pixelstats", &options.recordPixelStatistics, onError) ||
+            ParseArg(&iter, args.end(), "perlightstats", &options.recordPerLightStatistics, onError) ||
             ParseArg(&iter, args.end(), "quick", &options.quickRender, onError) ||
             ParseArg(&iter, args.end(), "quiet", &options.quiet, onError) ||
             ParseArg(&iter, args.end(), "render-coord-sys", &renderCoordSys, onError) ||

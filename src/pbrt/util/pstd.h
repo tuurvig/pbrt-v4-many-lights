@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -870,11 +871,19 @@ class vector {
 
     PBRT_CPU_GPU
     reference operator[](size_type index) {
+        size_type s = size();
+        if (index >= s) {
+            DCHECK_LT(index, size());
+        }
         DCHECK_LT(index, size());
         return ptr[index];
     }
     PBRT_CPU_GPU
     const_reference operator[](size_type index) const {
+        size_type s = size();
+        if (index >= s) {
+            DCHECK_LT(index, size());
+        }
         DCHECK_LT(index, size());
         return ptr[index];
     }

@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -48,7 +49,7 @@ TEST(BVHLightSampling, OneSpot) {
         pstd::optional<LightLiSample> ls = lights[0].SampleLi(in, u, lambda);
 
         pstd::optional<SampledLight> sampledLight =
-            distrib.Sample(in, rng.Uniform<Float>());
+            distrib.Sample(in, nullptr, 0, rng.Uniform<Float>());
 
         if (!sampledLight) {
             EXPECT_FALSE((bool)ls);
@@ -90,14 +91,14 @@ TEST(BVHLightSampling, Point) {
         const int nSamples = 10000;
         for (Float u : Stratified1D(nSamples)) {
             Interaction intr(p, 0, (Medium) nullptr);
-            pstd::optional<SampledLight> sampledLight = distrib.Sample(intr, u);
+            pstd::optional<SampledLight> sampledLight = distrib.Sample(intr, nullptr, 0, u);
             // Can assume this because it's all point lights
             ASSERT_TRUE((bool)sampledLight);
 
             EXPECT_GT(sampledLight->p, 0);
             sumWt[lightToIndex[sampledLight->light]] += 1 / (sampledLight->p * nSamples);
 
-            EXPECT_FLOAT_EQ(sampledLight->p, distrib.PMF(intr, sampledLight->light));
+            EXPECT_FLOAT_EQ(sampledLight->p, distrib.PMF(intr, nullptr, 0, sampledLight->light).pmf);
         }
 
         for (int i = 0; i < lights.size(); ++i) {
@@ -140,7 +141,7 @@ TEST(BVHLightSampling, PointVaryPower) {
         const int nSamples = 100000;
         for (Float u : Stratified1D(nSamples)) {
             Interaction intr(Point3fi(p), Normal3f(0, 0, 0), Point2f(0, 0));
-            pstd::optional<SampledLight> sampledLight = distrib.Sample(intr, u);
+            pstd::optional<SampledLight> sampledLight = distrib.Sample(intr, nullptr, 0, u);
             // Again because it's all point lights...
             ASSERT_TRUE((bool)sampledLight);
 
@@ -149,7 +150,7 @@ TEST(BVHLightSampling, PointVaryPower) {
             EXPECT_GT(pdf, 0);
             sumWt[lightToIndex[light]] += 1 / (pdf * nSamples);
 
-            EXPECT_LT(std::abs(distrib.PMF(intr, light) - pdf) / pdf, 1e-4);
+            EXPECT_LT(std::abs(distrib.PMF(intr, nullptr, 0, light).pmf - pdf) / pdf, 1e-4);
         }
 
         for (int i = 0; i < lights.size(); ++i) {
@@ -173,14 +174,14 @@ TEST(BVHLightSampling, PointVaryPower) {
         std::vector<int> counts(lights.size(), 0);
         const int nSamples = 100000;
         for (Float u : Stratified1D(nSamples)) {
-            pstd::optional<SampledLight> sampledLight = distrib.Sample(intr, u);
+            pstd::optional<SampledLight> sampledLight = distrib.Sample(intr, nullptr, 0, u);
             ASSERT_TRUE((bool)sampledLight);
             Light light = sampledLight->light;
             Float pdf = sampledLight->p;
             EXPECT_GT(pdf, 0);
             ++counts[lightToIndex[light]];
 
-            EXPECT_FLOAT_EQ(pdf, distrib.PMF(intr, light));
+            EXPECT_FLOAT_EQ(pdf, distrib.PMF(intr, nullptr, 0, light).pmf);
         }
 
         for (int i = 0; i < lights.size(); ++i) {
@@ -221,7 +222,7 @@ TEST(BVHLightSampling, OneTri) {
         pstd::optional<LightLiSample> ls = lights[0].SampleLi(in, u, lambda);
 
         pstd::optional<SampledLight> sampledLight =
-            distrib.Sample(in, rng.Uniform<Float>());
+            distrib.Sample(in, nullptr, 0, rng.Uniform<Float>());
 
         // Note that the converse (sampledLight ->
         // ls) isn't always true since the light importance
@@ -286,12 +287,12 @@ TEST(BVHLightSampling, PdfMethod) {
         Point3f p{-1 + 3 * r(), -1 + 3 * r(), -1 + 3 * r()};
         Float u = rng.Uniform<Float>();
         Interaction intr(Point3fi(p), Normal3f(0, 0, 0), Point2f(0, 0));
-        pstd::optional<SampledLight> sampledLight = distrib.Sample(intr, u);
+        pstd::optional<SampledLight> sampledLight = distrib.Sample(intr, nullptr, 0, u);
         if (sampledLight)
             // It's actually legit to sometimes get no lights; as the bounds
             // tighten up as we get deeper in the tree, it may turn out that
             // the path we followed didn't have any lights after all.
-            EXPECT_FLOAT_EQ(sampledLight->p, distrib.PMF(intr, sampledLight->light));
+            EXPECT_FLOAT_EQ(sampledLight->p, distrib.PMF(intr, nullptr, 0, sampledLight->light).pmf);
     }
 }
 
@@ -308,9 +309,9 @@ TEST(ExhaustiveLightSampling, PdfMethod) {
         Point3f p{-1 + 3 * r(), -1 + 3 * r(), -1 + 3 * r()};
         Interaction intr(Point3fi(p), Normal3f(0, 0, 0), Point2f(0, 0));
         pstd::optional<SampledLight> sampledLight =
-            distrib.Sample(intr, rng.Uniform<Float>());
+            distrib.Sample(intr, nullptr, 0, rng.Uniform<Float>());
         ASSERT_TRUE((bool)sampledLight) << i << " - " << p;
-        EXPECT_FLOAT_EQ(sampledLight->p, distrib.PMF(intr, sampledLight->light));
+        EXPECT_FLOAT_EQ(sampledLight->p, distrib.PMF(intr, nullptr, 0, sampledLight->light).pmf);
     }
 }
 
@@ -327,9 +328,9 @@ TEST(UniformLightSampling, PdfMethod) {
         Point3f p{-1 + 3 * r(), -1 + 3 * r(), -1 + 3 * r()};
         Interaction intr(Point3fi(p), Normal3f(0, 0, 0), Point2f(0, 0));
         pstd::optional<SampledLight> sampledLight =
-            distrib.Sample(intr, rng.Uniform<Float>());
+            distrib.Sample(intr, nullptr, 0, rng.Uniform<Float>());
         ASSERT_TRUE((bool)sampledLight) << i << " - " << p;
-        EXPECT_FLOAT_EQ(sampledLight->p, distrib.PMF(intr, sampledLight->light));
+        EXPECT_FLOAT_EQ(sampledLight->p, distrib.PMF(intr, nullptr, 0, sampledLight->light).pmf);
     }
 }
 
@@ -346,8 +347,8 @@ TEST(PowerLightSampling, PdfMethod) {
         Point3f p{-1 + 3 * r(), -1 + 3 * r(), -1 + 3 * r()};
         Interaction intr(Point3fi(p), Normal3f(0, 0, 0), Point2f(0, 0));
         pstd::optional<SampledLight> sampledLight =
-            distrib.Sample(intr, rng.Uniform<Float>());
+            distrib.Sample(intr, nullptr, 0, rng.Uniform<Float>());
         ASSERT_TRUE((bool)sampledLight) << i << " - " << p;
-        EXPECT_FLOAT_EQ(sampledLight->p, distrib.PMF(intr, sampledLight->light));
+        EXPECT_FLOAT_EQ(sampledLight->p, distrib.PMF(intr, nullptr, 0, sampledLight->light).pmf);
     }
 }

@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -34,6 +35,7 @@ CPUAggregate::CPUAggregate(
 void CPUAggregate::IntersectClosest(int maxRays, const RayQueue *rayQueue,
                                     EscapedRayQueue *escapedRayQueue,
                                     HitAreaLightQueue *hitAreaLightQueue,
+                                    HitAreaMaterialLightQueue *hitAreaMaterialLightQueue,
                                     MaterialEvalQueue *basicEvalMaterialQueue,
                                     MaterialEvalQueue *universalEvalMaterialQueue,
                                     MediumSampleQueue *mediumSampleQueue,
@@ -53,22 +55,25 @@ void CPUAggregate::IntersectClosest(int maxRays, const RayQueue *rayQueue,
             // FIXME? Second arg r.ray.medium doesn't match OptiX path
             EnqueueWorkAfterIntersection(
                 r, r.ray.medium, si->tHit, si->intr, mediumSampleQueue, nextRayQueue,
-                hitAreaLightQueue, basicEvalMaterialQueue, universalEvalMaterialQueue);
+                hitAreaLightQueue, hitAreaMaterialLightQueue, basicEvalMaterialQueue,
+                universalEvalMaterialQueue);
     });
 }
 
 void CPUAggregate::IntersectShadow(int maxRays, ShadowRayQueue *shadowRayQueue,
-                                   SOA<PixelSampleState> *pixelSampleState) const {
+                                   SOA<PixelSampleState> *pixelSampleState,
+                                   const LightSampler &lightSampler) const {
     // Intersect shadow rays from _shadowRayQueue_ in parallel
     ParallelFor(0, shadowRayQueue->Size(), [=](int index) {
         const ShadowRayWorkItem w = (*shadowRayQueue)[index];
         bool hit = aggregate.IntersectP(w.ray, w.tMax);
-        RecordShadowRayResult(w, pixelSampleState, hit);
+        RecordShadowRayResult(w, pixelSampleState, hit, lightSampler);
     });
 }
 
 void CPUAggregate::IntersectShadowTr(int maxRays, ShadowRayQueue *shadowRayQueue,
-                                     SOA<PixelSampleState> *pixelSampleState) const {
+                                     SOA<PixelSampleState> *pixelSampleState,
+                                     const LightSampler &lightSampler) const {
     ParallelFor(0, shadowRayQueue->Size(), [=](int index) {
         const ShadowRayWorkItem w = (*shadowRayQueue)[index];
         pstd::optional<ShapeIntersection> si;
@@ -83,7 +88,8 @@ void CPUAggregate::IntersectShadowTr(int maxRays, ShadowRayQueue *shadowRayQueue
                     return TransmittanceTraceResult{true, si->intr.p(),
                                                     si->intr.material};
             },
-            [&](Point3f p) -> Ray { return si->intr.SpawnRayTo(p); });
+            [&](Point3f p) -> Ray { return si->intr.SpawnRayTo(p); },
+            lightSampler);
     });
 }
 

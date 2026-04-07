@@ -1,0 +1,316 @@
+﻿{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "windows-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/bin-${presetName}",
+      "toolset": "v142",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "cl.exe",
+        "CMAKE_CXX_COMPILER": "cl.exe",
+        "CMAKE_CUDA_STANDARD": "17",
+        "CMAKE_CUDA_COMPILER": "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.8/bin/nvcc.exe",
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        //"PBRT_GPU_SHADER_MODEL": "sm_89",
+        "PBRT_OPTIX7_PATH": "C:/ProgramData/NVIDIA Corporation/OptiX SDK 7.7.0",
+        "VCPKG_TARGET_TRIPLET": "x64-windows"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "linux-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/bin-${presetName}",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "/usr/bin/gcc",
+        "CMAKE_CXX_COMPILER": "/usr/bin/g++",
+        "CMAKE_CUDA_STANDARD": "17",
+        "CMAKE_CUDA_COMPILER": "/opt/cuda/bin/nvcc",
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-linux",
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "windows-cpu-base",
+      "hidden": true,
+      "inherits": "windows-base",
+      "cacheVariables": {
+        "PBRT_OPTIX7_PATH": ""
+      }
+    },
+    {
+      "name": "linux-cpu-base",
+      "hidden": true,
+      "inherits": "linux-base",
+      "cacheVariables": {
+        "PBRT_OPTIX7_PATH": ""
+      }
+    },
+    {
+      "name": "windows-x64-debug",
+      "displayName": "Windows x64 Debug",
+      "inherits": "windows-base",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "windows-x64-release",
+      "displayName": "Windows x64 Release",
+      "inherits": "windows-base",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "windows-x64-rel-deb-info",
+      "displayName": "Windows x64 Release with Debug Info",
+      "inherits": "windows-base",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    },
+    {
+      "name": "windows-x64-debug-cpu-only",
+      "displayName": "Windows x64 Debug (CPU only)",
+      "inherits": "windows-cpu-base",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "windows-x64-release-cpu-only",
+      "displayName": "Windows x64 Release (CPU only)",
+      "inherits": "windows-cpu-base",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "windows-x64-rel-deb-info-cpu-only",
+      "displayName": "Windows x64 Release with Debug Info (CPU only)",
+      "inherits": "windows-cpu-base",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    },
+    {
+      "name": "linux-x64-debug",
+      "displayName": "Linux x64 Debug",
+      "inherits": "linux-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "linux-x64-release",
+      "displayName": "Linux x64 Release",
+      "inherits": "linux-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "linux-x64-rel-deb-info",
+      "displayName": "Linux x64 Release with Debug Info",
+      "inherits": "linux-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    },
+    {
+      "name": "linux-x64-debug-cpu-only",
+      "displayName": "Linux x64 Debug (CPU only)",
+      "inherits": "linux-cpu-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "linux-x64-release-cpu-only",
+      "displayName": "Linux x64 Release (CPU only)",
+      "inherits": "linux-cpu-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "linux-x64-rel-deb-info-cpu-only",
+      "displayName": "Linux x64 Release with Debug Info (CPU only)",
+      "inherits": "linux-cpu-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-x64-debug",
+      "displayName": "Windows x64 Debug",
+      "hidden": false,
+      "configurePreset": "windows-x64-debug",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "windows-x64-release",
+      "displayName": "Windows x64 Release",
+      "hidden": false,
+      "configurePreset": "windows-x64-release",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "windows-x64-rel-deb-info",
+      "displayName": "Windows x64 Release with Debug Info",
+      "hidden": false,
+      "configurePreset": "windows-x64-rel-deb-info",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "windows-x64-debug-cpu-only",
+      "displayName": "Windows x64 Debug (CPU only)",
+      "hidden": false,
+      "configurePreset": "windows-x64-debug-cpu-only",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "windows-x64-release-cpu-only",
+      "displayName": "Windows x64 Release (CPU only)",
+      "hidden": false,
+      "configurePreset": "windows-x64-release-cpu-only",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "windows-x64-rel-deb-info-cpu-only",
+      "displayName": "Windows x64 Release with Debug Info (CPU only)",
+      "hidden": false,
+      "configurePreset": "windows-x64-rel-deb-info-cpu-only",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "linux-x64-debug",
+      "displayName": "Linux x64 Debug",
+      "hidden": false,
+      "configurePreset": "linux-x64-debug",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-x64-release",
+      "displayName": "Linux x64 Release",
+      "hidden": false,
+      "configurePreset": "linux-x64-release",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-x64-rel-deb-info",
+      "displayName": "Linux x64 Release with Debug Info",
+      "hidden": false,
+      "configurePreset": "linux-x64-rel-deb-info",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-x64-debug-cpu-only",
+      "displayName": "Linux x64 Debug (CPU only)",
+      "hidden": false,
+      "configurePreset": "linux-x64-debug-cpu-only",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-x64-release-cpu-only",
+      "displayName": "Linux x64 Release (CPU only)",
+      "hidden": false,
+      "configurePreset": "linux-x64-release-cpu-only",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-x64-rel-deb-info-cpu-only",
+      "displayName": "Linux x64 Release with Debug Info (CPU only)",
+      "hidden": false,
+      "configurePreset": "linux-x64-rel-deb-info-cpu-only",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    }
+  ]
+}

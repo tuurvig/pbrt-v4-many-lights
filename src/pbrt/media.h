@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -798,6 +799,23 @@ PBRT_CPU_GPU SampledSpectrum SampleT_maj(Ray ray, Float tMax, Float u, RNG &rng,
     }
     return SampledSpectrum(1.f);
 }
+
+struct MediumScatterEval {
+    PBRT_CPU_GPU
+    MediumScatterEval(PhaseFunction phase) : phase(phase) {}
+
+    template <typename PhaseFunc>
+    PBRT_CPU_GPU explicit MediumScatterEval(const PhaseFunc *phase) : phase(PhaseFunction(phase)) {}
+
+    PhaseFunction phase;
+
+    PBRT_CPU_GPU
+    SampledSpectrum operator()(Float& scatterPDF, Vector3f wo, Vector3f wi, bool isDeltaLight) const {
+        scatterPDF = isDeltaLight ? 0.f : phase.PDF(wo, wi);
+        Float p = phase.p(wo, wi);
+        return SampledSpectrum(p);
+    }
+};
 
 }  // namespace pbrt
 

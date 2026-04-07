@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -22,6 +23,7 @@
 #include <pbrt/util/pstd.h>
 #include <pbrt/wavefront/workitems.h>
 #include <pbrt/wavefront/workqueue.h>
+#include <pbrt/util/shadingpoints.h>
 
 namespace pbrt {
 
@@ -39,15 +41,18 @@ class WavefrontAggregate {
     virtual void IntersectClosest(int maxRays, const RayQueue *rayQ,
                                   EscapedRayQueue *escapedRayQ,
                                   HitAreaLightQueue *hitAreaLightQ,
+                                  HitAreaMaterialLightQueue *hitAreaMaterialLightQ,
                                   MaterialEvalQueue *basicMtlQ,
                                   MaterialEvalQueue *universalMtlQ,
                                   MediumSampleQueue *mediumSampleQ,
                                   RayQueue *nextRayQ) const = 0;
 
     virtual void IntersectShadow(int maxRays, ShadowRayQueue *shadowRayQueue,
-                                 SOA<PixelSampleState> *pixelSampleState) const = 0;
+                                 SOA<PixelSampleState> *pixelSampleState,
+                                 const LightSampler &lightSampler) const = 0;
     virtual void IntersectShadowTr(int maxRays, ShadowRayQueue *shadowRayQueue,
-                                   SOA<PixelSampleState> *pixelSampleState) const = 0;
+                                   SOA<PixelSampleState> *pixelSampleState,
+                                   const LightSampler &lightSampler) const = 0;
 
     virtual void IntersectOneRandom(
         int maxRays, SubsurfaceScatterQueue *subsurfaceScatterQueue) const = 0;
@@ -69,21 +74,35 @@ class WavefrontPathIntegrator {
 
     void TraceShadowRays(int wavefrontDepth);
     void SampleMediumInteraction(int wavefrontDepth);
-    template <typename PhaseFunction>
+
     void SampleMediumScattering(int wavefrontDepth);
+    template <int NShadowRays>
+    void SampleMediumScattering(int wavefrontDepth);
+    template <typename PhaseFunction, int NShadowRays>
+    void SampleMediumScattering(int wavefrontDepth);
+    void SampleSubsurface(int wavefrontDepth);
+    template <int NShadowRays>
     void SampleSubsurface(int wavefrontDepth);
 
     void HandleEscapedRays();
     void HandleEmissiveIntersection();
+    template <typename ConcreteMaterial>
+    void HandleEmissiveIntersectionMaterial();
 
     void EvaluateMaterialsAndBSDFs(int wavefrontDepth, Transform movingFromCamera);
-    template <typename ConcreteMaterial>
+    template <int NShadowRays>
+    void EvaluateMaterialsAndBSDFs(int wavefrontDepth, Transform movingFromCamera);
+    template <typename ConcreteMaterial, int NShadowRays>
     void EvaluateMaterialAndBSDF(int wavefrontDepth, Transform movingFromCamera);
-    template <typename ConcreteMaterial, typename TextureEvaluator>
+    template <typename ConcreteMaterial, typename TextureEvaluator, int NShadowRays>
     void EvaluateMaterialAndBSDF(MaterialEvalQueue *evalQueue, Transform movingFromCamera,
                                  int wavefrontDepth);
 
     void UpdateFilm();
+    /// @brief Per-wave hook performed before a wave is started.
+    void OnRenderWaveStart(int waveIndex, const Bounds2i &pixelBounds);
+    /// @brief Per-wave hook performed after a wave has completed.
+    void OnRenderWaveDone(int waveIndex);
 
     WavefrontPathIntegrator(pstd::pmr::memory_resource *memoryResource,
                             BasicScene &scene);
@@ -92,7 +111,7 @@ class WavefrontPathIntegrator {
     void ParallelFor(const char *description, int nItems, F &&func) {
         if (Options->useGPU)
 #ifdef PBRT_BUILD_GPU_RENDERER
-            GPUParallelFor(description, nItems, func);
+            GPUParallelFor(description, ProfilerKernelGroup::WAVEFRONT, nItems, func);
 #else
             LOG_FATAL("Options->useGPU was set without PBRT_BUILD_GPU_RENDERER enabled");
 #endif
@@ -104,7 +123,8 @@ class WavefrontPathIntegrator {
     void Do(const char *description, F &&func) {
         if (Options->useGPU)
 #ifdef PBRT_BUILD_GPU_RENDERER
-            GPUParallelFor(description, 1, [=] PBRT_GPU(int) mutable { func(); });
+            GPUParallelFor(description, ProfilerKernelGroup::WAVEFRONT, 1,
+                           [=] PBRT_GPU(int) mutable { func(); });
 #else
             LOG_FATAL("Options->useGPU was set without PBRT_BUILD_GPU_RENDERER enabled");
 #endif
@@ -158,10 +178,13 @@ class WavefrontPathIntegrator {
     pstd::vector<Light> *infiniteLights;
     LightSampler lightSampler;
 
-    int maxDepth, samplesPerPixel;
+    int maxDepth, samplesPerPixel, currentSampleIndex;
     bool regularize;
+    bool isOnlineLightSampler = false;
+    ShadingPointCollector *firstIterationShadingPoints = nullptr;
 
     int scanlinesPerPass, maxQueueSize;
+    ERequiresShadowRays requiredShadowRays;
 
     SOA<PixelSampleState> pixelSampleState;
 
@@ -175,6 +198,8 @@ class WavefrontPathIntegrator {
     EscapedRayQueue *escapedRayQueue = nullptr;
 
     HitAreaLightQueue *hitAreaLightQueue = nullptr;
+    HitAreaMaterialLightQueue *hitAreaMaterialLightQueue = nullptr;
+    bool useBSDFDependentHitAreaQueue = false;
 
     MaterialEvalQueue *basicEvalMaterialQueue = nullptr;
     MaterialEvalQueue *universalEvalMaterialQueue = nullptr;

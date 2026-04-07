@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -7,6 +8,7 @@
 #include <pbrt/util/check.h>
 #include <pbrt/util/print.h>
 #include <pbrt/util/vecmath.h>
+#include <pbrt/util/sampling.h>
 
 #include <cmath>
 #include <iostream>
@@ -377,5 +379,96 @@ PBRT_CPU_GPU Point2f WrapEqualAreaSquare(Point2f uv) {
     }
     return uv;
 }
+
+PBRT_CPU_GPU uint64_t EncodeExtendedMorton5(Point3f position, Vector3f direction) {
+    constexpr int positionBits = 18;
+    constexpr int normalBits = 5;
+
+    uint32_t qPos[3] = {
+        QuantizeUnitToBitRange(position[0], positionBits),
+        QuantizeUnitToBitRange(position[1], positionBits),
+        QuantizeUnitToBitRange(position[2], positionBits - 1)};
+
+    Point2f sphereSample = InvertUniformDiskConcentricSample({direction.x, direction.y});
+    if (direction.z < 0) {
+        sphereSample.x = 2 - sphereSample.x;
+    }
+    sphereSample.x *= 0.5;
+
+    uint32_t uQuant = QuantizeUnitToBitRange(sphereSample.x, normalBits + 1);
+    uint32_t vQuant = QuantizeUnitToBitRange(sphereSample.y, normalBits);
+
+    uint32_t topCode = 0;
+
+    int pBit = positionBits - 1;
+    int uBit = normalBits;
+    int vBit = uBit - 1;
+    topCode = (topCode << 1) | ((qPos[0] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[1] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[2] >> (pBit - 1)) & 1u);
+    topCode = (topCode << 1) | ((uQuant >> uBit) & 1u);
+    topCode = (topCode << 1) | ((vQuant >> vBit) & 1u);
+
+    --pBit;
+    --uBit;
+    --vBit;
+    topCode = (topCode << 1) | ((qPos[0] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[1] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[2] >> (pBit - 1)) & 1u);
+    topCode = (topCode << 1) | ((uQuant >> uBit) & 1u);
+    topCode = (topCode << 1) | ((vQuant >> vBit) & 1u);
+
+    --pBit;
+    --uBit;
+    --vBit;
+    topCode = (topCode << 1) | ((qPos[0] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[1] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[2] >> (pBit - 1)) & 1u);
+    topCode = (topCode << 1) | ((uQuant >> uBit) & 1u);
+    topCode = (topCode << 1) | ((vQuant >> vBit) & 1u);
+
+    --pBit;
+    --uBit;
+    --vBit;
+    topCode = (topCode << 1) | ((qPos[0] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[1] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[2] >> (pBit - 1)) & 1u);
+    topCode = (topCode << 1) | ((uQuant >> uBit) & 1u);
+    topCode = (topCode << 1) | ((vQuant >> vBit) & 1u);
+
+    --pBit;
+    --uBit;
+    --vBit;
+    topCode = (topCode << 1) | ((qPos[0] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[1] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[2] >> (pBit - 1)) & 1u);
+    topCode = (topCode << 1) | ((uQuant >> uBit) & 1u);
+    topCode = (topCode << 1) | ((vQuant >> vBit) & 1u);
+
+    --pBit;
+    topCode = (topCode << 1) | ((qPos[0] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[1] >> pBit) & 1u);
+    topCode = (topCode << 1) | (uQuant & 1u);
+    
+    --pBit;
+    topCode = (topCode << 1) | ((qPos[0] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[1] >> pBit) & 1u);
+    topCode = (topCode << 1) | ((qPos[2] >> pBit) & 1u);
+    
+    uint64_t mortonCode = topCode;
+    --pBit;
+    mortonCode = (mortonCode << 1) | ((qPos[0] >> pBit) & 1u);
+    mortonCode = (mortonCode << 1) | ((qPos[1] >> pBit) & 1u);
+    mortonCode = (mortonCode << 1) | ((qPos[2] >> pBit) & 1u);
+
+    mortonCode <<= 30;
+
+    constexpr uint32_t bottomMask = (1 << 10) - 1;
+    uint32_t bottomCode = EncodeMorton3(qPos[2] & bottomMask, qPos[1] & bottomMask, qPos[0] & bottomMask);
+    mortonCode |= bottomCode;
+
+    return mortonCode;
+}
+
 
 }  // namespace pbrt

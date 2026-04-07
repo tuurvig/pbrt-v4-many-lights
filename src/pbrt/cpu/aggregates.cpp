@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -404,6 +405,9 @@ BVHBuildNode *BVHAggregate::buildHLBVH(Allocator alloc,
         mortonPrims[i].primitiveIndex = bvhPrimitives[i].primitiveIndex;
         Vector3f centroidOffset = bounds.Offset(bvhPrimitives[i].Centroid());
         Vector3f offset = centroidOffset * mortonScale;
+        DCHECK_GE(offset.x, 0);
+        DCHECK_GE(offset.y, 0);
+        DCHECK_GE(offset.z, 0);
         mortonPrims[i].mortonCode = EncodeMorton3(offset.x, offset.y, offset.z);
     });
 

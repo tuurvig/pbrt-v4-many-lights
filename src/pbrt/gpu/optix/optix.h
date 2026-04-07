@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -56,12 +57,14 @@ struct RayIntersectParameters {
     RayQueue *nextRayQueue;
     EscapedRayQueue *escapedRayQueue;
     HitAreaLightQueue *hitAreaLightQueue;
+    HitAreaMaterialLightQueue *hitAreaMaterialLightQueue;
     MaterialEvalQueue *basicEvalMaterialQueue, *universalEvalMaterialQueue;
     MediumSampleQueue *mediumSampleQueue;
 
     // shadow rays
     ShadowRayQueue *shadowRayQueue;
     SOA<PixelSampleState> pixelSampleState;
+    LightSampler lightSampler;
 
     // Subsurface scattering...
     SubsurfaceScatterQueue *subsurfaceScatterQueue;

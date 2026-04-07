@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -30,26 +31,38 @@ inline PBRT_CPU_GPU void EnqueueWorkAfterMiss(RayWorkItem r,
 
 inline PBRT_CPU_GPU void RecordShadowRayResult(const ShadowRayWorkItem w,
                                                SOA<PixelSampleState> *pixelSampleState,
-                                               bool foundIntersection) {
-    if (foundIntersection) {
-        PBRT_DBG("Shadow ray was occluded\n");
-        return;
-    }
-    SampledSpectrum Ld = w.Ld / (w.r_u + w.r_l).Average();
-    PBRT_DBG("Unoccluded shadow ray. Final Ld %f %f %f %f "
+                                               bool foundIntersection,
+                                               const LightSampler &lightSampler) {
+    const bool isUnoccluded = !foundIntersection;
+    if (isUnoccluded) {
+        SampledSpectrum Ld = w.Ld / (w.r_u + w.r_l).Average();
+        PBRT_DBG("Unoccluded shadow ray. Final Ld %f %f %f %f "
              "(sr.Ld %f %f %f %f r_u %f %f %f %f r_l %f %f %f %f)\n",
              Ld[0], Ld[1], Ld[2], Ld[3], w.Ld[0], w.Ld[1], w.Ld[2], w.Ld[3], w.r_u[0],
              w.r_u[1], w.r_u[2], w.r_u[3], w.r_l[0], w.r_l[1], w.r_l[2], w.r_l[3]);
-
-    SampledSpectrum Lpixel = pixelSampleState->L[w.pixelIndex];
-    pixelSampleState->L[w.pixelIndex] = Lpixel + Ld;
+        
+        pixelSampleState->L.AtomicAdd(w.pixelIndex, Ld);
+    } else {
+        PBRT_DBG("Shadow ray was occluded\n");
+    }
+    
+    if (const LTCLightSampler *ltc = lightSampler.CastOrNullptr<LTCLightSampler>()) {
+        // Feed online LTC update with a scalar estimate of this sample's contribution.
+        Float contribution = 0;
+        if (isUnoccluded) {
+            contribution = w.Ld.MaxComponentValue() / (w.r_u + w.r_l / w.pdfCancellationFactor).Average();
+        }
+        ltc->AccumulateContribution(contribution, w.lightSamplerHint);
+    }
+        
 }
 
 inline PBRT_CPU_GPU void EnqueueWorkAfterIntersection(
     RayWorkItem r, Medium rayMedium, float tMax, SurfaceInteraction intr,
     MediumSampleQueue *mediumSampleQueue, RayQueue *nextRayQueue,
-    HitAreaLightQueue *hitAreaLightQueue, MaterialEvalQueue *basicEvalMaterialQueue,
-    MaterialEvalQueue *universalEvalMaterialQueue) {
+    HitAreaLightQueue *hitAreaLightQueue,
+    HitAreaMaterialLightQueue *hitAreaMaterialLightQueue,
+    MaterialEvalQueue *basicEvalMaterialQueue, MaterialEvalQueue *universalEvalMaterialQueue) {
     MediumInterface mediumInterface =
         intr.mediumInterface ? *intr.mediumInterface : MediumInterface(rayMedium);
 
@@ -65,6 +78,7 @@ inline PBRT_CPU_GPU void EnqueueWorkAfterIntersection(
                                                      r.r_l,
                                                      r.pixelIndex,
                                                      r.prevIntrCtx,
+                                                     r.prevMaterialCtx,
                                                      r.specularBounce,
                                                      r.anyNonSpecularBounces,
                                                      r.etaScale,
@@ -100,19 +114,34 @@ inline PBRT_CPU_GPU void EnqueueWorkAfterIntersection(
         PBRT_DBG("Enqueuing into medium transition queue: pixel index %d \n",
                  r.pixelIndex);
         Ray newRay = intr.SpawnRay(r.ray.d);
-        nextRayQueue->PushIndirectRay(newRay, r.depth, r.prevIntrCtx, r.beta, r.r_u,
-                                      r.r_l, r.lambda, r.etaScale, r.specularBounce,
-                                      r.anyNonSpecularBounces, r.pixelIndex);
+        nextRayQueue->PushIndirectRay(newRay, r.depth, r.prevIntrCtx, r.prevMaterialCtx,
+                                      r.beta, r.r_u, r.r_l, r.lambda, r.etaScale,
+                                      r.specularBounce, r.anyNonSpecularBounces,
+                                      r.pixelIndex);
         return;
     }
 
     if (intr.areaLight) {
         PBRT_DBG("Ray hit an area light: adding to hitAreaLightQueue pixel index %d\n",
                  r.pixelIndex);
-        // TODO: intr.wo == -ray.d?
-        hitAreaLightQueue->Push(HitAreaLightWorkItem{
-            intr.areaLight, intr.p(), intr.n, intr.uv, intr.wo, r.lambda, r.depth, r.beta,
-            r.r_u, r.r_l, r.prevIntrCtx, (int)r.specularBounce, r.pixelIndex});
+        if (hitAreaMaterialLightQueue && r.prevMaterialCtx.material) {
+            auto enqueueHitAreaWorkItem = [=](auto ptr) {
+                using ConcreteMaterial =
+                    typename std::remove_reference_t<decltype(*ptr)>;
+                hitAreaMaterialLightQueue->Push(
+                    HitAreaMaterialLightWorkItem<ConcreteMaterial>{
+                        ptr, intr.areaLight, intr.p(), intr.n, intr.uv, intr.wo, r.lambda,
+                        r.depth, r.beta, r.r_u, r.r_l, r.prevIntrCtx, r.prevMaterialCtx,
+                        (int)r.specularBounce, r.pixelIndex});
+            };
+            r.prevMaterialCtx.material.Dispatch(enqueueHitAreaWorkItem);
+        } else if (hitAreaLightQueue) {
+            // TODO: intr.wo == -ray.d?
+            hitAreaLightQueue->Push(HitAreaLightWorkItem{
+                intr.areaLight, intr.p(), intr.n, intr.uv, intr.wo, r.lambda, r.depth,
+                r.beta, r.r_u, r.r_l, r.prevIntrCtx, (int)r.specularBounce,
+                r.pixelIndex});
+        }
     }
 
     FloatTexture displacement = material.GetDisplacement();
@@ -164,7 +193,8 @@ struct TransmittanceTraceResult {
 template <typename T, typename S>
 inline PBRT_CPU_GPU void TraceTransmittance(ShadowRayWorkItem sr,
                                             SOA<PixelSampleState> *pixelSampleState,
-                                            T trace, S spawnTo) {
+                                            T trace, S spawnTo,
+                                            const LightSampler &lightSampler) {
     SampledWavelengths lambda = sr.lambda;
 
     SampledSpectrum Ld = sr.Ld;
@@ -260,16 +290,31 @@ inline PBRT_CPU_GPU void TraceTransmittance(ShadowRayWorkItem sr,
              T_ray[2] / (sr.r_u * r_u + sr.r_l * r_l).Average(),
              T_ray[3] / (sr.r_u * r_u + sr.r_l * r_l).Average());
 
-    if (T_ray) {
-        // FIXME/reconcile: this takes r_l as input while
-        // e.g. VolPathIntegrator::SampleLd() does not...
-        Ld *= T_ray / (sr.r_u * r_u + sr.r_l * r_l).Average();
+    
+    // FIXME/reconcile: this takes r_l as input while
+    // e.g. VolPathIntegrator::SampleLd() does not...
+    r_u *= sr.r_u;
+    r_l *= sr.r_l;
+
+    const bool isUnoccluded = T_ray.IsNonZero();
+    SampledSpectrum unweightedFinalLd = Ld * T_ray;
+    if (isUnoccluded) {
+        
+        SampledSpectrum finalLd = unweightedFinalLd / (r_u + r_l).Average();
 
         PBRT_DBG("Setting final Ld for shadow ray pixel index %d = as %f %f %f %f\n",
                  sr.pixelIndex, Ld[0], Ld[1], Ld[2], Ld[3]);
 
-        SampledSpectrum Lpixel = pixelSampleState->L[sr.pixelIndex];
-        pixelSampleState->L[sr.pixelIndex] = Lpixel + Ld;
+        pixelSampleState->L.AtomicAdd(sr.pixelIndex, finalLd);
+    }
+
+    if (const LTCLightSampler *ltc = lightSampler.CastOrNullptr<LTCLightSampler>()) {
+        // Feed online LTC update with a scalar estimate of this sample's contribution.
+        Float contribution = 0;
+        if (isUnoccluded) {
+            contribution = unweightedFinalLd.MaxComponentValue() / (r_u + r_l / sr.pdfCancellationFactor).Average();
+        }
+        ltc->AccumulateContribution(contribution, sr.lightSamplerHint);
     }
 }
 

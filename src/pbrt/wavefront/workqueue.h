@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -6,7 +7,6 @@
 #define PBRT_WAVEFRONT_WORKQUEUE_H
 
 #include <pbrt/pbrt.h>
-
 #include <pbrt/options.h>
 #ifdef PBRT_BUILD_GPU_RENDERER
 #include <pbrt/gpu/util.h>
@@ -17,25 +17,13 @@
 #include <atomic>
 #include <utility>
 
-#ifdef __CUDACC__
-
-#ifdef PBRT_IS_WINDOWS
-#if (__CUDA_ARCH__ < 700)
-#define PBRT_USE_LEGACY_CUDA_ATOMICS
-#endif
-#else
-#if (__CUDA_ARCH__ < 600)
-#define PBRT_USE_LEGACY_CUDA_ATOMICS
-#endif
-#endif  // PBRT_IS_WINDOWS
-
-#ifndef PBRT_USE_LEGACY_CUDA_ATOMICS
-#include <cuda/atomic>
-#endif
-
-#endif  // __CUDACC__
-
 namespace pbrt {
+
+#ifndef PBRT_BUILD_GPU_RENDERER
+enum ProfilerKernelGroup {
+    WAVEFRONT, HPLOC, END
+};
+#endif
 
 // WorkQueue Definition
 template <typename WorkItem>
@@ -46,37 +34,18 @@ class WorkQueue : public SOA<WorkItem> {
     WorkQueue(int n, Allocator alloc) : SOA<WorkItem>(n, alloc) {}
     WorkQueue &operator=(const WorkQueue &w) {
         SOA<WorkItem>::operator=(w);
-#if defined(PBRT_IS_GPU_CODE) && defined(PBRT_USE_LEGACY_CUDA_ATOMICS)
-        size = w.size;
-#else
-        size.store(w.size.load());
-#endif
+        size.Store(w.size.Load());
         return *this;
     }
 
     PBRT_CPU_GPU
     int Size() const {
-#ifdef PBRT_IS_GPU_CODE
-#ifdef PBRT_USE_LEGACY_CUDA_ATOMICS
-        return size;
-#else
-        return size.load(cuda::std::memory_order_relaxed);
-#endif
-#else
-        return size.load(std::memory_order_relaxed);
-#endif
+        return size.Load();
     }
+
     PBRT_CPU_GPU
     void Reset() {
-#ifdef PBRT_IS_GPU_CODE
-#ifdef PBRT_USE_LEGACY_CUDA_ATOMICS
-        size = 0;
-#else
-        size.store(0, cuda::std::memory_order_relaxed);
-#endif
-#else
-        size.store(0, std::memory_order_relaxed);
-#endif
+        size.Store(0);
     }
 
     PBRT_CPU_GPU
@@ -86,42 +55,36 @@ class WorkQueue : public SOA<WorkItem> {
         return index;
     }
 
+    PBRT_CPU_GPU
+    int ReserveEntries(int count) {
+        if (count < 1) {
+            return -1;
+        }
+
+        return size.FetchAdd(count);
+    }
+
   protected:
     // WorkQueue Protected Methods
     PBRT_CPU_GPU
     int AllocateEntry() {
-#ifdef PBRT_IS_GPU_CODE
-#ifdef PBRT_USE_LEGACY_CUDA_ATOMICS
-        return atomicAdd(&size, 1);
-#else
-        return size.fetch_add(1, cuda::std::memory_order_relaxed);
-#endif
-#else
-        return size.fetch_add(1, std::memory_order_relaxed);
-#endif
+        return size.FetchAdd(1);
     }
 
   private:
     // WorkQueue Private Members
-#ifdef PBRT_IS_GPU_CODE
-#ifdef PBRT_USE_LEGACY_CUDA_ATOMICS
-    int size = 0;
-#else
-    cuda::atomic<int, cuda::thread_scope_device> size{0};
-#endif
-#else
-    std::atomic<int> size{0};
-#endif  // PBRT_IS_GPU_CODE
+    AtomicInt<int> size;
 };
 
 // WorkQueue Inline Functions
 template <typename F, typename WorkItem>
-void ForAllQueued(const char *desc, const WorkQueue<WorkItem> *q, int maxQueued,
+void ForAllQueued(const char *desc, ProfilerKernelGroup group, const WorkQueue<WorkItem> *q, int maxQueued,
                   F &&func) {
     if (Options->useGPU) {
         // Launch GPU threads to process _q_ using _func_
 #ifdef PBRT_BUILD_GPU_RENDERER
-        GPUParallelFor(desc, maxQueued, [=] PBRT_GPU(int index) mutable {
+        GPUParallelFor(desc, group, maxQueued,
+                       [=] PBRT_GPU(int index) mutable {
             if (index >= q->Size())
                 return;
             func((*q)[index]);

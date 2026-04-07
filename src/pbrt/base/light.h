@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -29,6 +30,7 @@ class UniformInfiniteLight;
 class ImageInfiniteLight;
 class PortalImageInfiniteLight;
 class SpotLight;
+class CosineSpotLight;
 
 class LightSampleContext;
 class LightBounds;
@@ -40,7 +42,7 @@ struct LightLeSample;
 class Light : public TaggedPointer<  // Light Source Types
                   PointLight, DistantLight, ProjectionLight, GoniometricLight, SpotLight,
                   DiffuseAreaLight, UniformInfiniteLight, ImageInfiniteLight,
-                  PortalImageInfiniteLight
+                  PortalImageInfiniteLight, CosineSpotLight
 
                   > {
   public:

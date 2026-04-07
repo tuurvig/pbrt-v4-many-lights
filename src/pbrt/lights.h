@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -86,11 +87,11 @@ class LightSampleContext {
     LightSampleContext() = default;
     PBRT_CPU_GPU
     LightSampleContext(const SurfaceInteraction &si)
-        : pi(si.pi), n(si.n), ns(si.shading.n) {}
+        : pi(si.pi), n(si.n), ns(si.shading.n), wo(si.wo) {}
     PBRT_CPU_GPU
-    LightSampleContext(const Interaction &intr) : pi(intr.pi) {}
+    LightSampleContext(const Interaction &intr) : pi(intr.pi), wo(intr.wo) {}
     PBRT_CPU_GPU
-    LightSampleContext(Point3fi pi, Normal3f n, Normal3f ns) : pi(pi), n(n), ns(ns) {}
+    LightSampleContext(Point3fi pi, Normal3f n, Normal3f ns, Vector3f wo) : pi(pi), n(n), ns(ns), wo(wo) {}
 
     PBRT_CPU_GPU
     Point3f p() const { return Point3f(pi); }
@@ -98,6 +99,7 @@ class LightSampleContext {
     // LightSampleContext Public Members
     Point3fi pi;
     Normal3f n, ns;
+    Vector3f wo;
 };
 
 // LightBounds Definition
@@ -105,11 +107,17 @@ class LightBounds {
   public:
     // LightBounds Public Methods
     LightBounds() = default;
-    LightBounds(const Bounds3f &b, Vector3f w, Float phi, Float cosTheta_o,
+    using BoundsType = Bounds3f;
+
+    PBRT_CPU_GPU
+    LightBounds(const Bounds3f &b, Vector3f w, Float phi, Float I, Float cosTheta_o,
                 Float cosTheta_e, bool twoSided);
 
     PBRT_CPU_GPU
-    Point3f Centroid() const { return (bounds.pMin + bounds.pMax) / 2; }
+    inline Point3f Centroid() const { return (bounds.pMin + bounds.pMax) / 2; }
+
+    PBRT_CPU_GPU
+    inline BoundsType Bounds() const { return bounds; }
 
     PBRT_CPU_GPU
     Float Importance(Point3f p, Normal3f n) const;
@@ -119,22 +127,25 @@ class LightBounds {
     // LightBounds Public Members
     Bounds3f bounds;
     Float phi = 0;
+    Float I = 0;
     Vector3f w;
     Float cosTheta_o, cosTheta_e;
     bool twoSided;
 };
 
 // LightBounds Inline Methods
-inline LightBounds::LightBounds(const Bounds3f &b, Vector3f w, Float phi,
+inline PBRT_CPU_GPU
+LightBounds::LightBounds(const Bounds3f &b, Vector3f w, Float phi, Float I,
                                 Float cosTheta_o, Float cosTheta_e, bool twoSided)
     : bounds(b),
       w(Normalize(w)),
       phi(phi),
+      I(I),
       cosTheta_o(cosTheta_o),
       cosTheta_e(cosTheta_e),
       twoSided(twoSided) {}
 
-inline LightBounds Union(const LightBounds &a, const LightBounds &b) {
+inline PBRT_CPU_GPU LightBounds Union(const LightBounds &a, const LightBounds &b) {
     // If one _LightBounds_ has zero power, return the other
     if (a.phi == 0)
         return b;
@@ -148,8 +159,79 @@ inline LightBounds Union(const LightBounds &a, const LightBounds &b) {
     Float cosTheta_e = std::min(a.cosTheta_e, b.cosTheta_e);
 
     // Return final _LightBounds_ union
-    return LightBounds(Union(a.bounds, b.bounds), cone.w, a.phi + b.phi, cosTheta_o,
+    return LightBounds(Union(a.bounds, b.bounds), cone.w, a.phi + b.phi, a.I + b.I, cosTheta_o,
                        cosTheta_e, a.twoSided | b.twoSided);
+}
+
+class SphericalLightBounds {
+  public:
+      SphericalLightBounds() = default;
+      using BoundsType = SphericalLightBounds;
+
+      PBRT_CPU_GPU
+      SphericalLightBounds(const Bounds3f &b, Float phi) : 
+          center(b.Centroid()),
+          radius(Distance(b.pMax, b.pMin) * Float(0.5)),
+          phi(phi) {}
+
+      PBRT_CPU_GPU
+      SphericalLightBounds(const Point3f &c, Float r, Float phi) : 
+          center(c), radius(r), phi(phi) {}
+
+      PBRT_CPU_GPU
+      inline Point3f Centroid() const { return center; }
+
+      PBRT_CPU_GPU
+      inline Float Radius() const { return radius; }
+
+      PBRT_CPU_GPU Vector3f Diagonal() const {
+          const Point3f pMin(center.x - radius, center.y - radius, center.z - radius);
+          const Point3f pMax(center.x + radius, center.y + radius, center.z + radius);
+          return pMax - pMin;
+      } 
+      
+      PBRT_CPU_GPU
+      inline Float Phi() const { return phi; }
+
+      PBRT_CPU_GPU
+      inline BoundsType Bounds() const {
+          return *this;
+      };
+
+      PBRT_CPU_GPU
+      Float Importance(Point3f p, Normal3f n) const;
+      
+      PBRT_CPU_GPU
+      Float SplitProbability(Point3f p, Float gamma) const;
+
+      PBRT_CPU_GPU
+      inline Float SurfaceArea() const {
+          return 4 * Pi * radius * radius;
+      }
+
+      std::string ToString() const;
+  private:
+    Point3f center;
+    Float radius;
+    Float phi = 0; // Total Energy
+};
+
+inline PBRT_CPU_GPU SphericalLightBounds Union(const SphericalLightBounds &a, const SphericalLightBounds &b) {
+    if (a.Phi() == 0) return b;
+    if (b.Phi() == 0) return a;
+
+    const Float dist = Distance(a.Centroid(), b.Centroid());
+
+    // If one sphere is inside the other
+    if (dist + b.Radius() <= a.Radius()) return SphericalLightBounds(a.Centroid(), a.Radius(), a.Phi() + b.Phi());
+    if (dist + a.Radius() <= b.Radius()) return SphericalLightBounds(b.Centroid(), b.Radius(), a.Phi() + b.Phi());
+
+    // Compute new enclosing sphere
+    const Float newRadius = (dist + a.Radius() + b.Radius()) * Float(0.5);
+    const Float k = (newRadius - a.Radius()) / dist;
+    const Point3f newCenter = a.Centroid() + (b.Centroid() - a.Centroid()) * k;
+
+    return SphericalLightBounds(newCenter, newRadius, a.Phi() + b.Phi());
 }
 
 // LightBase Definition
@@ -786,6 +868,68 @@ class SpotLight : public LightBase {
     // SpotLight Private Members
     const DenselySampledSpectrum *Iemit;
     Float scale, cosFalloffStart, cosFalloffEnd;
+};
+
+// CosineSpotLight Definition
+class CosineSpotLight : public LightBase {
+  public:
+    // CosineSpotLight Public Methods
+    CosineSpotLight(const Transform &renderFromLight, const MediumInterface &m,
+                    Spectrum I, Float scale);
+
+    static CosineSpotLight *Create(const Transform &renderFromLight, Medium medium,
+                                   const ParameterDictionary &parameters,
+                                   const RGBColorSpace *colorSpace, const FileLoc *loc,
+                                   Allocator alloc);
+
+    void Preprocess(const Bounds3f &sceneBounds) {}
+
+    PBRT_CPU_GPU
+    SampledSpectrum I(Vector3f w, SampledWavelengths) const;
+
+    SampledSpectrum Phi(SampledWavelengths lambda) const;
+
+    PBRT_CPU_GPU
+    Float PDF_Li(LightSampleContext, Vector3f, bool allowIncompletePDF) const;
+
+    PBRT_CPU_GPU
+    pstd::optional<LightLeSample> SampleLe(Point2f u1, Point2f u2,
+                                           SampledWavelengths &lambda, Float time) const;
+    PBRT_CPU_GPU
+    void PDF_Le(const Ray &, Float *pdfPos, Float *pdfDir) const;
+
+    PBRT_CPU_GPU
+    void PDF_Le(const Interaction &, Vector3f w, Float *pdfPos, Float *pdfDir) const {
+        LOG_FATAL("Shouldn't be called for non-area lights");
+    }
+
+    pstd::optional<LightBounds> Bounds() const;
+
+    std::string ToString() const;
+
+    PBRT_CPU_GPU
+    pstd::optional<LightLiSample> SampleLi(LightSampleContext ctx, Point2f u,
+                                           SampledWavelengths lambda,
+                                           bool allowIncompletePDF) const {
+        Point3f p = renderFromLight(Point3f(0, 0, 0));
+        Vector3f wi = Normalize(p - ctx.p());
+
+        // Transform incident direction to light space
+        Vector3f wLight = Normalize(renderFromLight.ApplyInverse(-wi));
+        
+        // Intensity includes the CosTheta factor internally in I()
+        SampledSpectrum Li = I(wLight, lambda) / DistanceSquared(p, ctx.p());
+
+        if (!Li)
+            return {};
+            
+        return LightLiSample(Li, wi, 1, Interaction(p, &mediumInterface));
+    }
+
+  private:
+    // CosineSpotLight Private Members
+    const DenselySampledSpectrum *Iemit;
+    Float scale;
 };
 
 PBRT_CPU_GPU inline pstd::optional<LightLiSample> Light::SampleLi(LightSampleContext ctx, Point2f u,

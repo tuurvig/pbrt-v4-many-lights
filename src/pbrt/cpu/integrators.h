@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -16,6 +17,7 @@
 #include <pbrt/interaction.h>
 #include <pbrt/lights.h>
 #include <pbrt/lightsamplers.h>
+#include <pbrt/util/shadingpoints.h>
 #include <pbrt/util/lowdiscrepancy.h>
 #include <pbrt/util/print.h>
 #include <pbrt/util/pstd.h>
@@ -51,6 +53,10 @@ class Integrator {
 
     bool Unoccluded(const Interaction &p0, const Interaction &p1) const {
         return !IntersectP(p0.SpawnRayTo(p1), 1 - ShadowEpsilon);
+    }
+
+    bool Unoccluded(const Interaction &p0, const Point3fi& pi, const Normal3f& n) const {
+        return !IntersectP(p0.SpawnRayTo(pi, n), 1 - ShadowEpsilon);
     }
 
     SampledSpectrum Tr(const Interaction &p0, const Interaction &p1,
@@ -90,6 +96,9 @@ class ImageTileIntegrator : public Integrator {
                                      ScratchBuffer &scratchBuffer) = 0;
 
   protected:
+    virtual void OnRenderWaveStart(int waveIndex, const Bounds2i & pixelBounds) {}
+    virtual void OnRenderWaveDone(int waveIndex) {}
+
     // ImageTileIntegrator Protected Members
     Camera camera;
     Sampler samplerPrototype;
@@ -106,7 +115,7 @@ class RayIntegrator : public ImageTileIntegrator {
     void EvaluatePixelSample(Point2i pPixel, int sampleIndex, Sampler sampler,
                              ScratchBuffer &scratchBuffer) final;
 
-    virtual SampledSpectrum Li(RayDifferential ray, SampledWavelengths &lambda,
+    virtual SampledSpectrum Li(RayDifferential ray, uint32_t seed, SampledWavelengths &lambda,
                                Sampler sampler, ScratchBuffer &scratchBuffer,
                                VisibleSurface *visibleSurface) const = 0;
 };
@@ -125,9 +134,8 @@ class RandomWalkIntegrator : public RayIntegrator {
 
     std::string ToString() const;
 
-    SampledSpectrum Li(RayDifferential ray, SampledWavelengths &lambda, Sampler sampler,
-                       ScratchBuffer &scratchBuffer,
-                       VisibleSurface *visibleSurface) const {
+    SampledSpectrum Li(RayDifferential ray, uint32_t seed, SampledWavelengths &lambda, Sampler sampler,
+                       ScratchBuffer &scratchBuffer, VisibleSurface *visibleSurface) const {
         return LiRandomWalk(ray, lambda, sampler, scratchBuffer, 0);
     }
 
@@ -186,7 +194,7 @@ class SimplePathIntegrator : public RayIntegrator {
     SimplePathIntegrator(int maxDepth, bool sampleLights, bool sampleBSDF, Camera camera,
                          Sampler sampler, Primitive aggregate, std::vector<Light> lights);
 
-    SampledSpectrum Li(RayDifferential ray, SampledWavelengths &lambda, Sampler sampler,
+    SampledSpectrum Li(RayDifferential ray, uint32_t seed, SampledWavelengths &lambda, Sampler sampler,
                        ScratchBuffer &scratchBuffer,
                        VisibleSurface *visibleSurface) const;
 
@@ -212,9 +220,8 @@ class PathIntegrator : public RayIntegrator {
                    const std::string &lightSampleStrategy = "bvh",
                    bool regularize = false);
 
-    SampledSpectrum Li(RayDifferential ray, SampledWavelengths &lambda, Sampler sampler,
-                       ScratchBuffer &scratchBuffer,
-                       VisibleSurface *visibleSurface) const;
+    SampledSpectrum Li(RayDifferential ray, uint32_t seed, SampledWavelengths &lambda, Sampler sampler,
+                       ScratchBuffer &scratchBuffer, VisibleSurface *visibleSurface) const;
 
     static std::unique_ptr<PathIntegrator> Create(const ParameterDictionary &parameters,
                                                   Camera camera, Sampler sampler,
@@ -225,14 +232,26 @@ class PathIntegrator : public RayIntegrator {
     std::string ToString() const;
 
   private:
+    /// @brief Per-wave hook performed before a wave is started.
+    virtual void OnRenderWaveStart(int waveIndex, const Bounds2i &pixelBounds) override;
+    /// @brief Per-wave hook performed after a wave has completed.
+    virtual void OnRenderWaveDone(int waveIndex) override;
+
     // PathIntegrator Private Methods
-    SampledSpectrum SampleLd(const SurfaceInteraction &intr, const BSDF *bsdf,
+    template <int NShadowRays>
+    SampledSpectrum SampleLd(const SurfaceInteraction &intr, uint32_t seed, const BSDF *bsdf,
+                             SampledWavelengths &lambda, Sampler sampler) const;
+
+    inline SampledSpectrum SampleLd(const SurfaceInteraction &intr, uint32_t seed, const BSDF *bsdf,
                              SampledWavelengths &lambda, Sampler sampler) const;
 
     // PathIntegrator Private Members
     int maxDepth;
+    ERequiresShadowRays requiredShadowRays;
     LightSampler lightSampler;
     bool regularize;
+    bool isOnlineLightSampler;
+    std::unique_ptr<ShadingPointCollector> firstIterationShadingPoints;
 };
 
 // SimpleVolPathIntegrator Definition
@@ -242,7 +261,7 @@ class SimpleVolPathIntegrator : public RayIntegrator {
     SimpleVolPathIntegrator(int maxDepth, Camera camera, Sampler sampler,
                             Primitive aggregate, std::vector<Light> lights);
 
-    SampledSpectrum Li(RayDifferential ray, SampledWavelengths &lambda, Sampler sampler,
+    SampledSpectrum Li(RayDifferential ray, uint32_t seed, SampledWavelengths &lambda, Sampler sampler,
                        ScratchBuffer &scratchBuffer,
                        VisibleSurface *visibleSurface) const;
 
@@ -266,13 +285,17 @@ class VolPathIntegrator : public RayIntegrator {
                       const std::string &lightSampleStrategy = "bvh",
                       bool regularize = false)
         : RayIntegrator(camera, sampler, aggregate, lights),
-          maxDepth(maxDepth),
-          lightSampler(LightSampler::Create(lightSampleStrategy, lights, Allocator())),
-          regularize(regularize) {}
+          maxDepth(maxDepth), requiredShadowRays(E_DEFAULT_SHADOW_RAYS),
+          lightSampler(LightSampler::Create(requiredShadowRays, lightSampleStrategy, lights, Options->discretizeAreaLights > 0, Allocator())),
+          regularize(regularize),
+          isOnlineLightSampler(false) {
+        // Register the integrator is going to use an online light sampler, that requires
+        // some form of a feedback loop after each wave of samples.
+        isOnlineLightSampler = lightSampler.Is<LTCLightSampler>();
+    }
 
-    SampledSpectrum Li(RayDifferential ray, SampledWavelengths &lambda, Sampler sampler,
-                       ScratchBuffer &scratchBuffer,
-                       VisibleSurface *visibleSurface) const;
+    SampledSpectrum Li(RayDifferential ray, uint32_t seed, SampledWavelengths &lambda, Sampler sampler,
+                       ScratchBuffer &scratchBuffer, VisibleSurface *visibleSurface) const;
 
     static std::unique_ptr<VolPathIntegrator> Create(
         const ParameterDictionary &parameters, Camera camera, Sampler sampler,
@@ -281,15 +304,28 @@ class VolPathIntegrator : public RayIntegrator {
     std::string ToString() const;
 
   private:
+    /// @brief Per-wave hook performed before a wave is started.
+    virtual void OnRenderWaveStart(int waveIndex, const Bounds2i &pixelBounds) override;
+    /// @brief Per-wave hook performed after a wave has ended.
+    virtual void OnRenderWaveDone(int waveIndex) override;
+
     // VolPathIntegrator Private Methods
-    SampledSpectrum SampleLd(const Interaction &intr, const BSDF *bsdf,
+    inline SampledSpectrum SampleLd(const Interaction &intr, uint32_t seed, const BSDF *bsdf,
+                             SampledWavelengths &lambda, Sampler sampler,
+                             SampledSpectrum beta, SampledSpectrum inv_w_u) const;
+
+    template <int NShadowRays>
+    SampledSpectrum SampleLd(const Interaction &intr, uint32_t seed, const BSDF *bsdf,
                              SampledWavelengths &lambda, Sampler sampler,
                              SampledSpectrum beta, SampledSpectrum inv_w_u) const;
 
     // VolPathIntegrator Private Members
     int maxDepth;
+    ERequiresShadowRays requiredShadowRays;
     LightSampler lightSampler;
     bool regularize;
+    bool isOnlineLightSampler;
+    std::unique_ptr<ShadingPointCollector> firstIterationShadingPoints;
 };
 
 // AOIntegrator Definition
@@ -299,9 +335,8 @@ class AOIntegrator : public RayIntegrator {
     AOIntegrator(bool cosSample, Float maxDist, Camera camera, Sampler sampler,
                  Primitive aggregate, std::vector<Light> lights, Spectrum illuminant);
 
-    SampledSpectrum Li(RayDifferential ray, SampledWavelengths &lambda, Sampler sampler,
-                       ScratchBuffer &scratchBuffer,
-                       VisibleSurface *visibleSurface) const;
+    SampledSpectrum Li(RayDifferential ray, uint32_t seed, SampledWavelengths &lambda, Sampler sampler,
+                       ScratchBuffer &scratchBuffer, VisibleSurface *visibleSurface) const;
 
     static std::unique_ptr<AOIntegrator> Create(const ParameterDictionary &parameters,
                                                 Spectrum illuminant, Camera camera,
@@ -355,7 +390,7 @@ class BDPTIntegrator : public RayIntegrator {
           visualizeStrategies(visualizeStrategies),
           visualizeWeights(visualizeWeights) {}
 
-    SampledSpectrum Li(RayDifferential ray, SampledWavelengths &lambda, Sampler sampler,
+    SampledSpectrum Li(RayDifferential ray, uint32_t seed, SampledWavelengths &lambda, Sampler sampler,
                        ScratchBuffer &scratchBuffer,
                        VisibleSurface *visibleSurface) const;
 
@@ -463,7 +498,7 @@ class SPPMIntegrator : public Integrator {
 
   private:
     // SPPMIntegrator Private Methods
-    SampledSpectrum SampleLd(const SurfaceInteraction &intr, const BSDF &bsdf,
+    SampledSpectrum SampleLd(const SurfaceInteraction &intr, uint32_t seed, const BSDF &bsdf,
                              SampledWavelengths &lambda, Sampler sampler,
                              LightSampler lightSampler) const;
 

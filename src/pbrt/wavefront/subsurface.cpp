@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -13,8 +14,16 @@
 #include <pbrt/wavefront/integrator.h>
 
 namespace pbrt {
+void WavefrontPathIntegrator::SampleSubsurface(int wavefrontDepth) {
+    switch (requiredShadowRays) {
+        case E_TWO_SHADOW_RAYS: SampleSubsurface<E_TWO_SHADOW_RAYS>(wavefrontDepth); break;
+        case E_LIGHTCUTS_SHADOW_RAYS: SampleSubsurface<E_LIGHTCUTS_SHADOW_RAYS>(wavefrontDepth); break;
+        default: SampleSubsurface<E_DEFAULT_SHADOW_RAYS>(wavefrontDepth); break;
+    }
+}
 
 // WavefrontPathIntegrator Subsurface Scattering Methods
+template <int NShadowRays>
 void WavefrontPathIntegrator::SampleSubsurface(int wavefrontDepth) {
     if (!haveSubsurface)
         return;
@@ -22,8 +31,8 @@ void WavefrontPathIntegrator::SampleSubsurface(int wavefrontDepth) {
     RayQueue *nextRayQueue = NextRayQueue(wavefrontDepth);
 
     ForAllQueued(
-        "Get BSSRDF and enqueue probe ray", bssrdfEvalQueue, maxQueueSize,
-        PBRT_CPU_GPU_LAMBDA(const GetBSSRDFAndProbeRayWorkItem w) {
+        "Get BSSRDF and enqueue probe ray", ProfilerKernelGroup::WAVEFRONT,
+        bssrdfEvalQueue, maxQueueSize, PBRT_CPU_GPU_LAMBDA(const GetBSSRDFAndProbeRayWorkItem w) {
             const SubsurfaceMaterial *material = w.material.Cast<SubsurfaceMaterial>();
             MaterialEvalContext ctx = w.GetMaterialEvalContext();
             SampledWavelengths lambda = w.lambda;
@@ -43,9 +52,11 @@ void WavefrontPathIntegrator::SampleSubsurface(int wavefrontDepth) {
 
     aggregate->IntersectOneRandom(maxQueueSize, subsurfaceScatterQueue);
 
+    const int sampleIndex = currentSampleIndex;
+
     ForAllQueued(
-        "Handle out-scattering after SSS", subsurfaceScatterQueue, maxQueueSize,
-        PBRT_CPU_GPU_LAMBDA(SubsurfaceScatterWorkItem w) {
+        "Handle out-scattering after SSS", ProfilerKernelGroup::WAVEFRONT,
+        subsurfaceScatterQueue, maxQueueSize, PBRT_CPU_GPU_LAMBDA(SubsurfaceScatterWorkItem w) {
             if (w.reservoirPDF == 0)
                 return;
 
@@ -123,11 +134,11 @@ void WavefrontPathIntegrator::SampleSubsurface(int wavefrontDepth) {
                         // possible...
                         bool anyNonSpecularBounces = true;
 
-                        LightSampleContext ctx(intr.pi, intr.n, intr.ns);
+                        LightSampleContext ctx(intr.pi, intr.n, intr.ns, Vector3f(0, 0, 0));
                         nextRayQueue->PushIndirectRay(
-                            ray, w.depth + 1, ctx, beta, indir_r_u, r_l, lambda,
-                            etaScale, bsdfSample->IsSpecular(), anyNonSpecularBounces,
-                            w.pixelIndex);
+                            ray, w.depth + 1, ctx, ProcessedMaterialContext(), beta,
+                            indir_r_u, r_l, lambda, etaScale, bsdfSample->IsSpecular(),
+                            anyNonSpecularBounces, w.pixelIndex);
 
                         PBRT_DBG("Spawned indirect ray at depth %d. "
                                  "Specular %d beta %f %f %f %f indir_r_u %f %f %f %f "
@@ -148,57 +159,40 @@ void WavefrontPathIntegrator::SampleSubsurface(int wavefrontDepth) {
 
             // Direct lighting...
             if (IsNonSpecular(bsdf.Flags())) {
-                LightSampleContext ctx(intr.pi, intr.n, intr.ns);
-                pstd::optional<SampledLight> sampledLight =
-                    lightSampler.Sample(ctx, raySamples.direct.uc);
-                if (!sampledLight)
-                    return;
-                Light light = sampledLight->light;
+                LightSampleContext ctx(intr.pi, intr.n, intr.ns, Vector3f(0, 0, 0));
 
-                pstd::optional<LightLiSample> ls =
-                    light.SampleLi(ctx, raySamples.direct.u, lambda, true);
-                if (!ls || !ls->L || ls->pdf == 0)
-                    return;
+                BSDFScatterEval scatterEval(&bsdf, intr.ns);
 
-                Vector3f wi = ls->wi;
-                SampledSpectrum f = bsdf.f<ConcreteBxDF>(wo, wi);
-                if (!f)
-                    return;
+                CountedArray<SampledLd, NShadowRays> samplesLd;
+                lightSampler.SampleLd(samplesLd, ctx, lambda, &bsdf, Hash(sampleIndex, w.pixelIndex, (w.depth + 1)),
+                                      raySamples.direct.uc, raySamples.direct.u, scatterEval);
+                
+                int reserveStartIdx = shadowRayQueue->ReserveEntries(samplesLd.count);
+                for (int i = 0; i < samplesLd.count; ++i) {
+                    const SampledLd& sLd(samplesLd[i]);
 
-                SampledSpectrum beta = betap * f * AbsDot(wi, intr.ns);
+                    SampledSpectrum sample_r_u = r_u * sLd.scatterPDF;
+                    SampledSpectrum sample_r_l = r_u * sLd.lightPDF;
 
-                PBRT_DBG(
-                    "depth %d beta %f %f %f %f f %f %f %f %f ls.L %f %f %f %f ls.pdf "
-                    "%f\n",
-                    w.depth, beta[0], beta[1], beta[2], beta[3], f[0], f[1], f[2], f[3],
-                    ls->L[0], ls->L[1], ls->L[2], ls->L[3], ls->pdf);
+                    SampledSpectrum Ld = betap * sLd.Ld;
 
-                Float lightPDF = ls->pdf * sampledLight->p;
-                // This causes r_u to be zero for the shadow ray, so that
-                // part of MIS just becomes a no-op.
-                Float bsdfPDF =
-                    IsDeltaLight(light.Type()) ? 0.f : bsdf.PDF<ConcreteBxDF>(wo, wi);
-                SampledSpectrum r_l = r_u * lightPDF;
-                r_u *= bsdfPDF;
+                    PBRT_DBG("depth %d Ld %f %f %f %f "
+                             "new beta %f %f %f %f beta/uni %f %f %f %f Ld/uni %f %f %f %f\n",
+                             w.depth, Ld[0], Ld[1], Ld[2], Ld[3], beta[0], beta[1], beta[2],
+                             beta[3], SafeDiv(beta, sample_r_u)[0], SafeDiv(beta, sample_r_u)[1],
+                             SafeDiv(beta, sample_r_u)[2], SafeDiv(beta, sample_r_u)[3],
+                             SafeDiv(Ld, sample_r_u)[0], SafeDiv(Ld, sample_r_u)[1],
+                             SafeDiv(Ld, sample_r_u)[2], SafeDiv(Ld, sample_r_u)[3]);
 
-                SampledSpectrum Ld = beta * ls->L;
-
-                PBRT_DBG("depth %d Ld %f %f %f %f "
-                         "new beta %f %f %f %f beta/uni %f %f %f %f Ld/uni %f %f %f %f\n",
-                         w.depth, Ld[0], Ld[1], Ld[2], Ld[3], beta[0], beta[1], beta[2],
-                         beta[3], SafeDiv(beta, r_u)[0], SafeDiv(beta, r_u)[1],
-                         SafeDiv(beta, r_u)[2], SafeDiv(beta, r_u)[3],
-                         SafeDiv(Ld, r_u)[0], SafeDiv(Ld, r_u)[1],
-                         SafeDiv(Ld, r_u)[2], SafeDiv(Ld, r_u)[3]);
-
-                Ray ray = SpawnRayTo(intr.pi, intr.n, time, ls->pLight.pi, ls->pLight.n);
-                if (haveMedia)
-                    // TODO: as above, always take outside here?
-                    ray.medium = Dot(ray.d, intr.n) > 0 ? w.mediumInterface.outside
-                                                        : w.mediumInterface.inside;
-
-                shadowRayQueue->Push(ShadowRayWorkItem{ray, 1 - ShadowEpsilon, lambda, Ld,
-                                                       r_u, r_l, w.pixelIndex});
+                    Ray ray = sLd.SpawnShadowRay(intr.pi, intr.n, time);
+                    if (haveMedia)
+                        // TODO: as above, always take outside here?
+                        ray.medium = Dot(ray.d, intr.n) > 0 ? w.mediumInterface.outside
+                                                            : w.mediumInterface.inside;
+                    (*shadowRayQueue)[reserveStartIdx + i] =
+                        ShadowRayWorkItem{ray, 1 - ShadowEpsilon, lambda, Ld, sample_r_u,
+                                          sample_r_l, w.pixelIndex, std::numeric_limits<uint32_t>::max(), 0};
+                }
             }
         });
 

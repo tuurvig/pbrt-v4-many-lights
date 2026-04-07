@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -32,8 +33,10 @@ namespace pbrt {
 #define OneMinusEpsilon FloatOneMinusEpsilon
 #endif
 
-#define Infinity std::numeric_limits<Float>::infinity()
-#define MachineEpsilon std::numeric_limits<Float>::epsilon() * 0.5f
+static PBRT_GPU constexpr Float Infinity = std::numeric_limits<Float>::infinity();
+static PBRT_GPU constexpr Float MachineEpsilon = std::numeric_limits<Float>::epsilon() * 0.5;
+static PBRT_GPU constexpr Float MaxImportance = std::numeric_limits<Float>::max() * 0.25;
+static PBRT_GPU constexpr Float MathEpsilon = Float(1e-6);
 
 #else
 
@@ -41,6 +44,8 @@ namespace pbrt {
 static constexpr Float Infinity = std::numeric_limits<Float>::infinity();
 
 static constexpr Float MachineEpsilon = std::numeric_limits<Float>::epsilon() * 0.5;
+static constexpr Float MaxImportance = std::numeric_limits<Float>::max() * 0.25;
+static constexpr Float MathEpsilon = Float(1e-6);
 
 static constexpr double DoubleOneMinusEpsilon = 0x1.fffffffffffffp-1;
 static constexpr float FloatOneMinusEpsilon = 0x1.fffffep-1;
@@ -295,6 +300,14 @@ inline PBRT_CPU_GPU Float SqrtRoundDown(Float a) {
 #endif
 #else  // CPU
     return std::max<Float>(0, NextFloatDown(std::sqrt(a)));
+#endif
+}
+
+inline PBRT_CPU_GPU Float InvSqrtRoot(Float a) {
+#ifdef PBRT_IS_GPU_CODE
+    return __frsqrt_rn(a);
+#else // CPU
+    return 1 / std::sqrt(a);
 #endif
 }
 

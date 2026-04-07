@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -206,6 +207,89 @@ PBRT_CPU_GPU SampledSpectrum DielectricBxDF::f(Vector3f wo, Vector3f wi, Transpo
 
         return SampledSpectrum(ft);
     }
+}
+
+PBRT_CPU_GPU Float DielectricBxDF::Max_f(Vector3f woGlobal, Bounds3f wiBoundsGlobal, Point3f p,
+                                         const Frame& localFrame, TransportMode mode,
+                                         BxDFReflTransFlags flags) const {
+    DirectionCone wiConeGlobal = BoundSubtendedDirections(wiBoundsGlobal, p);
+    DirectionCone wiCone(localFrame.ToLocal(wiConeGlobal.w), wiConeGlobal.cosTheta);
+
+    Vector3f wo = localFrame.ToLocal(woGlobal);
+    if (wo.z == 0 || eta == 1 || mfDistrib.EffectivelySmooth()) return 0;
+    
+    HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
+
+    Float maxVal = 0;
+    
+    // Reflection bounds
+    if ((flags & BxDFReflTransFlags::Reflection) && (h & HemisphereIntersection::SAME)) {
+        // Ideal reflection direction in global space
+        Vector3f wiGlobal = Reflect(woGlobal, localFrame.z);
+        
+        // Adjust to bounds
+        if (!IntersectOrAdjust(wiGlobal, wiBoundsGlobal, p, wiGlobal)) {
+            return 0;
+        }
+        Vector3f wi = localFrame.ToLocal(wiGlobal);
+    
+        // Evaluate (f handles hemisphere checks)
+        maxVal = f(wo, wi, mode).MaxComponentValue();
+    }
+    
+    // Transmission bounds
+    if ((flags & BxDFReflTransFlags::Transmission) && (h & HemisphereIntersection::DIFF)) {
+        // Ideal transmission direction in global space
+        Vector3f wiGlobal;
+        Float etap;
+        bool valid = Refract(woGlobal, Normal3f(localFrame.z), eta, &etap, &wiGlobal);
+        CHECK_RARE(1e-5f, !valid);
+        if (valid) {
+            // Adjust to bounds
+            if (!IntersectOrAdjust(wiGlobal, wiBoundsGlobal, p, wiGlobal)) {
+                return 0;
+            }
+            Vector3f wi = localFrame.ToLocal(wiGlobal);
+    
+            // Evaluate
+            maxVal = std::max(maxVal, f(wo, wi, mode).MaxComponentValue());
+        }
+    }
+    
+    return maxVal;
+}
+
+PBRT_CPU_GPU Float DielectricBxDF::Max_f(Vector3f wo, DirectionCone wiCone,
+                                         TransportMode mode,
+                                         BxDFReflTransFlags flags) const {
+    if (wo.z == 0 || eta == 1 || mfDistrib.EffectivelySmooth())
+        return 0;
+    
+    HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
+    Float maxVal = 0;
+    
+    // Reflection bounds
+    if ((flags & BxDFReflTransFlags::Reflection) && (h & HemisphereIntersection::SAME)) {
+        // Ideal reflection direction
+        Vector3f wi(-wo.x, -wo.y, wo.z);
+        // Find closest direction in cone
+        wi = wiCone.ClosestVectorInCone(wi);
+        maxVal = std::max(maxVal, f(wo, wi, mode).MaxComponentValue());
+    }
+    
+    // Transmission bounds
+    if ((flags & BxDFReflTransFlags::Transmission) && (h & HemisphereIntersection::DIFF)) {
+        // Ideal transmission direction
+        Vector3f wi;
+        Float etap;
+        if (Refract(wo, Normal3f(0, 0, 1), eta, &etap, &wi)) {
+            // Find closest direction in cone
+            wi = wiCone.ClosestVectorInCone(wi);
+            maxVal = std::max(maxVal, f(wo, wi, mode).MaxComponentValue());
+        }
+    }
+    
+    return maxVal;
 }
 
 PBRT_CPU_GPU Float DielectricBxDF::PDF(Vector3f wo, Vector3f wi, TransportMode mode,
@@ -487,6 +571,16 @@ PBRT_CPU_GPU pstd::optional<BSDFSample> HairBxDF::Sample_f(Vector3f wo, Float uc
            (1 / (2 * Pi));
 
     return BSDFSample(f(wo, wi, mode), wi, pdf, Flags());
+}
+
+PBRT_CPU_GPU Float HairBxDF::Max_f(Vector3f wo, DirectionCone wiCone,
+             TransportMode mode, BxDFReflTransFlags flags) const {
+    return 1;
+}
+
+PBRT_CPU_GPU Float HairBxDF::Max_f(Vector3f woGlobal, Bounds3f wiBoundsGlobal, Point3f p,
+                          const Frame& localFrame, TransportMode mode, BxDFReflTransFlags flags) const {                        
+    return 1;
 }
 
 PBRT_CPU_GPU Float HairBxDF::PDF(Vector3f wo, Vector3f wi, TransportMode mode,
@@ -957,7 +1051,8 @@ MeasuredBxDFData *MeasuredBxDFData::Create(const std::string &filename, Allocato
     brdf->vndf = PiecewiseLinear2D<2>(
         alloc, (float *)vndf.data.get(), vndf.shape[3], vndf.shape[2],
         {{(int)phi_i.shape[0], (int)theta_i.shape[0]}},
-        {{(const float *)phi_i.data.get(), (const float *)theta_i.data.get()}});
+        {{(const float *)phi_i.data.get(), (const float *)theta_i.data.get()}},
+        true, true, true);
 
     /* Construct Luminance warp data structure */
     brdf->luminance = PiecewiseLinear2D<2>(
@@ -1033,6 +1128,91 @@ PBRT_CPU_GPU SampledSpectrum MeasuredBxDF::f(Vector3f wo, Vector3f wi,
            (4 * brdf->sigma.Evaluate(u_wo) * CosTheta(wi));
 }
 
+PBRT_CPU_GPU Float MeasuredBxDF::Max_f(Vector3f wo, DirectionCone wiCone,
+                                       TransportMode mode, BxDFReflTransFlags flags) const {
+    HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
+    if (!(flags & BxDFReflTransFlags::Reflection) || !(h & HemisphereIntersection::SAME)) {
+        return Float(0);
+    }
+
+    bool flipWi = false;
+    Vector3f woEval = wo;
+    if (wo.z <= 0) {
+        woEval = -woEval;
+        wiCone.w = -wiCone.w;
+        flipWi = true;
+    }
+
+    Float theta_o = SphericalTheta(woEval), phi_o = std::atan2(woEval.y, woEval.x);
+
+    Point2f u_wm = brdf->vndf.ArgMax(true, phi_o, theta_o);
+    Float theta_m = u2theta(u_wm.x);
+    Float phi_m = u2phi(u_wm.y);
+    if (brdf->isotropic)
+        phi_m += phi_o;
+
+    Float sinTheta_m = std::sin(theta_m), cosTheta_m = std::cos(theta_m);
+    Vector3f wm = SphericalDirection(sinTheta_m, cosTheta_m, phi_m);
+    Vector3f wi = Reflect(woEval, wm);
+    if (wi.z <= 0)
+        return Float(0);
+
+    wi = wiCone.ClosestVectorInCone(wi);
+
+    if (flipWi) {
+        wi = -wi;
+    }
+        
+    return f(wo, wi, mode).MaxComponentValue();
+}
+
+PBRT_CPU_GPU Float MeasuredBxDF::Max_f(Vector3f woGlobal, Bounds3f wiBoundsGlobal, Point3f p,
+                                       const Frame& localFrame, TransportMode mode, BxDFReflTransFlags flags) const {
+    DirectionCone wiConeGlobal = BoundSubtendedDirections(wiBoundsGlobal, p);
+    DirectionCone wiCone = wiConeGlobal;
+    wiCone.w = localFrame.ToLocal(wiCone.w);
+    Vector3f wo = localFrame.ToLocal(woGlobal);
+    HemisphereIntersection h = WhichHemisphere(wo, wiCone.w, wiCone.cosTheta);
+    if (!(flags & BxDFReflTransFlags::Reflection) || !(h & HemisphereIntersection::SAME)) {
+        return Float(0);
+    }
+
+    bool flipWi = false;
+    Vector3f woEval = wo;
+    if (wo.z <= 0) {
+        woEval = -woEval;
+        flipWi = true;
+    }
+
+    Float theta_o = SphericalTheta(woEval), phi_o = std::atan2(woEval.y, woEval.x);
+
+    Point2f u_wm = brdf->vndf.ArgMax(true, phi_o, theta_o);
+    Float theta_m = u2theta(u_wm.x);
+    Float phi_m = u2phi(u_wm.y);
+    if (brdf->isotropic)
+        phi_m += phi_o;
+
+    Float sinTheta_m = std::sin(theta_m), cosTheta_m = std::cos(theta_m);
+    Vector3f wm = SphericalDirection(sinTheta_m, cosTheta_m, phi_m);
+    Vector3f wi = Reflect(woEval, wm);
+
+    if (wi.z <= 0)
+        return Float(0);
+
+    if (flipWi) {
+        wi = -wi;
+    }
+
+    Vector3f wiGlobal = localFrame.FromLocal(wi);
+    if (!IntersectOrAdjust(wiGlobal, wiBoundsGlobal, p, wiGlobal)) {
+        return false;
+    }
+
+    Vector3f wiAdjusted = localFrame.ToLocal(wiGlobal);
+
+    return f(wo, wiAdjusted, mode).MaxComponentValue();
+}
+
 PBRT_CPU_GPU pstd::optional<BSDFSample> MeasuredBxDF::Sample_f(Vector3f wo, Float uc, Point2f u,
                                                   TransportMode mode,
                                                   BxDFReflTransFlags sampleFlags) const {
@@ -1075,7 +1255,7 @@ PBRT_CPU_GPU pstd::optional<BSDFSample> MeasuredBxDF::Sample_f(Vector3f wo, Floa
 
     Point2f u_wo(theta2u(theta_o), phi2u(phi_o));
     fr *= brdf->ndf.Evaluate(u_wm) / (4 * brdf->sigma.Evaluate(u_wo) * AbsCosTheta(wi));
-    pdf /= 4 * Dot(wo, wm) * std::max<Float>(2 * Sqr(Pi) * u_wm.x * sinTheta_m, 1e-6f);
+    pdf /= 4 * Dot(wo, wm) * std::max<Float>(2 * Sqr(Pi) * u_wm.x * sinTheta_m, MathEpsilon);
 
     // Handle interactions in lower hemisphere
     if (flipWi)
@@ -1115,7 +1295,7 @@ PBRT_CPU_GPU Float MeasuredBxDF::PDF(Vector3f wo, Vector3f wi, TransportMode mod
     Float pdf = brdf->luminance.Evaluate(sample, phi_o, theta_o);
     Float sinTheta_m = std::sqrt(Sqr(wm.x) + Sqr(wm.y));
     Float jacobian =
-        4.f * Dot(wo, wm) * std::max<Float>(2 * Sqr(Pi) * u_wm.x * sinTheta_m, 1e-6f);
+        4.f * Dot(wo, wm) * std::max<Float>(2 * Sqr(Pi) * u_wm.x * sinTheta_m, MathEpsilon);
     return vndfPDF * pdf / jacobian;
 }
 

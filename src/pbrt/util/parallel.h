@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -23,6 +24,31 @@
 #include <thread>
 #include <type_traits>
 #include <vector>
+
+#ifdef __CUDACC__
+#ifdef PBRT_IS_WINDOWS
+#if (__CUDA_ARCH__ < 700)
+#ifndef PBRT_USE_LEGACY_CUDA_ATOMICS
+#define PBRT_USE_LEGACY_CUDA_ATOMICS
+#endif
+#endif
+#else
+#if (__CUDA_ARCH__ < 600)
+#ifndef PBRT_USE_LEGACY_CUDA_ATOMICS
+#define PBRT_USE_LEGACY_CUDA_ATOMICS
+#endif
+#endif
+#endif  // PBRT_IS_WINDOWS
+
+#ifndef PBRT_USE_LEGACY_CUDA_ATOMICS
+#include <cuda/atomic>
+
+// CUDA headers may pull in Windows macros that collide with pbrt::RGB.
+#ifdef RGB
+#undef RGB
+#endif  // RGB
+#endif
+#endif  // __CUDACC__
 
 namespace pbrt {
 
@@ -240,6 +266,87 @@ class AtomicDouble {
 #else
     std::atomic<uint64_t> bits;
 #endif
+};
+
+// AtomicInt Definition
+template <typename T>
+class AtomicInt {
+    static_assert(std::is_integral_v<T>, "AtomicInt requires an integer type.");
+  public:
+    // AtomicInt Public Methods
+    PBRT_CPU_GPU
+    explicit AtomicInt(T v = 0) {
+        Store(v);
+    }
+
+    PBRT_CPU_GPU
+    operator T() const {
+        return Load();
+    }
+
+    PBRT_CPU_GPU
+    T operator=(T v) {
+        Store(v);
+        return v;
+    }
+
+    PBRT_CPU_GPU
+    T Load() const {
+#ifdef PBRT_IS_GPU_CODE
+#ifdef PBRT_USE_LEGACY_CUDA_ATOMICS
+        return value;
+#else
+        return value.load(cuda::std::memory_order_relaxed);
+#endif
+#else
+        return value.load(std::memory_order_relaxed);
+#endif  // PBRT_IS_GPU_CODE
+    }
+
+    PBRT_CPU_GPU
+    void Store(T v) {
+#ifdef PBRT_IS_GPU_CODE
+#ifdef PBRT_USE_LEGACY_CUDA_ATOMICS
+        value = v;
+#else
+        value.store(v, cuda::std::memory_order_relaxed);
+#endif
+#else
+        value.store(v, std::memory_order_relaxed);
+#endif  // PBRT_IS_GPU_CODE
+    }
+
+    PBRT_CPU_GPU
+    void Add(T v) {
+        FetchAdd(v);
+    }
+
+    PBRT_CPU_GPU
+    T FetchAdd(T v) {
+#ifdef PBRT_IS_GPU_CODE
+#ifdef PBRT_USE_LEGACY_CUDA_ATOMICS
+        return atomicAdd(&value, v);
+#else
+        return value.fetch_add(v, cuda::std::memory_order_relaxed);
+#endif
+#else
+        return value.fetch_add(v, std::memory_order_relaxed);
+#endif  // PBRT_IS_GPU_CODE
+    }
+
+    std::string ToString() const;
+
+  private:
+    // AtomicInt Private Members
+#ifdef PBRT_IS_GPU_CODE
+#ifdef PBRT_USE_LEGACY_CUDA_ATOMICS
+    T value{0};
+#else
+    cuda::atomic<T, cuda::thread_scope_device> value{0};
+#endif
+#else
+    std::atomic<T> value{0};
+#endif  // PBRT_IS_GPU_CODE
 };
 
 // Barrier Definition

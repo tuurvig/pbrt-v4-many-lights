@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -111,12 +112,21 @@ inline uint32_t LeftShift3(uint32_t x) {
     return x;
 }
 
-PBRT_CPU_GPU inline uint32_t EncodeMorton3(float x, float y, float z) {
-    DCHECK_GE(x, 0);
-    DCHECK_GE(y, 0);
-    DCHECK_GE(z, 0);
+PBRT_CPU_GPU inline uint32_t EncodeMorton3(uint32_t x, uint32_t y, uint32_t z) {
+    //DCHECK_GE(x, 0);
+    //DCHECK_GE(y, 0);
+    //DCHECK_GE(z, 0);
     return (LeftShift3(z) << 2) | (LeftShift3(y) << 1) | LeftShift3(x);
 }
+
+PBRT_CPU_GPU inline uint32_t QuantizeUnitToBitRange(Float unit, int bits) {
+    uint32_t maxValue = (1u << bits) - 1;
+    Float scaled = unit * maxValue;
+    uint32_t q = static_cast<uint32_t>(std::round(scaled));
+    return std::min<uint32_t>(maxValue, q);
+}
+
+PBRT_CPU_GPU uint64_t EncodeExtendedMorton5(Point3f position, Vector3f direction);
 
 PBRT_CPU_GPU
 inline uint32_t Compact1By1(uint64_t x) {
@@ -362,6 +372,20 @@ PBRT_CPU_GPU
 inline double SafeACos(double x) {
     DCHECK(x >= -1.0001 && x <= 1.0001);
     return std::acos(Clamp(x, -1, 1));
+}
+
+PBRT_CPU_GPU
+inline Float SafeSubtractCos(Float sinTheta_a, Float cosTheta_a, Float sinTheta_b, Float cosTheta_b) {
+    if (cosTheta_a > cosTheta_b)
+        return 1;
+    return cosTheta_a * cosTheta_b + sinTheta_a * sinTheta_b;
+}
+
+PBRT_CPU_GPU
+inline Float SafeSubtractSin(Float sinTheta_a, Float cosTheta_a, Float sinTheta_b, Float cosTheta_b) {
+    if (cosTheta_a > cosTheta_b)
+        return 0;
+    return sinTheta_a * cosTheta_b - cosTheta_a * sinTheta_b;
 }
 
 PBRT_CPU_GPU inline Float Log2(Float x) {
@@ -658,8 +682,8 @@ inline bool Quadratic(double a, double b, double c, double *t0, double *t1) {
 }
 
 template <typename Func>
-PBRT_CPU_GPU inline Float NewtonBisection(Float x0, Float x1, Func f, Float xEps = 1e-6f,
-                                          Float fEps = 1e-6f) {
+PBRT_CPU_GPU inline Float NewtonBisection(Float x0, Float x1, Func f, Float xEps = MathEpsilon,
+                                          Float fEps = MathEpsilon) {
     // Check function endpoints for roots
     DCHECK_LT(x0, x1);
     Float fx0 = f(x0).first, fx1 = f(x1).first;

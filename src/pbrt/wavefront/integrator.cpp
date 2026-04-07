@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -34,6 +35,7 @@
 #include <cstring>
 #include <iostream>
 #include <map>
+#include <type_traits>
 
 #ifdef PBRT_BUILD_GPU_RENDERER
 #include <cuda.h>
@@ -183,7 +185,16 @@ WavefrontPathIntegrator::WavefrontPathIntegrator(
         scene.integrator.parameters.GetOneString("lightsampler", "bvh");
     if (allLights.size() == 1)
         lightSamplerName = "uniform";
-    lightSampler = LightSampler::Create(lightSamplerName, allLights, alloc);
+    lightSampler = LightSampler::Create(requiredShadowRays, lightSamplerName, allLights, Options->discretizeAreaLights > 0, alloc);
+    
+    // Register the wavefront integrator is going to use an online light sampler, that requires
+    // some form of a feedback loop after each wave of samples.
+    isOnlineLightSampler = lightSampler.Is<LTCLightSampler>();
+
+    useBSDFDependentHitAreaQueue =
+        lightSampler.Is<LightcutsLightSampler>() || lightSampler.Is<SLCLightSampler>() ||
+        lightSampler.Is<HSLCLightSampler>() || lightSampler.Is<LTCLightSampler>();
+    
     LOG_VERBOSE("Finished creating light sampler");
 
     if (scene.integrator.name != "path" && scene.integrator.name != "volpath")
@@ -206,6 +217,8 @@ WavefrontPathIntegrator::WavefrontPathIntegrator(
         Warning("The wavefront integrator does not support --write-partial-images.");
     if (Options->recordPixelStatistics)
         ErrorExit("The wavefront integrator does not support --pixelstats.");
+    if (Options->recordPerLightStatistics)
+        ErrorExit("The wavefront integrator does not support --perlightstats.");
     if (!Options->mseReferenceImage.empty())
         ErrorExit("The wavefront integrator does not support --mse-reference-image.");
     if (!Options->mseReferenceOutput.empty())
@@ -225,7 +238,8 @@ WavefrontPathIntegrator::WavefrontPathIntegrator(
 #endif  // PBRT_BUILD_GPU_RENDERER
 
     // Compute number of scanlines to render per pass
-    Vector2i resolution = film.PixelBounds().Diagonal();
+    Bounds2i pixelBounds = film.PixelBounds();
+    Vector2i resolution = pixelBounds.Diagonal();
     // TODO: make this configurable. Base it on the amount of GPU memory?
     int maxSamples = 1024 * 1024;
     scanlinesPerPass = std::max(1, maxSamples / resolution.x);
@@ -240,7 +254,7 @@ WavefrontPathIntegrator::WavefrontPathIntegrator(
     rayQueues[0] = alloc.new_object<RayQueue>(maxQueueSize, alloc);
     rayQueues[1] = alloc.new_object<RayQueue>(maxQueueSize, alloc);
 
-    shadowRayQueue = alloc.new_object<ShadowRayQueue>(maxQueueSize, alloc);
+    shadowRayQueue = alloc.new_object<ShadowRayQueue>(maxQueueSize * static_cast<int>(requiredShadowRays), alloc);
 
     if (haveSubsurface) {
         bssrdfEvalQueue =
@@ -252,6 +266,18 @@ WavefrontPathIntegrator::WavefrontPathIntegrator(
     if (infiniteLights->size())
         escapedRayQueue = alloc.new_object<EscapedRayQueue>(maxQueueSize, alloc);
     hitAreaLightQueue = alloc.new_object<HitAreaLightQueue>(maxQueueSize, alloc);
+    if (useBSDFDependentHitAreaQueue) {
+        pstd::array<bool, Material::NumTags()> haveHitAreaMaterial;
+        haveHitAreaMaterial.fill(false);
+        for (size_t i = 1; i < haveHitAreaMaterial.size(); ++i) {
+            haveHitAreaMaterial[i] =
+                haveBasicEvalMaterial[i] || haveUniversalEvalMaterial[i];
+        }
+        haveHitAreaMaterial[Material::TypeIndex<MixMaterial>()] = false;
+        hitAreaMaterialLightQueue = alloc.new_object<HitAreaMaterialLightQueue>(
+            maxQueueSize, alloc,
+            pstd::MakeConstSpan(&haveHitAreaMaterial[1], haveHitAreaMaterial.size() - 1));
+    }
 
     basicEvalMaterialQueue = alloc.new_object<MaterialEvalQueue>(
         maxQueueSize, alloc,
@@ -287,6 +313,68 @@ WavefrontPathIntegrator::WavefrontPathIntegrator(
 }
 
 // WavefrontPathIntegrator Method Definitions
+void WavefrontPathIntegrator::OnRenderWaveStart(int waveIndex, const Bounds2i &pixelBounds) {
+    if (!isOnlineLightSampler || waveIndex != 0)
+        return;
+
+    Allocator alloc(memoryResource);
+    firstIterationShadingPoints =
+        alloc.new_object<ShadingPointCollector>(pixelBounds, maxDepth, alloc);
+}
+
+/// @brief Completes per-wave maintenance.
+void WavefrontPathIntegrator::OnRenderWaveDone(int waveIndex) {
+    if (waveIndex != 0 && isOnlineLightSampler) {
+        // Later waves only apply online updates from accumulated contributions.
+        LTCLightSampler *ltc = lightSampler.CastOrNullptr<LTCLightSampler>();
+        if (ltc) {
+            ltc->Update(waveIndex);
+        }
+        return;
+    }
+
+    if (waveIndex == 0 && firstIterationShadingPoints) {
+        // Wave 0 finalizes shading-point collection and builds partition cuts.
+        ShadingPoint* points = nullptr;
+#ifdef PBRT_BUILD_GPU_RENDERER
+        if (Options->useGPU) {
+            // Ensure first-wave shading points are available on host for partition setup.
+            GPUWait();
+            points = firstIterationShadingPoints->Data();
+            const uint32_t count = firstIterationShadingPoints->Size();
+
+            LOG_VERBOSE("Collected %u first-wave wavefront shading points.", count);
+            ShadingPoint* copyPoints = new ShadingPoint[count];
+            GPUCopyToHost(copyPoints, points, count);
+            points = copyPoints;
+        } else
+#endif
+        {
+            points = firstIterationShadingPoints->Data();
+        }
+
+        const uint32_t count = firstIterationShadingPoints->Size();
+        LOG_VERBOSE("Collected %u first-wave wavefront shading points.", count);
+
+        LTCLightSampler *ltc = lightSampler.CastOrNullptr<LTCLightSampler>();
+        if (ltc) {
+            Bounds3f sceneBounds = aggregate->Bounds();
+            ltc->SetupScenePartitions({points, count}, sceneBounds);
+        }
+
+        Allocator alloc(memoryResource);
+        alloc.delete_object(firstIterationShadingPoints);
+        firstIterationShadingPoints = nullptr;
+
+#ifdef PBRT_BUILD_GPU_RENDERER
+        if (Options->useGPU) {
+            delete[] points;
+            points = nullptr;
+        }
+#endif
+    }
+}
+
 Float WavefrontPathIntegrator::Render() {
     Bounds2i pixelBounds = film.PixelBounds();
     Vector2i resolution = pixelBounds.Diagonal();
@@ -333,23 +421,25 @@ Float WavefrontPathIntegrator::Render() {
 
     ProgressReporter progress(lastSampleIndex - firstSampleIndex, "Rendering",
                               Options->quiet || Options->interactive, Options->useGPU);
-    for (int sampleIndex = firstSampleIndex; sampleIndex < lastSampleIndex || gui;
-         ++sampleIndex) {
+    currentSampleIndex = firstSampleIndex;
+    for (; currentSampleIndex < lastSampleIndex || gui; ++currentSampleIndex) {
         // Attempt to work around issue #145.
 #if !(defined(PBRT_IS_WINDOWS) && defined(PBRT_BUILD_GPU_RENDERER) && \
       __CUDACC_VER_MAJOR__ == 11 && __CUDACC_VER_MINOR__ == 1)
         CheckCallbackScope _([&]() {
             return StringPrintf("Wavefront rendering failed at sample %d. Debug with "
                                 "\"--debugstart %d\"\n",
-                                sampleIndex, sampleIndex);
+                                currentSampleIndex, currentSampleIndex);
         });
 #endif
 
         // Keep running the outer for loop but don't take more samples if
         // the GUI is being used so that the user can move the camera, etc.
-        if (sampleIndex < lastSampleIndex) {
+        if (currentSampleIndex < lastSampleIndex) {
+            OnRenderWaveStart(currentSampleIndex, pixelBounds);
+
             // Render image for sample _sampleIndex_
-            LOG_VERBOSE("Starting to submit work for sample %d", sampleIndex);
+            LOG_VERBOSE("Starting to submit work for sample %d", currentSampleIndex);
             for (int y0 = pixelBounds.pMin.y; y0 < pixelBounds.pMax.y;
                  y0 += scanlinesPerPass) {
                 // Generate camera rays for current scanline range
@@ -357,7 +447,7 @@ Float WavefrontPathIntegrator::Render() {
                 Do(
                    "Reset ray queue", PBRT_CPU_GPU_LAMBDA() {
                        PBRT_DBG("Starting scanlines at y0 = %d, sample %d / %d\n", y0,
-                                sampleIndex, samplesPerPixel);
+                                currentSampleIndex, samplesPerPixel);
                        cameraRayQueue->Reset();
                    });
 
@@ -365,7 +455,7 @@ Float WavefrontPathIntegrator::Render() {
                 if (gui)
                     cameraMotion =
                         renderFromCamera * gui->GetCameraTransform() * cameraFromRender;
-                GenerateCameraRays(y0, cameraMotion, sampleIndex);
+                GenerateCameraRays(y0, cameraMotion, currentSampleIndex);
                 Do(
                    "Update camera ray stats",
                    PBRT_CPU_GPU_LAMBDA() { stats->cameraRays += cameraRayQueue->Size(); });
@@ -386,6 +476,8 @@ Float WavefrontPathIntegrator::Render() {
                            if (escapedRayQueue)
                                escapedRayQueue->Reset();
                            hitAreaLightQueue->Reset();
+                           if (hitAreaMaterialLightQueue)
+                               hitAreaMaterialLightQueue->Reset();
 
                            basicEvalMaterialQueue->Reset();
                            universalEvalMaterialQueue->Reset();
@@ -397,12 +489,13 @@ Float WavefrontPathIntegrator::Render() {
                        });
 
                     // Follow active ray paths and accumulate radiance estimates
-                    GenerateRaySamples(wavefrontDepth, sampleIndex);
+                    GenerateRaySamples(wavefrontDepth, currentSampleIndex);
 
                     // Find closest intersections along active rays
                     aggregate->IntersectClosest(
                                                 maxQueueSize, CurrentRayQueue(wavefrontDepth), escapedRayQueue,
-                                                hitAreaLightQueue, basicEvalMaterialQueue, universalEvalMaterialQueue,
+                                                hitAreaLightQueue, hitAreaMaterialLightQueue,
+                                                basicEvalMaterialQueue, universalEvalMaterialQueue,
                                                 mediumSampleQueue, NextRayQueue(wavefrontDepth));
 
                     if (wavefrontDepth > 0) {
@@ -438,6 +531,8 @@ Float WavefrontPathIntegrator::Render() {
             if (Options->useGPU && !Options->displayServer.empty())
                 UpdateDisplayRGBFromFilm(pixelBounds);
 
+            OnRenderWaveDone(currentSampleIndex);
+
             progress.Update();
         }
 
@@ -461,7 +556,7 @@ Float WavefrontPathIntegrator::Render() {
             if (state == DisplayState::EXIT)
                 break;
             else if (state == DisplayState::RESET) {
-                sampleIndex = firstSampleIndex - 1;
+                currentSampleIndex = firstSampleIndex - 1;
                 ParallelFor(
                     "Reset pixels", resolution.x * resolution.y,
                     PBRT_CPU_GPU_LAMBDA(int i) {
@@ -470,7 +565,6 @@ Float WavefrontPathIntegrator::Render() {
                     });
             }
         }
-
     }
 
     if (gui) {
@@ -495,8 +589,10 @@ Float WavefrontPathIntegrator::Render() {
 void WavefrontPathIntegrator::HandleEscapedRays() {
     if (!escapedRayQueue)
         return;
+
+    const int sampleIndex = currentSampleIndex;
     ForAllQueued(
-        "Handle escaped rays", escapedRayQueue, maxQueueSize,
+        "Handle escaped rays", ProfilerKernelGroup::WAVEFRONT, escapedRayQueue, maxQueueSize,
         PBRT_CPU_GPU_LAMBDA(const EscapedRayWorkItem w) {
             // Compute weighted radiance for escaped ray
             SampledSpectrum L(0.f);
@@ -517,7 +613,7 @@ void WavefrontPathIntegrator::HandleEscapedRays() {
                     } else {
                         // Compute MIS-weighted radiance contribution from infinite light
                         LightSampleContext ctx = w.prevIntrCtx;
-                        Float lightChoicePDF = lightSampler.PMF(ctx, light);
+                        Float lightChoicePDF = lightSampler.PMF(ctx, nullptr, Hash(sampleIndex, w.pixelIndex, w.depth), light).pmf;
                         SampledSpectrum r_l =
                             w.r_l * lightChoicePDF * light.PDF_Li(ctx, w.rayd, true);
                         L += w.beta * Le / (w.r_u + r_l).Average();
@@ -536,10 +632,17 @@ void WavefrontPathIntegrator::HandleEscapedRays() {
         });
 }
 
-void WavefrontPathIntegrator::HandleEmissiveIntersection() {
+template <typename ConcreteMaterial>
+void WavefrontPathIntegrator::HandleEmissiveIntersectionMaterial() {
+    const bool discretizedAreaLights = Options->discretizeAreaLights > 0;
+    const int sampleIndex = currentSampleIndex;
+    auto queue = hitAreaMaterialLightQueue->Get<HitAreaMaterialLightWorkItem<ConcreteMaterial>>();
+    std::string desc = StringPrintf("Handle emitters hit by indirect rays (%s)",
+                                    ConcreteMaterial::Name());
+
     ForAllQueued(
-        "Handle emitters hit by indirect rays", hitAreaLightQueue, maxQueueSize,
-        PBRT_CPU_GPU_LAMBDA(const HitAreaLightWorkItem w) {
+        desc.c_str(), ProfilerKernelGroup::WAVEFRONT, queue, maxQueueSize,
+        PBRT_CPU_GPU_LAMBDA(const HitAreaMaterialLightWorkItem<ConcreteMaterial> w) {
             // Find emitted radiance from surface that ray hit
             SampledSpectrum Le = w.areaLight.L(w.p, w.n, w.uv, w.wo, w.lambda);
             if (!Le)
@@ -551,12 +654,30 @@ void WavefrontPathIntegrator::HandleEmissiveIntersection() {
             SampledSpectrum L(0.f);
             if (w.depth == 0 || w.specularBounce) {
                 L = w.beta * Le / w.r_u.Average();
-            } else {
-                // Compute MIS-weighted radiance contribution from area light
+            } else if (!discretizedAreaLights) {
+                // Recreate the previous BSDF from the processed material context.
                 Vector3f wi = -w.wo;
                 LightSampleContext ctx = w.prevIntrCtx;
-                Float lightChoicePDF = lightSampler.PMF(ctx, w.areaLight);
-                Float lightPDF = lightChoicePDF * w.areaLight.PDF_Li(ctx, wi, true);
+                MaterialEvalContext mtlCtx = w.GetMaterialEvalContext();
+                SampledWavelengths lambda = w.lambda;
+
+                auto computePMF = [&](auto texEval) {
+                    using ConcreteBxDF = typename ConcreteMaterial::BxDF;
+                    ConcreteBxDF bxdf = w.material->GetBxDF(texEval, mtlCtx, lambda);
+                    BSDF bsdf(mtlCtx.ns, mtlCtx.dpdus, &bxdf);
+                    if (w.prevMaterialCtx.regularized)
+                        bsdf.Regularize();
+
+                    return lightSampler.PMF(
+                        ctx, &bsdf, Hash(sampleIndex, w.pixelIndex, w.depth), w.areaLight);
+                };
+
+                LightPMF l_pmf =
+                    w.prevMaterialCtx.isBasicTextureEvaluator
+                        ? computePMF(BasicTextureEvaluator())
+                        : computePMF(UniversalTextureEvaluator());
+                Le *= l_pmf.scale;
+                Float lightPDF = l_pmf.pmf * w.areaLight.PDF_Li(ctx, wi, true);
 
                 SampledSpectrum r_u = w.r_u;
                 SampledSpectrum r_l = w.r_l * lightPDF;
@@ -572,11 +693,70 @@ void WavefrontPathIntegrator::HandleEmissiveIntersection() {
         });
 }
 
+template <typename Integrator>
+struct HandleEmissiveIntersectionMaterialCallback {
+    Integrator *integrator;
+    template <typename ConcreteMaterial>
+    void operator()() {
+        if constexpr (!std::is_same_v<ConcreteMaterial, MixMaterial>)
+            integrator->template HandleEmissiveIntersectionMaterial<ConcreteMaterial>();
+    }
+};
+
+void WavefrontPathIntegrator::HandleEmissiveIntersection() {
+    const bool discretizedAreaLights = Options->discretizeAreaLights > 0;
+    const int sampleIndex = currentSampleIndex;
+
+    ForAllQueued(
+        "Handle emitters hit by indirect rays", ProfilerKernelGroup::WAVEFRONT,
+        hitAreaLightQueue, maxQueueSize, PBRT_CPU_GPU_LAMBDA(const HitAreaLightWorkItem w) {
+            // Find emitted radiance from surface that ray hit
+            SampledSpectrum Le = w.areaLight.L(w.p, w.n, w.uv, w.wo, w.lambda);
+            if (!Le)
+                return;
+            PBRT_DBG("Got Le %f %f %f %f from hit area light at depth %d\n", Le[0], Le[1],
+                     Le[2], Le[3], w.depth);
+
+            // Compute area light's weighted radiance contribution to the path
+            SampledSpectrum L(0.f);
+            if (w.depth == 0 || w.specularBounce) {
+                L = w.beta * Le / w.r_u.Average();
+            } else if (!discretizedAreaLights) {
+                // Compute MIS-weighted radiance contribution from area light
+                Vector3f wi = -w.wo;
+                LightSampleContext ctx = w.prevIntrCtx;
+                LightPMF l_pmf = lightSampler.PMF(
+                    ctx, nullptr, Hash(sampleIndex, w.pixelIndex, w.depth), w.areaLight);
+                Le *= l_pmf.scale;
+                Float lightPDF = l_pmf.pmf * w.areaLight.PDF_Li(ctx, wi, true);
+
+                SampledSpectrum r_u = w.r_u;
+                SampledSpectrum r_l = w.r_l * lightPDF;
+                L = w.beta * Le / (r_u + r_l).Average();
+            }
+
+            PBRT_DBG("Added L %f %f %f %f for pixel index %d\n", L[0], L[1], L[2], L[3],
+                     w.pixelIndex);
+
+            // Update _L_ in _PixelSampleState_ for area light's radiance
+            L += pixelSampleState.L[w.pixelIndex];
+            pixelSampleState.L[w.pixelIndex] = L;
+        });
+
+    if (useBSDFDependentHitAreaQueue && hitAreaMaterialLightQueue) {
+        ForEachType(HandleEmissiveIntersectionMaterialCallback<WavefrontPathIntegrator>{this},
+                    Material::Types());
+    }
+}
+
 void WavefrontPathIntegrator::TraceShadowRays(int wavefrontDepth) {
+    int maxShadowRays = maxQueueSize * static_cast<int>(requiredShadowRays);
     if (haveMedia)
-        aggregate->IntersectShadowTr(maxQueueSize, shadowRayQueue, &pixelSampleState);
+        aggregate->IntersectShadowTr(maxShadowRays, shadowRayQueue, &pixelSampleState,
+                                     lightSampler);
     else
-        aggregate->IntersectShadow(maxQueueSize, shadowRayQueue, &pixelSampleState);
+        aggregate->IntersectShadow(maxShadowRays, shadowRayQueue, &pixelSampleState,
+                                   lightSampler);
     // Reset shadow ray queue
     Do(
         "Reset shadowRayQueue", PBRT_CPU_GPU_LAMBDA() {
@@ -658,8 +838,8 @@ void WavefrontPathIntegrator::StartDisplayThread() {
     if (Options->useGPU) {
         // Allocate staging memory on the GPU to store the current WIP
         // image.
-        CUDA_CHECK(cudaMalloc(&displayRGB, resolution.x * resolution.y * sizeof(RGB)));
-        CUDA_CHECK(cudaMemset(displayRGB, 0, resolution.x * resolution.y * sizeof(RGB)));
+        displayRGB = GPUAllocate<RGB>(resolution.x * resolution.y);
+        GPUMemset(displayRGB, 0, resolution.x * resolution.y * sizeof(RGB));
 
         // Host-side memory for the WIP Image.  We'll just let this leak so
         // that the lambda passed to DisplayDynamic below doesn't access
@@ -684,19 +864,14 @@ void WavefrontPathIntegrator::StartDisplayThread() {
             // Copy back to the host from the GPU buffer, without any
             // synthronization.
             while (!*exitCopyThread) {
-                CUDA_CHECK(cudaMemcpyAsync(displayRGBHost, displayRGB,
-                                           resolution.x * resolution.y * sizeof(RGB),
-                                           cudaMemcpyDeviceToHost, memcpyStream));
+                GPUCopyAsyncToHost<RGB>(displayRGBHost, displayRGB, resolution.x * resolution.y, memcpyStream);
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-                CUDA_CHECK(cudaStreamSynchronize(memcpyStream));
+                GPUWait(memcpyStream);
             }
 
             // Copy one more time to get the final image before exiting.
-            CUDA_CHECK(cudaMemcpy(displayRGBHost, displayRGB,
-                                  resolution.x * resolution.y * sizeof(RGB),
-                                  cudaMemcpyDeviceToHost));
-            CUDA_CHECK(cudaDeviceSynchronize());
+            GPUCopyToHost<RGB>(displayRGBHost, displayRGB, resolution.x * resolution.y);
+            GPUWait();
         });
 
         // Now on the CPU side, give the display system a lambda that
@@ -734,8 +909,8 @@ void WavefrontPathIntegrator::UpdateDisplayRGBFromFilm(Bounds2i pixelBounds) {
 #ifdef PBRT_BUILD_GPU_RENDERER
     Vector2i resolution = pixelBounds.Diagonal();
     GPUParallelFor(
-        "Update Display RGB Buffer", resolution.x * resolution.y,
-        PBRT_CPU_GPU_LAMBDA(int index) {
+        "Update Display RGB Buffer", ProfilerKernelGroup::WAVEFRONT,
+        resolution.x * resolution.y, PBRT_CPU_GPU_LAMBDA(int index) {
             Point2i p(index % resolution.x, index / resolution.x);
             displayRGB[index] = film.GetPixelRGB(p + pixelBounds.pMin);
         });

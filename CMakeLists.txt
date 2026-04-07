@@ -25,8 +25,6 @@ option (PBRT_USE_PREGENERATED_RGB_TO_SPECTRUM_TABLES "Use pregenerated rgbspectr
 set (PBRT_OPTIX_PATH $ENV{PBRT_OPTIX_PATH} CACHE PATH "Path to OptiX SDK")
 set (PBRT_GPU_SHADER_MODEL "" CACHE STRING "")
 
-
-
 if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   message (STATUS "Setting build type to 'Release' as none was specified.")
   set (CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
@@ -585,6 +583,29 @@ set (PBRT_SOURCE_HEADERS
   src/pbrt/textures.h
   )  
 
+set (PBRT_LIGHT_SAMPLERS_SOURCE_HEADERS
+  src/pbrt/lightsamplers/uniform.h
+  src/pbrt/lightsamplers/power.h
+  src/pbrt/lightsamplers/bvhlight.h
+  src/pbrt/lightsamplers/exhaustive.h
+  src/pbrt/lightsamplers/lightcuts.h
+  src/pbrt/lightsamplers/slc.h
+  src/pbrt/lightsamplers/hslc.h
+  src/pbrt/lightsamplers/rht.h
+  src/pbrt/lightsamplers/ltc.h
+)
+
+set (PBRT_LIGHT_SAMPLERS_SOURCE
+  src/pbrt/lightsamplers/power.cpp
+  src/pbrt/lightsamplers/bvhlight.cpp
+  src/pbrt/lightsamplers/exhaustive.cpp
+  src/pbrt/lightsamplers/lightcuts.cpp
+  src/pbrt/lightsamplers/slc.cpp
+  src/pbrt/lightsamplers/hslc.cpp
+  src/pbrt/lightsamplers/rht.cpp
+  src/pbrt/lightsamplers/ltc.cpp
+)
+
 SET (PBRT_CPU_SOURCE
   src/pbrt/cpu/aggregates.cpp
   src/pbrt/cpu/integrators.cpp
@@ -637,12 +658,14 @@ SET (PBRT_UTIL_SOURCE
   src/pbrt/util/log.cpp
   src/pbrt/util/loopsubdiv.cpp
   src/pbrt/util/lowdiscrepancy.cpp
+  src/pbrt/util/manylights.cpp
   src/pbrt/util/math.cpp
   src/pbrt/util/memory.cpp
   src/pbrt/util/mesh.cpp
   src/pbrt/util/mipmap.cpp
   src/pbrt/util/noise.cpp
   src/pbrt/util/parallel.cpp
+  src/pbrt/util/perlightstats.cpp
   src/pbrt/util/pmj02tables.cpp
   src/pbrt/util/primes.cpp
   src/pbrt/util/print.cpp
@@ -674,10 +697,14 @@ SET (PBRT_UTIL_SOURCE_HEADERS
   src/pbrt/util/float.h
   src/pbrt/util/gui.h
   src/pbrt/util/hash.h
+  src/pbrt/util/heap.h
   src/pbrt/util/image.h
+  src/pbrt/util/lighttree_generic.h
+  src/pbrt/util/perlightstats.h
   src/pbrt/util/log.h
   src/pbrt/util/loopsubdiv.h
   src/pbrt/util/lowdiscrepancy.h
+  src/pbrt/util/manylights.h
   src/pbrt/util/math.h
   src/pbrt/util/memory.h
   src/pbrt/util/mesh.h
@@ -692,6 +719,7 @@ SET (PBRT_UTIL_SOURCE_HEADERS
   src/pbrt/util/rng.h
   src/pbrt/util/sampling.h
   src/pbrt/util/scattering.h
+  src/pbrt/util/shadingpoints.h
   src/pbrt/util/soa.h
   src/pbrt/util/sobolmatrices.h
   src/pbrt/util/spectrum.h
@@ -719,6 +747,7 @@ if (PBRT_CUDA_ENABLED)
     src/pbrt/gpu/memory.h
     src/pbrt/gpu/optix/optix.h
     src/pbrt/gpu/util.h
+    src/pbrt/gpu/lighttreebuilder.h
   )
 
   set_source_files_properties (
@@ -753,6 +782,7 @@ if (PBRT_CUDA_ENABLED)
    src/pbrt/util/log.cpp
 #   src/pbrt/util/loopsubdiv.cpp
    src/pbrt/util/lowdiscrepancy.cpp
+   src/pbrt/util/manylights.cpp
    src/pbrt/util/math.cpp
 #   src/pbrt/util/memory.cpp
    src/pbrt/util/mesh.cpp
@@ -777,6 +807,7 @@ if (PBRT_CUDA_ENABLED)
 
     ${PBRT_WAVEFRONT_SOURCE}
     ${PBRT_GPU_SOURCE}
+    ${PBRT_LIGHT_SAMPLERS_SOURCE}
 
     src/pbrt/cmd/pspec_gpu.cpp
 
@@ -794,6 +825,9 @@ source_group ("Source Files/util" FILES ${PBRT_UTIL_SOURCE})
 source_group ("Header Files/util" FILES ${PBRT_UTIL_SOURCE_HEADERS})
 source_group ("Source Files/wavefront" FILES ${PBRT_WAVEFRONT_SOURCE})
 source_group ("Header Files/wavefront" FILES ${PBRT_WAVEFRONT_SOURCE_HEADERS})
+source_group ("Source Files/lightsamplers" FILES ${PBRT_LIGHT_SAMPLERS_SOURCE})
+source_group ("Header Files/lightsamplers" FILES ${PBRT_LIGHT_SAMPLERS_SOURCE_HEADERS})
+
 if (PBRT_CUDA_ENABLED)
   source_group ("Source Files/gpu" FILES ${PBRT_GPU_SOURCE})
   source_group ("Header Files/gpu" FILES ${PBRT_GPU_SOURCE_HEADERS})
@@ -847,6 +881,8 @@ add_library (pbrt_lib STATIC
   ${PBRT_UTIL_SOURCE_HEADERS}
   ${PBRT_WAVEFRONT_SOURCE}
   ${PBRT_WAVEFRONT_SOURCE_HEADERS}
+  ${PBRT_LIGHT_SAMPLERS_SOURCE}
+  ${PBRT_LIGHT_SAMPLERS_SOURCE_HEADERS}
   ${PBRT_GPU_SOURCE}
   ${PBRT_GPU_SOURCE_HEADERS}
 
@@ -918,7 +954,7 @@ if (PBRT_CUDA_ENABLED)
   add_dependencies (pbrt_embedded_ptx_lib pbrt_soa_generated)
   list (APPEND ALL_PBRT_LIBS pbrt_embedded_ptx_lib)
   if (PBRT_NVML)
-    list (APPEND ALL_PBRT_LIBS "nvidia-ml")
+    list (APPEND ALL_PBRT_LIBS "nvml")
   endif ()
 endif ()
 

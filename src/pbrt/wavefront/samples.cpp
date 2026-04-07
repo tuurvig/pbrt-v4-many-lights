@@ -1,4 +1,5 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// Contributions Copyright(c) 2026 Richard Kvasnica.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -33,7 +34,8 @@ void WavefrontPathIntegrator::GenerateRaySamples(int wavefrontDepth, int sampleI
 
     RayQueue *rayQueue = CurrentRayQueue(wavefrontDepth);
     ForAllQueued(
-        desc.c_str(), rayQueue, maxQueueSize, PBRT_CPU_GPU_LAMBDA(const RayWorkItem w) {
+        desc.c_str(), ProfilerKernelGroup::WAVEFRONT, rayQueue, maxQueueSize,
+        PBRT_CPU_GPU_LAMBDA(const RayWorkItem w) {
             // Generate samples for ray segment at current sample index
             // Find first sample dimension
             int dimension = 6 + 7 * w.depth;
