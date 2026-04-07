@@ -562,8 +562,8 @@ static void ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& re
                 lu1 = std::max(MathEpsilon, child1->compactLightBounds.PhiOrI() * MathEpsilon);
             }
 
-            Float sqrt0 = std::sqrt(lu0);
-            Float sqrt1 = std::sqrt(lu1);
+            Float sqrt0 = lu0;
+            Float sqrt1 = lu1;
             Float sumSqrt = sqrt0 + sqrt1;
             const Float probLeft = std::min(sqrt0 / sumSqrt, OneMinusEpsilon);
             const Float probRight = 1 - probLeft;
