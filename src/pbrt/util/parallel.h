@@ -40,14 +40,6 @@
 #endif
 #endif  // PBRT_IS_WINDOWS
 
-#ifndef PBRT_USE_LEGACY_CUDA_ATOMICS
-#include <cuda/atomic>
-
-// CUDA headers may pull in Windows macros that collide with pbrt::RGB.
-#ifdef RGB
-#undef RGB
-#endif  // RGB
-#endif
 #endif  // __CUDACC__
 
 namespace pbrt {
@@ -293,11 +285,7 @@ class AtomicInt {
     PBRT_CPU_GPU
     T Load() const {
 #ifdef PBRT_IS_GPU_CODE
-#ifdef PBRT_USE_LEGACY_CUDA_ATOMICS
         return value;
-#else
-        return value.load(cuda::std::memory_order_relaxed);
-#endif
 #else
         return value.load(std::memory_order_relaxed);
 #endif  // PBRT_IS_GPU_CODE
@@ -306,11 +294,7 @@ class AtomicInt {
     PBRT_CPU_GPU
     void Store(T v) {
 #ifdef PBRT_IS_GPU_CODE
-#ifdef PBRT_USE_LEGACY_CUDA_ATOMICS
         value = v;
-#else
-        value.store(v, cuda::std::memory_order_relaxed);
-#endif
 #else
         value.store(v, std::memory_order_relaxed);
 #endif  // PBRT_IS_GPU_CODE
@@ -327,7 +311,26 @@ class AtomicInt {
 #ifdef PBRT_USE_LEGACY_CUDA_ATOMICS
         return atomicAdd(&value, v);
 #else
-        return value.fetch_add(v, cuda::std::memory_order_relaxed);
+    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
+        if constexpr (sizeof(T) == 4 && std::is_signed_v<T>) {
+            int old;
+            int addend = static_cast<int>(v);
+            asm volatile("atom.add.relaxed.gpu.s32 %0,[%1],%2;"
+                         : "=r"(old)
+                         : "l"(&value), "r"(addend)
+                         : "memory");
+            return static_cast<T>(old);
+        } else if constexpr (sizeof(T) == 4 && std::is_unsigned_v<T>) {
+            uint32_t old;
+            uint32_t addend = static_cast<uint32_t>(v);
+            asm volatile("atom.add.relaxed.gpu.u32 %0,[%1],%2;"
+                         : "=r"(old)
+                         : "l"(&value), "r"(addend)
+                         : "memory");
+            return static_cast<T>(old);
+        }
+    #endif
+        return atomicAdd(&value, v);
 #endif
 #else
         return value.fetch_add(v, std::memory_order_relaxed);
@@ -339,11 +342,7 @@ class AtomicInt {
   private:
     // AtomicInt Private Members
 #ifdef PBRT_IS_GPU_CODE
-#ifdef PBRT_USE_LEGACY_CUDA_ATOMICS
     T value{0};
-#else
-    cuda::atomic<T, cuda::thread_scope_device> value{0};
-#endif
 #else
     std::atomic<T> value{0};
 #endif  // PBRT_IS_GPU_CODE
