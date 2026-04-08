@@ -59,23 +59,28 @@ class RHTLightSampler {
         Normal3f n = ctx.ns;
         uint32_t bitTrail = m_lightToBitTrail[light];
 
-        int nodeIndex = 0;
+        uint32_t nodeIndex = 0;
         Float PsParent = 1;
         Float T = 1;
         
         const Float uSplit = HashFloat(seed);
         const ResampledTreeNode* node = &m_tree.innerNodes[nodeIndex];
         while (!node->isLeaf) {
-            const uint32_t childrenIndices[2] = {static_cast<uint32_t>(nodeIndex + 1), node->childOrLightIndex};
+            const uint32_t childrenIndices[2] = {nodeIndex + 1, node->childOrLightIndex};
 
-            const Float PsNode = std::min(node->bounds.SplitProbability(p, gamma), PsParent);
-            const Float PsHatNode = std::max(MathEpsilon, 1 - PsNode);
+            const Float splitProb = node->bounds.SplitProbability(p, gamma);
+            Float PsNode = PsParent; // Ps(C)
+            Float T_node = T;
+            if (PsParent - splitProb > MachineEpsilon) {
+                PsNode = splitProb;
+                const Float PsHatNode = 1 - PsNode; // Ps_hat(C)
 
-            // Probability of splitting C_parent given that C has not been split
-            const Float Sns = (PsParent - PsNode) / PsHatNode;
-            const Float Pns = Sns + (1 - Sns) * T;
+                // Probability of splitting parent given that current node has not split.
+                const Float Pns = std::min((PsParent - PsNode) / PsHatNode, OneMinusEpsilon); // Pns(C)
+                T_node = Pns + (1 - Pns) * T;
+            }
 
-            const int child = bitTrail & 1;
+            const uint32_t child = bitTrail & 1;
             
             const ResampledTreeNode *children[2] = {&m_tree.innerNodes[childrenIndices[0]],
                                                     &m_tree.innerNodes[childrenIndices[1]]};
@@ -91,7 +96,7 @@ class RHTLightSampler {
             weight[0] = std::min(ci[0] / sumImportance, OneMinusEpsilon);
             weight[1] = 1 - weight[0];
 
-            T = Pns * weight[child];
+            T = T_node * weight[child];
 
             PsParent = PsNode;
             nodeIndex = childrenIndices[child];
@@ -140,7 +145,9 @@ class RHTLightSampler {
     }
     
     /// Size of the first-stage candidate reservoir set (heuristic H).
+#ifndef PBRT_RHT_RESERVOIR_SET_H_SIZE
 #define PBRT_RHT_RESERVOIR_SET_H_SIZE 16
+#endif
 
     /// @brief Produces direct-light samples using two-stage reservoir resampling.
     /// Stage H collects candidates from tree traversal; stage F resamples by contribution.
@@ -177,7 +184,7 @@ class RHTLightSampler {
             CollectLightCandidates(heuristicHSampler, ctx, seed, u, HashFloat(seed), pmf);
             {
                 Point2f uLightOffset = GetR2SequenceOffset();
-             
+
                 for (int i = 0; i < heuristicHSampler.Size(); ++i) {
                     const Point2f uLightCurrent = uLight;
                     uLight += uLightOffset;
@@ -203,7 +210,7 @@ class RHTLightSampler {
                     Float scatterPDF = 0;
                     SampledSpectrum contribution = ls->L;
                     contribution *= scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
-                
+
                     // F(Si) = bsdf * (Li / pdfLight) * misW * hW(Li)
                     const Float denom = std::max(lightPDF * hProb + scatterPDF, MathEpsilon);
                     const Float fWeight = contribution.MaxComponentValue() / denom;

@@ -219,7 +219,7 @@ void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSe
             const CompactLight &cl(m_tree.leaves[lightIdx]);
             const Float hImportance = cl.bounds.Importance(p, n, m_tree.allLightBounds) / pdf;
 
-            if (pdf > MachineEpsilon && hImportance > MachineEpsilon) {
+            if (pdf > 0 && hImportance > 0) {
                 const LightCandidate candidate{lightIdx, pdf};
                 reservoirSet.Add(candidate, hImportance);
             }
@@ -234,12 +234,17 @@ void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSe
         const uint32_t childIdxLeft = static_cast<uint32_t>(state.nodeIndex + 1);
         const uint32_t childIdxRight = node->childOrLightIndex;
 
-        const Float PsNode = std::min(node->bounds.SplitProbability(p, gamma), state.PsParent); // Ps(C)
-        const Float PsHatNode = 1 - PsNode; // Ps_hat(C)
+        const Float splitProb = node->bounds.SplitProbability(p, gamma);
+        Float PsNode = state.PsParent; // Ps(C)
+        Float T_node = state.T;
+        if (state.PsParent > splitProb) {
+            PsNode = splitProb;
+            const Float PsHatNode = 1 - PsNode; // Ps_hat(C)
 
-        // Probability of splitting parent given that current node has not split.
-        const Float Pns = (state.PsParent - PsNode) / std::max(PsHatNode, MathEpsilon); // Pns(C)
-        const Float T_node = Pns + (1 - Pns) * state.T;
+            // Probability of splitting parent given that current node has not split.
+            const Float Pns = std::min((state.PsParent - PsNode) / PsHatNode, OneMinusEpsilon); // Pns(C)
+            T_node = Pns + (1 - Pns) * state.T;
+        }
 
         const ResampledTreeNode *childLeft = &m_tree.innerNodes[childIdxLeft];
         const ResampledTreeNode *childRight = &m_tree.innerNodes[childIdxRight];
