@@ -181,11 +181,8 @@ WavefrontPathIntegrator::WavefrontPathIntegrator(
         ErrorExit("No light sources specified");
 
     LOG_VERBOSE("Starting to create light sampler");
-    std::string lightSamplerName =
-        scene.integrator.parameters.GetOneString("lightsampler", "bvh");
-    if (allLights.size() == 1)
-        lightSamplerName = "uniform";
-    lightSampler = LightSampler::Create(requiredShadowRays, lightSamplerName, allLights, Options->discretizeAreaLights > 0, alloc);
+    lightSampler = LightSampler::Create(requiredShadowRays,allLights, Options->discretizeAreaLights > 0,
+                                        scene.integrator.parameters, alloc);
     
     // Register the wavefront integrator is going to use an online light sampler, that requires
     // some form of a feedback loop after each wave of samples.

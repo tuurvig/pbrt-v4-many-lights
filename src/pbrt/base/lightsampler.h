@@ -74,6 +74,8 @@ enum ERequiresShadowRays : int {
     E_LIGHTCUTS_SHADOW_RAYS = PBRT_LIGHTCUTS_CUT_SIZE
 };
 
+class ParameterDictionary;
+
 class UniformLightSampler;
 class PowerLightSampler;
 class ExhaustiveLightSampler;
@@ -99,8 +101,8 @@ class LightSampler : public TaggedPointer<UniformLightSampler,
     // LightSampler Interface
     using TaggedPointer::TaggedPointer;
 
-    static LightSampler Create(ERequiresShadowRays& nShadowRays, const std::string &name, pstd::span<const Light> lights, bool discretizedLights,
-                               Allocator alloc);
+    static LightSampler Create(ERequiresShadowRays& nShadowRays, pstd::span<const Light> lights, bool discretizedLights,
+                               const ParameterDictionary& params, Allocator alloc);
 
     std::string ToString() const;
 

@@ -630,10 +630,11 @@ STAT_INT_DISTRIBUTION("Integrator/Path length", pathLength);
 // PathIntegrator Method Definitions
 PathIntegrator::PathIntegrator(int maxDepth, Camera camera, Sampler sampler,
                                Primitive aggregate, std::vector<Light> lights,
-                               const std::string &lightSampleStrategy, bool regularize)
+                               const ParameterDictionary& parameters, bool regularize)
     : RayIntegrator(camera, sampler, aggregate, lights),
       maxDepth(maxDepth), requiredShadowRays(E_DEFAULT_SHADOW_RAYS),
-      lightSampler(LightSampler::Create(requiredShadowRays, lightSampleStrategy, lights, Options->discretizeAreaLights > 0, Allocator())),
+      lightSampler(LightSampler::Create(requiredShadowRays, lights, Options->discretizeAreaLights > 0,
+                                        parameters, Allocator())),
       regularize(regularize),
       isOnlineLightSampler(false) {
     // Register the integrator is going to use an online light sampler, that requires
@@ -914,10 +915,9 @@ std::unique_ptr<PathIntegrator> PathIntegrator::Create(
     const ParameterDictionary &parameters, Camera camera, Sampler sampler,
     Primitive aggregate, std::vector<Light> lights, const FileLoc *loc) {
     int maxDepth = parameters.GetOneInt("maxdepth", 5);
-    std::string lightStrategy = parameters.GetOneString("lightsampler", "bvh");
     bool regularize = parameters.GetOneBool("regularize", false);
     return std::make_unique<PathIntegrator>(maxDepth, camera, sampler, aggregate, lights,
-                                            lightStrategy, regularize);
+                                            parameters, regularize);
 }
 
 // SimpleVolPathIntegrator Method Definitions
@@ -1591,10 +1591,9 @@ std::unique_ptr<VolPathIntegrator> VolPathIntegrator::Create(
     const ParameterDictionary &parameters, Camera camera, Sampler sampler,
     Primitive aggregate, std::vector<Light> lights, const FileLoc *loc) {
     int maxDepth = parameters.GetOneInt("maxdepth", 5);
-    std::string lightStrategy = parameters.GetOneString("lightsampler", "bvh");
     bool regularize = parameters.GetOneBool("regularize", false);
     return std::make_unique<VolPathIntegrator>(maxDepth, camera, sampler, aggregate,
-                                               lights, lightStrategy, regularize);
+                                               lights, parameters, regularize);
 }
 
 // AOIntegrator Method Definitions

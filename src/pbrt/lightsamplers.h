@@ -11,10 +11,7 @@
 #include <pbrt/base/light.h>
 #include <pbrt/base/lightsampler.h>
 #include <pbrt/lights.h>  // LightBounds. Should that live elsewhere?
-#include <pbrt/util/containers.h>
-#include <pbrt/util/hash.h>
 #include <pbrt/util/pstd.h>
-#include <pbrt/util/sampling.h>
 #include <pbrt/util/vecmath.h>
 
 #include <pbrt/lightsamplers/uniform.h>
@@ -29,8 +26,6 @@
 #include <pbrt/lightsamplers/ltc.h>
 
 #include <algorithm>
-#include <cstdint>
-#include <string>
 
 namespace pbrt {
 

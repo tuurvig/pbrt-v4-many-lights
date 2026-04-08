@@ -217,7 +217,7 @@ class PathIntegrator : public RayIntegrator {
     // PathIntegrator Public Methods
     PathIntegrator(int maxDepth, Camera camera, Sampler sampler, Primitive aggregate,
                    std::vector<Light> lights,
-                   const std::string &lightSampleStrategy = "bvh",
+                   const ParameterDictionary &parameters,
                    bool regularize = false);
 
     SampledSpectrum Li(RayDifferential ray, uint32_t seed, SampledWavelengths &lambda, Sampler sampler,
@@ -282,11 +282,12 @@ class VolPathIntegrator : public RayIntegrator {
     // VolPathIntegrator Public Methods
     VolPathIntegrator(int maxDepth, Camera camera, Sampler sampler, Primitive aggregate,
                       std::vector<Light> lights,
-                      const std::string &lightSampleStrategy = "bvh",
+                      const ParameterDictionary &parameters,
                       bool regularize = false)
         : RayIntegrator(camera, sampler, aggregate, lights),
           maxDepth(maxDepth), requiredShadowRays(E_DEFAULT_SHADOW_RAYS),
-          lightSampler(LightSampler::Create(requiredShadowRays, lightSampleStrategy, lights, Options->discretizeAreaLights > 0, Allocator())),
+          lightSampler(LightSampler::Create(requiredShadowRays, lights, Options->discretizeAreaLights > 0,
+                                            parameters, Allocator())),
           regularize(regularize),
           isOnlineLightSampler(false) {
         // Register the integrator is going to use an online light sampler, that requires

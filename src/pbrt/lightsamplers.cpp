@@ -5,6 +5,9 @@
 
 #include <pbrt/lightsamplers.h>
 
+#include <pbrt/paramdict.h>
+#include <pbrt/options.h>
+
 #include <pbrt/interaction.h>
 #include <pbrt/lights.h>
 #include <pbrt/util/check.h>
@@ -16,7 +19,6 @@
 #include <pbrt/util/print.h>
 #include <pbrt/util/sampling.h>
 #include <pbrt/util/spectrum.h>
-#include <pbrt/options.h>
 
 #include <atomic>
 #include <cstdint>
@@ -30,35 +32,45 @@ std::string SampledLight::ToString() const {
                         light ? light.ToString().c_str() : "(nullptr)", p);
 }
 
-LightSampler LightSampler::Create(ERequiresShadowRays& nShadowRays, const std::string &name, pstd::span<const Light> lights, bool discretizedLights,
-                                  Allocator alloc) {
+LightSampler LightSampler::Create(ERequiresShadowRays &nShadowRays, pstd::span<const Light> lights, const bool discretizedLights,
+                                  const ParameterDictionary& params, Allocator alloc) {
     nShadowRays = E_DEFAULT_SHADOW_RAYS;
+    std::string name = params.GetOneString("lightsampler", "bvh");
+    if (lights.size() == 1)
+        name = "uniform";
+
     if (name == "uniform")
         return alloc.new_object<UniformLightSampler>(lights, alloc);
     if (name == "power")
         return alloc.new_object<PowerLightSampler>(lights, alloc);
-    else if (name == "bvh")
+    if (name == "bvh")
         return alloc.new_object<BVHLightSampler>(lights, alloc);
-    else if (name == "lightcuts") {
+    if (name == "lightcuts") {
         nShadowRays = E_LIGHTCUTS_SHADOW_RAYS;
         if (discretizedLights) {
             return alloc.new_object<LightcutsLightSampler>(lights, alloc);
         }
-        Error(R"(Cannot use lightcuts lightsampler without discretizing area lights. Using "bvh".)");
+        Error(R"(Cannot use lightcuts lightsampler without discretizing area lights. Using "slc" stochastic lightcuts.)");
+        name = "slc";
     }
-    else if (name == "slc") {
+    if (name == "slc") {
         nShadowRays = E_LIGHTCUTS_SHADOW_RAYS;
-        return alloc.new_object<SLCLightSampler>(lights, alloc);
+        const Float threshold = params.GetOneFloat("lsParam1", 0.02f);
+        return alloc.new_object<SLCLightSampler>(lights, alloc, threshold);
     }
-    else if (name == "hslc") {
+    if (name == "hslc") {
         return alloc.new_object<HSLCLightSampler>(lights, alloc);
     }
-    else if (name == "rht") {
+    if (name == "rht") {
         nShadowRays = E_RHT_SHADOW_RAYS;
-        return alloc.new_object<RHTLightSampler>(lights, alloc);
+        const Float gamma = params.GetOneFloat("lsParam1", 0.2f);
+        return alloc.new_object<RHTLightSampler>(lights, alloc, gamma);
     }
-    else if (name == "ltc") {
-        return alloc.new_object<LTCLightSampler>(lights, alloc);
+    if (name == "ltc") {
+        const Float beta = params.GetOneFloat("lsParam1", 2.0f);
+        const Float omega = params.GetOneFloat("lsParam2", Float(6) / 7);
+        const Float gamma = params.GetOneFloat("lsParam3", 128.0f);
+        return alloc.new_object<LTCLightSampler>(lights, alloc, beta, omega, gamma);
     }
     else if (name == "exhaustive")
         return alloc.new_object<ExhaustiveLightSampler>(lights, alloc);
