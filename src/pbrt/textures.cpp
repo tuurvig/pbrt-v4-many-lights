@@ -1098,6 +1098,7 @@ GPUSpectrumImageTexture *GPUSpectrumImageTexture::Create(
     const char *defaultEncoding = HasExtension(filename, "png") ? "sRGB" : "linear";
     std::string encodingString = parameters.GetOneString("encoding", defaultEncoding);
     ColorEncoding encoding = ColorEncoding::Get(encodingString, alloc);
+    bool useSRGBDecoding = encoding.Is<sRGBColorEncoding>();
 
     // These have to be initialized one way or another in the below
     cudaMipmappedArray_t mipArray;
@@ -1304,7 +1305,7 @@ GPUSpectrumImageTexture *GPUSpectrumImageTexture::Create(
             : cudaFilterModePoint;
     texDesc.borderColor[0] = texDesc.borderColor[1] = texDesc.borderColor[2] =
         texDesc.borderColor[3] = 0.f;
-    texDesc.sRGB = 1;
+    texDesc.sRGB = useSRGBDecoding ? 1 : 0;
 
     cudaTextureObject_t texObj;
     CUDA_CHECK(cudaCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr));
@@ -1341,6 +1342,7 @@ GPUFloatImageTexture *GPUFloatImageTexture::Create(
     const char *defaultEncoding = HasExtension(filename, "png") ? "sRGB" : "linear";
     std::string encodingString = parameters.GetOneString("encoding", defaultEncoding);
     ColorEncoding encoding = ColorEncoding::Get(encodingString, alloc);
+    bool useSRGBDecoding = encoding.Is<sRGBColorEncoding>();
 
     cudaMipmappedArray_t mipArray;
     int nMIPMapLevels = 0;
@@ -1422,7 +1424,7 @@ GPUFloatImageTexture *GPUFloatImageTexture::Create(
             : cudaFilterModePoint;
     texDesc.borderColor[0] = texDesc.borderColor[1] = texDesc.borderColor[2] =
         texDesc.borderColor[3] = 0.f;
-    texDesc.sRGB = 1;
+    texDesc.sRGB = useSRGBDecoding ? 1 : 0;
 
     cudaTextureObject_t texObj;
     CUDA_CHECK(cudaCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr));
