@@ -183,19 +183,19 @@ PBRT_CPU_GPU Float SphericalLightBounds::Importance(Point3f p, Normal3f n) const
 }
 
 
-PBRT_CPU_GPU Float SphericalLightBounds::SplitProbability(Point3f p, Float gamma) const {
-    if (radius <= MathEpsilon) {
+PBRT_CPU_GPU Float SphericalLightBounds::SplitProbability(const Point3f p, const Float gamma) const {
+    if (radius <= MachineEpsilon) {
         return 0;
     }
 
     // distance fromt he shading point to the cluster center
-    Float d = Distance(center, p);
+    const Float d = Distance(center, p);
 
     // distance to cluster boundary normalized by radius
-    Float t = std::max(Float(0), d - radius) / radius;
+    const Float t = std::max(Float(0), d - radius) / radius;
 
     // Cauchy bell-shaped curve
-    Float splitProb = 1 / (1 + Sqr(t) / Sqr(gamma));
+    const Float splitProb = 1 / (1 + Sqr(t) / Sqr(gamma));
 
     return splitProb;
 }

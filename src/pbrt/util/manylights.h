@@ -753,7 +753,9 @@ static bool ComputeErrorBounds(Float &err0, Float &err1, Point3f p, Vector3f wo,
 /// Lightcuts tree cut function
 //////////////////////////////////////////////////////////
 
+#ifndef PBRT_LIGHTCUTS_CUT_SIZE
 #define PBRT_LIGHTCUTS_CUT_SIZE 32
+#endif
 
 struct alignas(8) CutData {
     Float estimate;

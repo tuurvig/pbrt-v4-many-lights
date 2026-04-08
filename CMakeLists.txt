@@ -24,6 +24,10 @@ option (PBRT_NVML "Use NVML for GPU performance measurement" OFF)
 option (PBRT_USE_PREGENERATED_RGB_TO_SPECTRUM_TABLES "Use pregenerated rgbspectrum_*.cpp files rather than running rgb2spec_opt to generate them at build time" OFF)
 set (PBRT_OPTIX_PATH $ENV{PBRT_OPTIX_PATH} CACHE PATH "Path to OptiX SDK")
 set (PBRT_GPU_SHADER_MODEL "" CACHE STRING "")
+set (PBRT_LIGHTCUTS_CUT_SIZE 32 CACHE STRING "Maximum number of clusters in Lightcuts/SLC cuts.")
+set (PBRT_LTC_MAX_CUT_SIZE 64 CACHE STRING "Maximum number of clusters used by LTC online cuts.")
+set (PBRT_RHT_F_SAMPLES 2 CACHE STRING "Number of final RHT shadow-ray samples.")
+set (PBRT_RHT_RESERVOIR_SET_H_SIZE 16 CACHE STRING "Number of first-stage heuristic-H reservoirs used by RHT.")
 
 if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   message (STATUS "Setting build type to 'Release' as none was specified.")
@@ -95,6 +99,12 @@ endif ()
 if (PBRT_DBG_LOGGING)
   list (APPEND PBRT_DEFINITIONS "PBRT_DBG_LOGGING")
 endif ()
+list (APPEND PBRT_DEFINITIONS
+  "PBRT_LIGHTCUTS_CUT_SIZE=${PBRT_LIGHTCUTS_CUT_SIZE}"
+  "PBRT_LTC_MAX_CUT_SIZE=${PBRT_LTC_MAX_CUT_SIZE}"
+  "PBRT_RHT_F_SAMPLES=${PBRT_RHT_F_SAMPLES}"
+  "PBRT_RHT_RESERVOIR_SET_H_SIZE=${PBRT_RHT_RESERVOIR_SET_H_SIZE}"
+)
 
 #######################################
 ## ext

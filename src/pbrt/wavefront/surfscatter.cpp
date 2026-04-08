@@ -41,7 +41,7 @@ struct EvaluateMaterialCallback {
 void WavefrontPathIntegrator::EvaluateMaterialsAndBSDFs(int wavefrontDepth,
                                                         Transform movingFromCamera) {
     switch (requiredShadowRays) {
-        case E_TWO_SHADOW_RAYS: EvaluateMaterialsAndBSDFs<E_TWO_SHADOW_RAYS>(wavefrontDepth, movingFromCamera); break;
+        case E_RHT_SHADOW_RAYS: EvaluateMaterialsAndBSDFs<E_RHT_SHADOW_RAYS>(wavefrontDepth, movingFromCamera); break;
         case E_LIGHTCUTS_SHADOW_RAYS: EvaluateMaterialsAndBSDFs<E_LIGHTCUTS_SHADOW_RAYS>(wavefrontDepth, movingFromCamera); break;
         default: EvaluateMaterialsAndBSDFs<E_DEFAULT_SHADOW_RAYS>(wavefrontDepth, movingFromCamera); break;
     }

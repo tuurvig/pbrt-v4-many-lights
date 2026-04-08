@@ -64,10 +64,14 @@ struct SampledLd {
     Float pdfCancellationFactor;
 };
 
+#ifndef PBRT_RHT_F_SAMPLES
+#define PBRT_RHT_F_SAMPLES 2
+#endif
+
 enum ERequiresShadowRays : int {
     E_DEFAULT_SHADOW_RAYS = 1,
-    E_TWO_SHADOW_RAYS = 2,
-    E_LIGHTCUTS_SHADOW_RAYS = 32
+    E_RHT_SHADOW_RAYS = PBRT_RHT_F_SAMPLES,
+    E_LIGHTCUTS_SHADOW_RAYS = PBRT_LIGHTCUTS_CUT_SIZE
 };
 
 class UniformLightSampler;

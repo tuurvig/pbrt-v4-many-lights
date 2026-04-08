@@ -55,7 +55,9 @@ struct alignas(8) PartitionTreeNode {
     };
 };
 
+#ifndef PBRT_LTC_MAX_CUT_SIZE
 #define PBRT_LTC_MAX_CUT_SIZE 64
+#endif
 
 /// @brief Per-partition online cut state used by LTC learning updates.
 /// Stores estimated cluster importances and accumulators for contributions

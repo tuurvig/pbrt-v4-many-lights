@@ -273,7 +273,7 @@ struct SampleMediumScatteringCallback {
 
 void WavefrontPathIntegrator::SampleMediumScattering(int wavefrontDepth) {
     switch (requiredShadowRays) {
-        case E_TWO_SHADOW_RAYS: SampleMediumScattering<E_TWO_SHADOW_RAYS>(wavefrontDepth); break;
+        case E_RHT_SHADOW_RAYS: SampleMediumScattering<E_RHT_SHADOW_RAYS>(wavefrontDepth); break;
         case E_LIGHTCUTS_SHADOW_RAYS: SampleMediumScattering<E_LIGHTCUTS_SHADOW_RAYS>(wavefrontDepth); break;
         default: SampleMediumScattering<E_DEFAULT_SHADOW_RAYS>(wavefrontDepth); break;
     }

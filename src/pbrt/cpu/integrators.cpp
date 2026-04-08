@@ -826,7 +826,7 @@ inline SampledSpectrum PathIntegrator::SampleLd(const SurfaceInteraction &intr, 
                                          SampledWavelengths &lambda,
                                          Sampler sampler) const {
     switch (requiredShadowRays) {
-        case E_TWO_SHADOW_RAYS: return SampleLd<E_TWO_SHADOW_RAYS>(intr, seed, bsdf, lambda, sampler); 
+        case E_RHT_SHADOW_RAYS: return SampleLd<E_RHT_SHADOW_RAYS>(intr, seed, bsdf, lambda, sampler); 
         case E_LIGHTCUTS_SHADOW_RAYS: return SampleLd<E_LIGHTCUTS_SHADOW_RAYS>(intr, seed, bsdf, lambda, sampler); 
         default: return SampleLd<E_DEFAULT_SHADOW_RAYS>(intr, seed, bsdf, lambda, sampler); 
     }
@@ -1425,7 +1425,7 @@ inline SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, uint
                                             SampledSpectrum beta,
                                             SampledSpectrum r_p) const {
     switch (requiredShadowRays) {
-        case E_TWO_SHADOW_RAYS: return SampleLd<E_TWO_SHADOW_RAYS>(intr, seed, bsdf, lambda, sampler, beta, r_p); 
+        case E_RHT_SHADOW_RAYS: return SampleLd<E_RHT_SHADOW_RAYS>(intr, seed, bsdf, lambda, sampler, beta, r_p); 
         case E_LIGHTCUTS_SHADOW_RAYS: return SampleLd<E_LIGHTCUTS_SHADOW_RAYS>(intr, seed, bsdf, lambda, sampler, beta, r_p); 
         default: return SampleLd<E_DEFAULT_SHADOW_RAYS>(intr, seed, bsdf, lambda, sampler, beta, r_p); 
     }

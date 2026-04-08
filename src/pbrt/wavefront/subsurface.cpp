@@ -16,7 +16,7 @@
 namespace pbrt {
 void WavefrontPathIntegrator::SampleSubsurface(int wavefrontDepth) {
     switch (requiredShadowRays) {
-        case E_TWO_SHADOW_RAYS: SampleSubsurface<E_TWO_SHADOW_RAYS>(wavefrontDepth); break;
+        case E_RHT_SHADOW_RAYS: SampleSubsurface<E_RHT_SHADOW_RAYS>(wavefrontDepth); break;
         case E_LIGHTCUTS_SHADOW_RAYS: SampleSubsurface<E_LIGHTCUTS_SHADOW_RAYS>(wavefrontDepth); break;
         default: SampleSubsurface<E_DEFAULT_SHADOW_RAYS>(wavefrontDepth); break;
     }

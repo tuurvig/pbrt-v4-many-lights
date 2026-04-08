@@ -2,8 +2,19 @@
   "version": 3,
   "configurePresets": [
     {
+      "name": "lightsamplers-base",
+      "hidden": true,
+      "cacheVariables": {
+        "PBRT_LIGHTCUTS_CUT_SIZE": "32",
+        "PBRT_LTC_MAX_CUT_SIZE": "64",
+        "PBRT_RHT_RESERVOIR_SET_H_SIZE": "16",
+        "PBRT_RHT_F_SAMPLES": "2"
+      }
+    },
+    {
       "name": "windows-base",
       "hidden": true,
+      "inherits": "lightsamplers-base",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/bin-${presetName}",
       "cacheVariables": {
@@ -28,6 +39,7 @@
     {
       "name": "linux-base",
       "hidden": true,
+      "inherits": "lightsamplers-base",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/bin-${presetName}",
       "cacheVariables": {
