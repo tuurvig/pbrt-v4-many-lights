@@ -26,6 +26,12 @@
 #include <vector>
 
 #ifdef __CUDACC__
+#include <cuda/atomic>
+#include <cuda/std/atomic>
+#endif
+
+#ifdef __CUDACC__
+#if defined(__CUDA_ARCH__)
 #ifdef PBRT_IS_WINDOWS
 #if (__CUDA_ARCH__ < 700)
 #ifndef PBRT_USE_LEGACY_CUDA_ATOMICS
@@ -39,6 +45,7 @@
 #endif
 #endif
 #endif  // PBRT_IS_WINDOWS
+#endif  // defined(__CUDA_ARCH__)
 
 #endif  // __CUDACC__
 
@@ -308,30 +315,7 @@ class AtomicInt {
     PBRT_CPU_GPU
     T FetchAdd(T v) {
 #ifdef PBRT_IS_GPU_CODE
-#ifdef PBRT_USE_LEGACY_CUDA_ATOMICS
         return atomicAdd(&value, v);
-#else
-    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
-        if constexpr (sizeof(T) == 4 && std::is_signed_v<T>) {
-            int old;
-            int addend = static_cast<int>(v);
-            asm volatile("atom.add.relaxed.gpu.s32 %0,[%1],%2;"
-                         : "=r"(old)
-                         : "l"(&value), "r"(addend)
-                         : "memory");
-            return static_cast<T>(old);
-        } else if constexpr (sizeof(T) == 4 && std::is_unsigned_v<T>) {
-            uint32_t old;
-            uint32_t addend = static_cast<uint32_t>(v);
-            asm volatile("atom.add.relaxed.gpu.u32 %0,[%1],%2;"
-                         : "=r"(old)
-                         : "l"(&value), "r"(addend)
-                         : "memory");
-            return static_cast<T>(old);
-        }
-    #endif
-        return atomicAdd(&value, v);
-#endif
 #else
         return value.fetch_add(v, std::memory_order_relaxed);
 #endif  // PBRT_IS_GPU_CODE
