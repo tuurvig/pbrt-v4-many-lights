@@ -49,6 +49,8 @@ class ProgressReporter {
 
     ~ProgressReporter();
 
+    static int64_t TimeLimitTotalWork(Float renderTimeLimitSeconds);
+    void UpdateTimeLimit(Float renderTimeLimitSeconds);
     void Update(int64_t num = 1);
     void Done();
     double ElapsedSeconds() const;
@@ -68,6 +70,7 @@ class ProgressReporter {
     std::atomic<bool> exitThread;
     std::thread updateThread;
     pstd::optional<float> finishTime;
+    int64_t timeLimitReportedMilliseconds = 0;
 
 #ifdef PBRT_BUILD_GPU_RENDERER
     std::vector<cudaEvent_t> gpuEvents;

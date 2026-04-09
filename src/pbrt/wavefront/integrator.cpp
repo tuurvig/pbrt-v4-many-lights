@@ -31,7 +31,9 @@
 #include <pbrt/util/taggedptr.h>
 #include <pbrt/wavefront/aggregate.h>
 
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstring>
 #include <iostream>
 #include <map>
@@ -418,9 +420,12 @@ Float WavefrontPathIntegrator::Render() {
 
     bool useRenderTimeLimit = Options->renderTimeSeconds.has_value();
     Float renderTimeLimit = useRenderTimeLimit ? *Options->renderTimeSeconds : 0;
+    int64_t progressTotal = useRenderTimeLimit
+                                ? ProgressReporter::TimeLimitTotalWork(renderTimeLimit)
+                                : lastSampleIndex - firstSampleIndex;
     ProgressReporter progress(
-        useRenderTimeLimit ? 1 : lastSampleIndex - firstSampleIndex, "Rendering",
-        Options->quiet || Options->interactive || useRenderTimeLimit, Options->useGPU);
+        progressTotal, "Rendering", Options->quiet || Options->interactive,
+        Options->useGPU && !useRenderTimeLimit);
     currentSampleIndex = firstSampleIndex;
     samplesRendered = 0;
     for (; currentSampleIndex < lastSampleIndex || gui || useRenderTimeLimit;
@@ -535,7 +540,10 @@ Float WavefrontPathIntegrator::Render() {
 
             OnRenderWaveDone(currentSampleIndex);
 
-            progress.Update();
+            if (useRenderTimeLimit)
+                progress.UpdateTimeLimit(renderTimeLimit);
+            else
+                progress.Update();
             ++samplesRendered;
 
             if (useRenderTimeLimit && timer.ElapsedSeconds() > renderTimeLimit) {

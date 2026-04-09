@@ -43,6 +43,7 @@
 #include <pbrt/util/string.h>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 namespace pbrt {
@@ -106,8 +107,10 @@ void ImageTileIntegrator::Render() {
     int spp = samplerPrototype.SamplesPerPixel();
     bool useRenderTimeLimit = Options->renderTimeSeconds.has_value();
     Float renderTimeLimit = useRenderTimeLimit ? *Options->renderTimeSeconds : 0;
-    ProgressReporter progress(useRenderTimeLimit ? 1 : int64_t(spp) * pixelBounds.Area(),
-                              "Rendering", Options->quiet || useRenderTimeLimit);
+    int64_t progressTotal =
+        useRenderTimeLimit ? ProgressReporter::TimeLimitTotalWork(renderTimeLimit)
+                           : int64_t(spp) * pixelBounds.Area();
+    ProgressReporter progress(progressTotal, "Rendering", Options->quiet);
 
     int waveStart = 0, waveEnd = 1, nextWaveSize = 1;
 
@@ -189,9 +192,12 @@ void ImageTileIntegrator::Render() {
             }
             PBRT_DBG("Finished image tile (%d,%d)-(%d,%d)\n", tileBounds.pMin.x,
                      tileBounds.pMin.y, tileBounds.pMax.x, tileBounds.pMax.y);
-            progress.Update((waveEnd - waveStart) * tileBounds.Area());
+            if (!useRenderTimeLimit)
+                progress.Update((waveEnd - waveStart) * tileBounds.Area());
         });
         OnRenderWaveDone(waveStart);
+        if (useRenderTimeLimit)
+            progress.UpdateTimeLimit(renderTimeLimit);
 
         // Update start and end wave
         waveStart = waveEnd;
@@ -3027,8 +3033,10 @@ void SPPMIntegrator::Render() {
     Float renderTimeLimit = useRenderTimeLimit ? *Options->renderTimeSeconds : 0;
     int nIterations =
         useRenderTimeLimit ? std::numeric_limits<int>::max() : configuredIterations;
-    ProgressReporter progress(useRenderTimeLimit ? 1 : 2 * int64_t(nIterations),
-                              "Rendering", Options->quiet || useRenderTimeLimit);
+    int64_t progressTotal = useRenderTimeLimit
+                                ? ProgressReporter::TimeLimitTotalWork(renderTimeLimit)
+                                : 2 * int64_t(nIterations);
+    ProgressReporter progress(progressTotal, "Rendering", Options->quiet);
     const Float invSqrtSPP = 1.f / std::sqrt(configuredIterations);
     Film film = camera.GetFilm();
     Bounds2i pixelBounds = film.PixelBounds();
@@ -3216,7 +3224,10 @@ void SPPMIntegrator::Render() {
                 }
             }
         });
-        progress.Update();
+        if (useRenderTimeLimit)
+            progress.UpdateTimeLimit(renderTimeLimit);
+        else
+            progress.Update();
         // Create grid of all SPPM visible points
         // Allocate grid for SPPM visible points
         int hashSize = NextPrime(nPixels);
@@ -3411,7 +3422,10 @@ void SPPMIntegrator::Render() {
         // Reset _threadScratchBuffers_ after tracing photons
         threadScratchBuffers.ForAll([](ScratchBuffer &buffer) { buffer.Reset(); });
 
-        progress.Update();
+        if (useRenderTimeLimit)
+            progress.UpdateTimeLimit(renderTimeLimit);
+        else
+            progress.Update();
         photonPaths += photonsPerIteration;
 
         // Update pixel values from this pass's photons
@@ -3690,8 +3704,10 @@ void FunctionIntegrator::Render() {
         image.Write(imageFilename);
     }
 
-    ProgressReporter prog(useRenderTimeLimit ? 1 : nSamples, "Sampling",
-                          Options->quiet || useRenderTimeLimit);
+    int64_t progressTotal = useRenderTimeLimit
+                                ? ProgressReporter::TimeLimitTotalWork(renderTimeLimit)
+                                : nSamples;
+    ProgressReporter prog(progressTotal, "Sampling", Options->quiet);
 
     bool isHalton = baseSampler.Is<HaltonSampler>();
     bool isStratified = baseSampler.Is<StratifiedSampler>();
@@ -3722,7 +3738,10 @@ void FunctionIntegrator::Render() {
         if (skipBad) {
             int nSamples = sampleIndex + 1;
             if (isStratified && Sqr(int(std::sqrt(nSamples))) != nSamples) {
-                prog.Update();
+                if (useRenderTimeLimit)
+                    prog.UpdateTimeLimit(renderTimeLimit);
+                else
+                    prog.Update();
                 if (useRenderTimeLimit && prog.ElapsedSeconds() > renderTimeLimit)
                     break;
                 continue;
@@ -3864,7 +3883,10 @@ void FunctionIntegrator::Render() {
 
             result += StringPrintf("%d %f\n", sampleIndex + 1, mse);
         }
-        prog.Update();
+        if (useRenderTimeLimit)
+            prog.UpdateTimeLimit(renderTimeLimit);
+        else
+            prog.Update();
 
         if (useRenderTimeLimit && prog.ElapsedSeconds() > renderTimeLimit) {
             LOG_VERBOSE("Reached --render-time limit after %.3f s", prog.ElapsedSeconds());

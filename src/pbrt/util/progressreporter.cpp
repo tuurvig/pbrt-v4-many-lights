@@ -11,7 +11,9 @@
 #include <pbrt/util/parallel.h>
 #include <pbrt/util/print.h>
 
+#include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <cstdio>
 #include <memory>
 
@@ -66,6 +68,22 @@ ProgressReporter::ProgressReporter(int64_t totalWork, std::string title, bool qu
 
 ProgressReporter::~ProgressReporter() {
     Done();
+}
+
+int64_t ProgressReporter::TimeLimitTotalWork(Float renderTimeLimitSeconds) {
+    return std::max<int64_t>(1, int64_t(std::ceil(1000 * renderTimeLimitSeconds)));
+}
+
+void ProgressReporter::UpdateTimeLimit(Float renderTimeLimitSeconds) {
+    int64_t elapsedMilliseconds = int64_t(1000 * ElapsedSeconds());
+    int64_t progressTotalMilliseconds = TimeLimitTotalWork(renderTimeLimitSeconds);
+    if (elapsedMilliseconds > progressTotalMilliseconds)
+        elapsedMilliseconds = progressTotalMilliseconds;
+
+    if (elapsedMilliseconds > timeLimitReportedMilliseconds) {
+        Update(elapsedMilliseconds - timeLimitReportedMilliseconds);
+        timeLimitReportedMilliseconds = elapsedMilliseconds;
+    }
 }
 
 void ProgressReporter::printBar() {
