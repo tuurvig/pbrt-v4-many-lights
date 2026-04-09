@@ -73,6 +73,7 @@ Rendering options:
   --quiet                       Suppress all text output other than error messages.
   --render-coord-sys <name>     Coordinate system to use for the scene when rendering,
                                 where name is "camera", "cameraworld", or "world".
+  --render-time <seconds>       Render for this many seconds, ignoring scene/CLI spp.
   --seed <n>                    Set random number generator seed. Default: 0.
   --stats                       Print various statistics after rendering completes.
   --spp <n>                     Override number of pixel samples specified in scene
@@ -198,6 +199,7 @@ int main(int argc, char *argv[]) {
             ParseArg(&iter, args.end(), "quick", &options.quickRender, onError) ||
             ParseArg(&iter, args.end(), "quiet", &options.quiet, onError) ||
             ParseArg(&iter, args.end(), "render-coord-sys", &renderCoordSys, onError) ||
+            ParseArg(&iter, args.end(), "render-time", &options.renderTimeSeconds, onError) ||
             ParseArg(&iter, args.end(), "seed", &options.seed, onError) ||
             ParseArg(&iter, args.end(), "spp", &options.pixelSamples, onError) ||
             ParseArg(&iter, args.end(), "stats", &options.printStatistics, onError) ||
@@ -241,6 +243,9 @@ int main(int argc, char *argv[]) {
         options.renderingSpace = RenderingCoordinateSystem::World;
     else
         ErrorExit("%s: unknown rendering coordinate system.", renderCoordSys);
+
+    if (options.renderTimeSeconds && *options.renderTimeSeconds <= 0)
+        ErrorExit("The --render-time value must be greater than zero.");
 
     if (!options.mseReferenceImage.empty() && options.mseReferenceOutput.empty())
         ErrorExit("Must provide MSE reference output filename via "

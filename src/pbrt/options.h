@@ -46,6 +46,7 @@ struct PBRTOptions : BasicPBRTOptions {
     bool recordPixelStatistics = false;
     bool recordPerLightStatistics = false;
     bool printStatistics = false;
+    pstd::optional<Float> renderTimeSeconds;
     pstd::optional<int> pixelSamples;
     pstd::optional<int> gpuDevice;
     bool quickRender = false;

@@ -40,7 +40,7 @@ std::string PBRTOptions::ToString() const {
         "forceDiffuse: %s useGPU: %s wavefront: %s interactive: %s fullscreen %s "
         "renderingSpace: %s nThreads: %s logLevel: %s logFile: %s logUtilization: %s "
         "writePartialImages: %s writeRenderTime: %s recordPixelStatistics: %s "
-        "recordPerLightStatistics: %s "
+        "recordPerLightStatistics: %s renderTimeSeconds: %s "
         "printStatistics: %s pixelSamples: %s gpuDevice: %s quickRender: %s upgrade: %s "
         "imageFile: %s mseReferenceImage: %s mseReferenceOutput: %s debugStart: %s "
         "displayServer: %s cropWindow: %s pixelBounds: %s pixelMaterial: %s "
@@ -48,8 +48,8 @@ std::string PBRTOptions::ToString() const {
         seed, quiet, disablePixelJitter, disableWavelengthJitter, disableTextureFiltering,
         disableImageTextures, forceDiffuse, useGPU, wavefront, interactive, fullscreen,
         renderingSpace, nThreads, logLevel, logFile, logUtilization, writePartialImages,
-        writeRenderTime, recordPixelStatistics, recordPerLightStatistics, printStatistics,
-        pixelSamples, gpuDevice, quickRender, upgrade,
+        writeRenderTime, recordPixelStatistics, recordPerLightStatistics, renderTimeSeconds,
+        printStatistics, pixelSamples, gpuDevice, quickRender, upgrade,
         imageFile, mseReferenceImage, mseReferenceOutput, debugStart, displayServer, cropWindow,
         pixelBounds, pixelMaterial, displacementEdgeScale);
 }

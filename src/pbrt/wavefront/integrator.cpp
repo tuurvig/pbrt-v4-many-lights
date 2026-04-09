@@ -416,10 +416,15 @@ Float WavefrontPathIntegrator::Render() {
             lastSampleIndex = firstSampleIndex + 1;
     }
 
-    ProgressReporter progress(lastSampleIndex - firstSampleIndex, "Rendering",
-                              Options->quiet || Options->interactive, Options->useGPU);
+    bool useRenderTimeLimit = Options->renderTimeSeconds.has_value();
+    Float renderTimeLimit = useRenderTimeLimit ? *Options->renderTimeSeconds : 0;
+    ProgressReporter progress(
+        useRenderTimeLimit ? 1 : lastSampleIndex - firstSampleIndex, "Rendering",
+        Options->quiet || Options->interactive || useRenderTimeLimit, Options->useGPU);
     currentSampleIndex = firstSampleIndex;
-    for (; currentSampleIndex < lastSampleIndex || gui; ++currentSampleIndex) {
+    samplesRendered = 0;
+    for (; currentSampleIndex < lastSampleIndex || gui || useRenderTimeLimit;
+         ++currentSampleIndex) {
         // Attempt to work around issue #145.
 #if !(defined(PBRT_IS_WINDOWS) && defined(PBRT_BUILD_GPU_RENDERER) && \
       __CUDACC_VER_MAJOR__ == 11 && __CUDACC_VER_MINOR__ == 1)
@@ -432,7 +437,7 @@ Float WavefrontPathIntegrator::Render() {
 
         // Keep running the outer for loop but don't take more samples if
         // the GUI is being used so that the user can move the camera, etc.
-        if (currentSampleIndex < lastSampleIndex) {
+        if (currentSampleIndex < lastSampleIndex || useRenderTimeLimit) {
             OnRenderWaveStart(currentSampleIndex, pixelBounds);
 
             // Render image for sample _sampleIndex_
@@ -531,6 +536,13 @@ Float WavefrontPathIntegrator::Render() {
             OnRenderWaveDone(currentSampleIndex);
 
             progress.Update();
+            ++samplesRendered;
+
+            if (useRenderTimeLimit && timer.ElapsedSeconds() > renderTimeLimit) {
+                LOG_VERBOSE("Reached --render-time limit after %.3f s",
+                            timer.ElapsedSeconds());
+                break;
+            }
         }
 
         if (gui) {

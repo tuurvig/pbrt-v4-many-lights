@@ -70,7 +70,7 @@ void RenderWavefront(BasicScene &scene) {
     ImageMetadata metadata;
     integrator->camera.InitMetadata(&metadata);
     metadata.renderTimeSeconds = seconds;
-    metadata.samplesPerPixel = integrator->sampler.SamplesPerPixel();
+    metadata.samplesPerPixel = integrator->samplesRendered;
     integrator->film.WriteImage(metadata);
 }
 

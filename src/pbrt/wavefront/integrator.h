@@ -179,6 +179,7 @@ class WavefrontPathIntegrator {
     LightSampler lightSampler;
 
     int maxDepth, samplesPerPixel, currentSampleIndex;
+    int samplesRendered = 0;
     bool regularize;
     bool isOnlineLightSampler = false;
     ShadingPointCollector *firstIterationShadingPoints = nullptr;

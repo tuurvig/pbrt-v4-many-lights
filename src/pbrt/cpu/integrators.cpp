@@ -104,8 +104,10 @@ void ImageTileIntegrator::Render() {
 
     Bounds2i pixelBounds = camera.GetFilm().PixelBounds();
     int spp = samplerPrototype.SamplesPerPixel();
-    ProgressReporter progress(int64_t(spp) * pixelBounds.Area(), "Rendering",
-                              Options->quiet);
+    bool useRenderTimeLimit = Options->renderTimeSeconds.has_value();
+    Float renderTimeLimit = useRenderTimeLimit ? *Options->renderTimeSeconds : 0;
+    ProgressReporter progress(useRenderTimeLimit ? 1 : int64_t(spp) * pixelBounds.Area(),
+                              "Rendering", Options->quiet || useRenderTimeLimit);
 
     int waveStart = 0, waveEnd = 1, nextWaveSize = 1;
 
@@ -161,7 +163,7 @@ void ImageTileIntegrator::Render() {
     }
 
     // Render image in waves
-    while (waveStart < spp) {
+    while (waveStart < spp || useRenderTimeLimit) {
         OnRenderWaveStart(waveStart, pixelBounds);
 
         // Render current wave's image tiles in parallel
@@ -193,14 +195,23 @@ void ImageTileIntegrator::Render() {
 
         // Update start and end wave
         waveStart = waveEnd;
-        waveEnd = std::min(spp, waveEnd + nextWaveSize);
-        if (!referenceImage)
-            nextWaveSize = std::min(2 * nextWaveSize, 64);
-        if (waveStart == spp)
+        if (useRenderTimeLimit)
+            waveEnd = waveStart + nextWaveSize;
+        else {
+            waveEnd = std::min(spp, waveEnd + nextWaveSize);
+            if (!referenceImage)
+                nextWaveSize = std::min(2 * nextWaveSize, 64);
+        }
+
+        bool reachedSampleLimit = !useRenderTimeLimit && waveStart == spp;
+        bool reachedTimeLimit =
+            useRenderTimeLimit && progress.ElapsedSeconds() >= renderTimeLimit;
+        if (reachedSampleLimit || reachedTimeLimit)
             progress.Done();
 
         // Optionally write current image to disk
-        if (waveStart == spp || Options->writePartialImages || referenceImage) {
+        if (reachedSampleLimit || reachedTimeLimit || Options->writePartialImages ||
+            referenceImage) {
             LOG_VERBOSE("Writing image with spp = %d", waveStart);
             ImageMetadata metadata;
             metadata.renderTimeSeconds = progress.ElapsedSeconds();
@@ -215,10 +226,16 @@ void ImageTileIntegrator::Render() {
                 metadata.MSE = mse.Average();
                 fflush(mseOutFile);
             }
-            if (waveStart == spp || Options->writePartialImages) {
+            if (reachedSampleLimit || reachedTimeLimit || Options->writePartialImages) {
                 camera.InitMetadata(&metadata);
                 camera.GetFilm().WriteImage(metadata, 1.0f / waveStart);
             }
+        }
+
+        if (reachedTimeLimit) {
+            LOG_VERBOSE("Reached --render-time limit after %.3f s",
+                        progress.ElapsedSeconds());
+            break;
         }
     }
 
@@ -3005,9 +3022,14 @@ void SPPMIntegrator::Render() {
         StatsEnablePixelStats(camera.GetFilm().PixelBounds(),
                               RemoveExtension(camera.GetFilm().GetFilename()));
     // Define variables for commonly used values in SPPM rendering
-    int nIterations = samplerPrototype.SamplesPerPixel();
-    ProgressReporter progress(2 * nIterations, "Rendering", Options->quiet);
-    const Float invSqrtSPP = 1.f / std::sqrt(nIterations);
+    int configuredIterations = samplerPrototype.SamplesPerPixel();
+    bool useRenderTimeLimit = Options->renderTimeSeconds.has_value();
+    Float renderTimeLimit = useRenderTimeLimit ? *Options->renderTimeSeconds : 0;
+    int nIterations =
+        useRenderTimeLimit ? std::numeric_limits<int>::max() : configuredIterations;
+    ProgressReporter progress(useRenderTimeLimit ? 1 : 2 * int64_t(nIterations),
+                              "Rendering", Options->quiet || useRenderTimeLimit);
+    const Float invSqrtSPP = 1.f / std::sqrt(configuredIterations);
     Film film = camera.GetFilm();
     Bounds2i pixelBounds = film.PixelBounds();
     int nPixels = pixelBounds.Area();
@@ -3418,8 +3440,11 @@ void SPPMIntegrator::Render() {
         });
 
         // Periodically write SPPM image to disk
-        if (iter + 1 == nIterations || (iter + 1 <= 64 && IsPowerOf2(iter + 1)) ||
-            ((iter + 1) % 64 == 0)) {
+        bool reachedIterationLimit = !useRenderTimeLimit && iter + 1 == nIterations;
+        bool reachedTimeLimit =
+            useRenderTimeLimit && progress.ElapsedSeconds() > renderTimeLimit;
+        if (reachedIterationLimit || reachedTimeLimit ||
+            (iter + 1 <= 64 && IsPowerOf2(iter + 1)) || ((iter + 1) % 64 == 0)) {
             uint64_t np = (uint64_t)(iter + 1) * (uint64_t)photonsPerIteration;
             Image rgbImage(PixelFormat::Float, Point2i(pixelBounds.Diagonal()),
                            {"R", "G", "B"});
@@ -3464,6 +3489,12 @@ void SPPMIntegrator::Render() {
                 metadata.fullResolution = camera.GetFilm().FullResolution();
                 rimg.Write("sppm_radius.png", metadata);
             }
+        }
+
+        if (reachedTimeLimit) {
+            LOG_VERBOSE("Reached --render-time limit after %.3f s",
+                        progress.ElapsedSeconds());
+            break;
         }
     }
 #if 0
@@ -3637,7 +3668,11 @@ void FunctionIntegrator::Render() {
     Bounds2i pixelBounds = camera.GetFilm().PixelBounds();
     int nPixels = pixelBounds.Area();
     Array2D<double> sumv(pixelBounds);
-    int nSamples = baseSampler.SamplesPerPixel();
+    int configuredSamples = baseSampler.SamplesPerPixel();
+    bool useRenderTimeLimit = Options->renderTimeSeconds.has_value();
+    Float renderTimeLimit = useRenderTimeLimit ? *Options->renderTimeSeconds : 0;
+    int nSamples =
+        useRenderTimeLimit ? std::numeric_limits<int>::max() : configuredSamples;
 
     if (!imageFilename.empty()) {
         RNG rng;
@@ -3655,7 +3690,8 @@ void FunctionIntegrator::Render() {
         image.Write(imageFilename);
     }
 
-    ProgressReporter prog(nSamples, "Sampling", Options->quiet);
+    ProgressReporter prog(useRenderTimeLimit ? 1 : nSamples, "Sampling",
+                          Options->quiet || useRenderTimeLimit);
 
     bool isHalton = baseSampler.Is<HaltonSampler>();
     bool isStratified = baseSampler.Is<StratifiedSampler>();
@@ -3687,6 +3723,8 @@ void FunctionIntegrator::Render() {
             int nSamples = sampleIndex + 1;
             if (isStratified && Sqr(int(std::sqrt(nSamples))) != nSamples) {
                 prog.Update();
+                if (useRenderTimeLimit && prog.ElapsedSeconds() > renderTimeLimit)
+                    break;
                 continue;
             } else if (isSobol && !IsPowerOf2(nSamples))
                 reportResult = false;
@@ -3827,6 +3865,11 @@ void FunctionIntegrator::Render() {
             result += StringPrintf("%d %f\n", sampleIndex + 1, mse);
         }
         prog.Update();
+
+        if (useRenderTimeLimit && prog.ElapsedSeconds() > renderTimeLimit) {
+            LOG_VERBOSE("Reached --render-time limit after %.3f s", prog.ElapsedSeconds());
+            break;
+        }
     }
 
     // Make sure that it's basically one...
