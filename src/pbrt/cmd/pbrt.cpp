@@ -78,6 +78,7 @@ Rendering options:
   --spp <n>                     Override number of pixel samples specified in scene
                                 description file.
   --wavefront                   Use wavefront volumetric path integrator.
+  --write-render-time           Write render time in seconds to render.time.txt.
   --write-partial-images        Periodically write the current image to disk, rather
                                 than waiting for the end of rendering. Default: disabled.
 
@@ -202,6 +203,8 @@ int main(int argc, char *argv[]) {
             ParseArg(&iter, args.end(), "stats", &options.printStatistics, onError) ||
             ParseArg(&iter, args.end(), "toply", &toPly, onError) ||
             ParseArg(&iter, args.end(), "wavefront", &options.wavefront, onError) ||
+            ParseArg(&iter, args.end(), "write-render-time",
+                     &options.writeRenderTime, onError) ||
             ParseArg(&iter, args.end(), "write-partial-images",
                      &options.writePartialImages, onError) ||
             ParseArg(&iter, args.end(), "upgrade", &options.upgrade, onError)) {

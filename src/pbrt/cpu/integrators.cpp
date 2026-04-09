@@ -85,7 +85,6 @@ void ImageTileIntegrator::Render() {
         tileSampler.StartPixelSample(pPixel, sampleIndex);
 
         EvaluatePixelSample(pPixel, sampleIndex, tileSampler, scratchBuffer);
-
         return;
     }
 
@@ -227,6 +226,7 @@ void ImageTileIntegrator::Render() {
         fclose(mseOutFile);
     DisconnectFromDisplayServer();
     LOG_VERBOSE("Rendering finished");
+    SetRenderTimeSeconds(progress.ElapsedSeconds());
 }
 
 // RayIntegrator Method Definitions
@@ -2905,6 +2905,7 @@ void MLTIntegrator::Render() {
     camera.InitMetadata(&metadata);
     camera.GetFilm().WriteImage(metadata, b / mutationsPerPixel);
     DisconnectFromDisplayServer();
+    SetRenderTimeSeconds(progressRender.ElapsedSeconds());
 }
 
 std::string MLTIntegrator::ToString() const {
@@ -3474,6 +3475,7 @@ void SPPMIntegrator::Render() {
 #endif
     progress.Done();
     DisconnectFromDisplayServer();
+    SetRenderTimeSeconds(progress.ElapsedSeconds());
 }
 
 SampledSpectrum SPPMIntegrator::SampleLd(const SurfaceInteraction &intr, uint32_t seed, const BSDF &b,
@@ -3836,6 +3838,7 @@ void FunctionIntegrator::Render() {
     prog.Done();
 
     WriteFileContents(outputFilename, result);
+    SetRenderTimeSeconds(prog.ElapsedSeconds());
 }
 
 std::string FunctionIntegrator::ToString() const {

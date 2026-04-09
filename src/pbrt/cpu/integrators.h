@@ -46,6 +46,7 @@ class Integrator {
     virtual std::string ToString() const = 0;
 
     virtual void Render() = 0;
+    pstd::optional<Float> RenderTimeSeconds() const { return renderTimeSeconds; }
 
     pstd::optional<ShapeIntersection> Intersect(const Ray &ray,
                                                 Float tMax = Infinity) const;
@@ -69,6 +70,8 @@ class Integrator {
 
   protected:
     // Integrator Protected Methods
+    void SetRenderTimeSeconds(Float seconds) { renderTimeSeconds = seconds; }
+
     Integrator(Primitive aggregate, std::vector<Light> lights)
         : aggregate(aggregate), lights(lights) {
         // Integrator constructor implementation
@@ -80,6 +83,9 @@ class Integrator {
                 infiniteLights.push_back(light);
         }
     }
+
+  private:
+    pstd::optional<Float> renderTimeSeconds;
 };
 
 // ImageTileIntegrator Definition

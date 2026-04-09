@@ -21,6 +21,7 @@
 #include <pbrt/util/file.h>
 #include <pbrt/util/perlightstats.h>
 #include <pbrt/util/parallel.h>
+#include <pbrt/util/print.h>
 
 namespace pbrt {
 
@@ -163,6 +164,15 @@ void RenderCPU(BasicScene &parsedScene) {
 
     // Render!
     integrator->Render();
+
+    if (Options->writeRenderTime) {
+        if (pstd::optional<Float> renderSeconds = integrator->RenderTimeSeconds()) {
+            if (!WriteFileContents("render.time.txt",
+                                   StringPrintf("%.6f\n", *renderSeconds)))
+                Warning("Unable to write render time to render.time.txt.");
+        } else
+            Warning("Render time was not available; render.time.txt was not written.");
+    }
 
     LOG_VERBOSE("Memory used after rendering: %s", GetCurrentRSS());
 

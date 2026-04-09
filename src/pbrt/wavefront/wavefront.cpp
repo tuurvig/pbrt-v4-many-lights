@@ -8,6 +8,8 @@
 #ifdef PBRT_BUILD_GPU_RENDERER
 #include <pbrt/gpu/memory.h>
 #endif  // PBRT_BUILD_GPU_RENDERER
+#include <pbrt/util/file.h>
+#include <pbrt/util/print.h>
 #include <pbrt/wavefront/integrator.h>
 
 namespace pbrt {
@@ -44,6 +46,8 @@ void RenderWavefront(BasicScene &scene) {
     Float seconds = integrator->Render();
 
     LOG_VERBOSE("Total rendering time: %.3f s", seconds);
+    if (Options->writeRenderTime)
+        WriteFileContents("render.time.txt", StringPrintf("%.6f\n", seconds));
 
     if (Options->printStatistics) {
 #ifdef PBRT_BUILD_GPU_RENDERER
