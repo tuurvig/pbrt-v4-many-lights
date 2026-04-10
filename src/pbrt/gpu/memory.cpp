@@ -42,13 +42,18 @@ void CUDATrackedMemoryResource::do_deallocate(void *p, size_t size, size_t align
     if (!p)
         return;
 
-    GPUFree(p);
+    size_t trackedSize = 0;
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        auto iter = allocations.find(p);
+        CHECK(iter != allocations.end());
+        trackedSize = iter->second;
+        allocations.erase(iter);
+        bytesAllocated -= trackedSize;
+    }
 
-    std::lock_guard<std::mutex> lock(mutex);
-    auto iter = allocations.find(p);
-    DCHECK(iter != allocations.end());
-    allocations.erase(iter);
-    bytesAllocated -= size;
+    DCHECK_EQ(trackedSize, size);
+    GPUFree(p);
 }
 
 void CUDATrackedMemoryResource::PrefetchToGPU() const {
