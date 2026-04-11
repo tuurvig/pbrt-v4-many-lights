@@ -138,6 +138,53 @@ constexpr char ParameterTypeTraits<ParameterType::String>::typeName[];
 ///////////////////////////////////////////////////////////////////////////
 // ParameterDictionary
 
+ParameterDictionary::~ParameterDictionary() {
+    FreeParameters();
+}
+
+ParameterDictionary::ParameterDictionary(const ParameterDictionary &other)
+    : colorSpace(other.colorSpace) {
+    params.reserve(other.params.size());
+    for (const ParsedParameter *p : other.params)
+        params.push_back(new ParsedParameter(*p));
+    nOwnedParams = params.size();
+}
+
+ParameterDictionary::ParameterDictionary(ParameterDictionary &&other) noexcept
+    : params(std::move(other.params)),
+      colorSpace(other.colorSpace),
+      nOwnedParams(other.nOwnedParams) {
+    other.nOwnedParams = 0;
+    other.colorSpace = nullptr;
+}
+
+ParameterDictionary &ParameterDictionary::operator=(const ParameterDictionary &other) {
+    if (this == &other)
+        return *this;
+
+    FreeParameters();
+    colorSpace = other.colorSpace;
+    params.reserve(other.params.size());
+    for (const ParsedParameter *p : other.params)
+        params.push_back(new ParsedParameter(*p));
+    nOwnedParams = params.size();
+    return *this;
+}
+
+ParameterDictionary &ParameterDictionary::operator=(ParameterDictionary &&other) noexcept {
+    if (this == &other)
+        return *this;
+
+    FreeParameters();
+    params = std::move(other.params);
+    colorSpace = other.colorSpace;
+    nOwnedParams = other.nOwnedParams;
+
+    other.nOwnedParams = 0;
+    other.colorSpace = nullptr;
+    return *this;
+}
+
 ParameterDictionary::ParameterDictionary(ParsedParameterVector p,
                                          const RGBColorSpace *colorSpace)
     : params(std::move(p)), colorSpace(colorSpace) {
@@ -230,9 +277,11 @@ typename ParameterTypeTraits<PT>::ReturnType ParameterDictionary::lookupSingle(
 }
 
 void ParameterDictionary::FreeParameters() {
-    for (int i = 0; i < nOwnedParams; ++i)
+    int nDelete = std::min<int>(nOwnedParams, params.size());
+    for (int i = 0; i < nDelete; ++i)
         delete params[i];
     params.clear();
+    nOwnedParams = 0;
 }
 
 Float ParameterDictionary::GetOneFloat(const std::string &name, Float def) const {

@@ -25,6 +25,7 @@
 #include <set>
 #include <string>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace pbrt {
@@ -36,7 +37,7 @@ struct SceneEntity {
     // SceneEntity Public Methods
     SceneEntity() = default;
     SceneEntity(const std::string &name, ParameterDictionary parameters, FileLoc loc)
-        : name(internedStrings.Lookup(name)), parameters(parameters), loc(loc) {}
+        : name(internedStrings.Lookup(name)), loc(loc), parameters(std::move(parameters)) {}
 
     std::string ToString() const {
         return StringPrintf("[ SceneEntity name: %s parameters: %s loc: %s ]", name,

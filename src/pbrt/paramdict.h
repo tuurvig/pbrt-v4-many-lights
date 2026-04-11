@@ -98,6 +98,12 @@ class ParameterDictionary {
   public:
     // ParameterDictionary Public Methods
     ParameterDictionary() = default;
+    ~ParameterDictionary();
+    ParameterDictionary(const ParameterDictionary &other);
+    ParameterDictionary(ParameterDictionary &&other) noexcept;
+    ParameterDictionary &operator=(const ParameterDictionary &other);
+    ParameterDictionary &operator=(ParameterDictionary &&other) noexcept;
+
     ParameterDictionary(ParsedParameterVector params, const RGBColorSpace *colorSpace);
 
     ParameterDictionary(ParsedParameterVector params0,
@@ -197,7 +203,7 @@ class ParameterDictionary {
     // ParameterDictionary Private Members
     ParsedParameterVector params;
     const RGBColorSpace *colorSpace = nullptr;
-    int nOwnedParams;
+    int nOwnedParams = 0;
 };
 
 // TextureParameterDictionary Definition
