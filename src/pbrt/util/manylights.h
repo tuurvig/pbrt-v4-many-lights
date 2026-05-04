@@ -634,7 +634,6 @@ static Float ComputeClusterEstimate(const BSDF* bsdf, BxDFFlags flags, Point3f l
 
 PBRT_CPU_GPU
 inline Float GeomTermBoundInFrame(Point3f point, const Frame& frame, const Bounds3f& bounds) {
-    Vector3f localX, localY;
     Bounds3f localBounds;
     for (int i = 0; i < 8; ++i) {
         Point3f corner = bounds.Corner(i);

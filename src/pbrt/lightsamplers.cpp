@@ -63,11 +63,11 @@ LightSampler LightSampler::Create(ERequiresShadowRays &nShadowRays, pstd::span<c
     }
     if (name == "rht") {
         nShadowRays = E_RHT_SHADOW_RAYS;
-        const Float gamma = params.GetOneFloat("lsParam1", 0.2f);
+        const Float gamma = params.GetOneFloat("lsParam1", 0.1f);
         return alloc.new_object<RHTLightSampler>(lights, alloc, gamma);
     }
     if (name == "ltc") {
-        const Float beta = params.GetOneFloat("lsParam1", 2.0f);
+        const Float beta = params.GetOneFloat("lsParam1", 4.0f);
         const Float omega = params.GetOneFloat("lsParam2", Float(6) / 7);
         const Float gamma = params.GetOneFloat("lsParam3", 128.0f);
         return alloc.new_object<LTCLightSampler>(lights, alloc, beta, omega, gamma);

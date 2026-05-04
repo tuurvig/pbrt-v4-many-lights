@@ -186,7 +186,7 @@ uint32_t LTCLightSampler::BuildPartitionTree(pstd::span<ShadingPoint>& items, in
         };
 
         // 1. Base Case: Leaf node
-        if (partitionSize <= 150) {
+        if (partitionSize <= 75) {
             return emitLeaf();
         }
 

@@ -188,7 +188,7 @@ PBRT_CPU_GPU Float SphericalLightBounds::SplitProbability(const Point3f p, const
         return 0;
     }
 
-    // distance fromt he shading point to the cluster center
+    // distance from he shading point to the cluster center
     const Float d = Distance(center, p);
 
     // distance to cluster boundary normalized by radius

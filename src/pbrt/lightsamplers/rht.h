@@ -47,13 +47,13 @@ class RHTLightSampler {
         // Handle infinite _light_ PMF
         if (!m_lightToBitTrail.HasKey(light))
             return InfiniteLightSimplePMF(m_infiniteLights, m_tree.leaves.size());;
-
-        // Compute infinite light sampling probability _pInfinite_
-        Float pInfinite = Float(m_infiniteLights.size()) /
-                          Float(m_infiniteLights.size() + (m_tree.leaves.size() == 0 ? 0 : 1));
         
         if (m_tree.leaves.empty())
             return 0;
+        
+        // Compute infinite light sampling probability _pInfinite_
+        Float pInfinite = Float(m_infiniteLights.size()) /
+                          Float(m_infiniteLights.size() + (m_tree.leaves.size() == 0 ? 0 : 1));
 
         Point3f p = ctx.p();
         Normal3f n = ctx.ns;
@@ -136,7 +136,7 @@ class RHTLightSampler {
         // Compute infinite light sampling probability _pInfinite_
         Float pInfinite = Float(m_infiniteLights.size()) /
                           Float(m_infiniteLights.size() + (m_tree.leaves.size() == 0 ? 0 : 1));
-        
+
         if (m_tree.leaves.empty())
             return 0;
 

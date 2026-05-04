@@ -217,9 +217,9 @@ void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSe
 
             const uint32_t lightIdx = node->childOrLightIndex;
             const CompactLight &cl(m_tree.leaves[lightIdx]);
-            const Float hImportance = cl.bounds.Importance(p, n, m_tree.allLightBounds) / pdf;
-
-            if (pdf > 0 && hImportance > 0) {
+            const Float lightImportance = cl.bounds.Importance(p, n, m_tree.allLightBounds);
+            if (pdf > 0 && lightImportance > 0) {
+                const Float hImportance = lightImportance / std::max(pdf, MathEpsilon);
                 const LightCandidate candidate{lightIdx, pdf};
                 reservoirSet.Add(candidate, hImportance);
             }
@@ -237,7 +237,7 @@ void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSe
         const Float splitProb = node->bounds.SplitProbability(p, gamma);
         Float PsNode = state.PsParent; // Ps(C)
         Float T_node = state.T;
-        if (state.PsParent > splitProb) {
+        if (state.PsParent - splitProb > MachineEpsilon) {
             PsNode = splitProb;
             const Float PsHatNode = 1 - PsNode; // Ps_hat(C)
 
@@ -262,7 +262,8 @@ void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSe
             continue;
         }
 
-        const Float pLeft = std::min(importanceLeft / wSum, OneMinusEpsilon);
+        const Float wSumDenom = std::max(wSum, MathEpsilon);
+        const Float pLeft = std::min(importanceLeft / wSumDenom, OneMinusEpsilon);
         const Float pRight = 1 - pLeft;
 
         if (uSplit <= PsNode) {
@@ -277,10 +278,10 @@ void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSe
 
         // No split: stochastically select exactly one child and continue.
         if (u <= pLeft) {
-            u /= pLeft;
+            u /= std::max(pLeft, MathEpsilon);
             state = TraversalState(childIdxLeft, T_node * pLeft, PsNode);
         } else {
-            u = (u - pLeft) / pRight;
+            u = (u - pLeft) / std::max(pRight, MathEpsilon);
             state = TraversalState(childIdxRight, T_node * pRight, PsNode);
         }
 
