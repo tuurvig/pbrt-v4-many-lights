@@ -705,8 +705,6 @@ PBRT_CPU_GPU PBRT_NOINLINE
 static bool ComputeErrorBounds(Float &err0, Float &err1, Point3f p, Vector3f wo, Normal3f n, const Frame& frame, const BSDF* bsdf, const CompactLightBounds& cb0, const CompactLightBounds& cb1, const Bounds3f& allLightBounds, const bool isOriented = true) {
     const Float nodeI0 = cb0.PhiOrI();
     const Float nodeI1 = cb1.PhiOrI();
-
-    BxDFFlags bsdfFlags = bsdf ? bsdf->Flags() : BxDFFlags::All;
     
     const Bounds3f nodeBound0 = cb0.Bounds(allLightBounds);
     const Bounds3f nodeBound1 = cb1.Bounds(allLightBounds);

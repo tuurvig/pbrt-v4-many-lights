@@ -416,7 +416,7 @@ class LTCLightSampler {
         Float lightPDF = sampledLight->p * ls->pdf;
         Float scatterPDF = 0;
         SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
-        SampledSpectrum Ld = f_hat * ls->L;
+        SampledSpectrum Ld = ClampZero(f_hat * ls->L);
 
         samples.Add(SampledLd(Ld, light, ls->pLight, lightPDF, scatterPDF, sampledLight->hint, sampledLight->pLearning));
     }
@@ -433,6 +433,9 @@ class LTCLightSampler {
     PBRT_CPU_GPU
     void AccumulateContribution(Float contribution, const uint32_t lightSamplerHint) const {
         if (m_partitions.leaves.empty() || lightSamplerHint == std::numeric_limits<uint32_t>::max()) {
+            return;
+        }
+        if (!IsFinite(contribution)) {
             return;
         }
 

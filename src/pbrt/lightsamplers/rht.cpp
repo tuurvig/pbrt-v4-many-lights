@@ -5,6 +5,7 @@
 
 #include "rht.h"
 #include <pbrt/util/stats.h>
+#include <pbrt/util/timer.h>
 #include <pbrt/util/vecmath.h>
 #include <pbrt/util/hash.h>
 
@@ -24,6 +25,7 @@ namespace pbrt {
 // Resampled Hierarchic Tree Light LightSampler
 
 STAT_MEMORY_COUNTER("Memory/Resampled Hierarchic Tree", RHTLightTreeBytes);
+STAT_COUNTER("Timer/CPU Construction", constructionMicroseconds);
 
 /// @brief Builds the RHT hierarchy from lights provided by integrator.
 RHTLightSampler::RHTLightSampler(pstd::span<const Light> lights, Allocator alloc, Float gamma) :
@@ -64,8 +66,10 @@ RHTLightSampler::RHTLightSampler(pstd::span<const Light> lights, Allocator alloc
         if (!buildOnGPU)
 #endif
         {
+            Timer constructionTimer;
             RHTNodeEmitter emitter(m_tree, m_lightToBitTrail);
             BuildLightTree<16, RHTBuildContainer, SphericalBoundsCostEvaluator, RHTNodeEmitter>(treeLights, 0, treeLights.size(), 0, 0, SphericalBoundsCostEvaluator(), emitter);
+            constructionMicroseconds += constructionTimer.ElapsedMicroseconds();
         }
     }
 
@@ -139,8 +143,10 @@ class RHTreeBuilderGPU final : public LightTreeBuilderGPU<SphericalLightBounds, 
 
         RHTNodeEmitter emitter(tree, bitTrailContainer);
         GPUToRHTLeaf adapter(hostNodes);
-        
+
+        Timer flattenTimer;
         FlattenLightTree<GPUToRHTLeaf, RHTNodeEmitter>(adapter, rootIndex, 0, 0, emitter);
+        constructionMicroseconds += flattenTimer.ElapsedMicroseconds();
     }
 
 private:
@@ -179,6 +185,7 @@ struct alignas(8) PackedTraversalState {
 
 /// @brief Expanded traversal state used while processing one active branch.
 struct alignas(16) TraversalState {
+    TraversalState() = default;
     PBRT_CPU_GPU
     TraversalState(uint32_t nodeIndex, Float T, Float PsParent) :
         nodeIndex(nodeIndex), T(T), PsParent(PsParent) {}
@@ -205,8 +212,8 @@ void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSe
     // Start from the root with full traversal weight.
     TraversalState state(0, Float(1), Float(1));
 
-    Point3f p = ctx.p();
-    Normal3f n = ctx.ns;
+    const Point3f p = ctx.p();
+    const Normal3f n = ctx.ns;
 
     while (true) {
         const ResampledTreeNode* node = &m_tree.innerNodes[state.nodeIndex];
@@ -231,7 +238,7 @@ void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSe
             continue;
         }
 
-        const uint32_t childIdxLeft = static_cast<uint32_t>(state.nodeIndex + 1);
+        const uint32_t childIdxLeft = state.nodeIndex + 1;
         const uint32_t childIdxRight = node->childOrLightIndex;
 
         const Float splitProb = node->bounds.SplitProbability(p, gamma);
@@ -262,8 +269,7 @@ void RHTLightSampler::CollectLightCandidates(HeuristicHReservoirSet& reservoirSe
             continue;
         }
 
-        const Float wSumDenom = std::max(wSum, MathEpsilon);
-        const Float pLeft = std::min(importanceLeft / wSumDenom, OneMinusEpsilon);
+        const Float pLeft = std::clamp(importanceLeft / wSum, MathEpsilon, OneMinusEpsilon);
         const Float pRight = 1 - pLeft;
 
         if (uSplit <= PsNode) {

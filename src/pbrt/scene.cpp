@@ -268,19 +268,21 @@ static bool TryDiscretizeAreaLight(const std::string &name, const ParameterDicti
             if (LengthSquared(n) == 0)
                 n = Vector3f(0, 0, 1);
 
-            Point3f offsetP = p + ShadowEpsilon * n;
-            Transform translate = Translate(Vector3f(offsetP.x, offsetP.y, offsetP.z));
-            //newLights.push_back(
-            //        alloc.new_object<PointLight>(translate, mi, emitted, perSampleScale / 4));
             if (data.twoSided) {
-                newLights.push_back(
-                    alloc.new_object<PointLight>(translate, mi, emitted, perSampleScale / 4));
-            } else {
-                Transform dirToZ = (Transform)Frame::FromZ(n);
-                Transform sampleRenderFromLight = translate * Inverse(dirToZ);
+                Point3f offsetP = p - ShadowEpsilon * n;
+                Transform translate = Translate(Vector3f(offsetP.x, offsetP.y, offsetP.z));
+                Transform dirToZMinus = (Transform)Frame::FromZ(-n);
+                Transform sampleRenderFromLight = translate * Inverse(dirToZMinus);
                 newLights.push_back(
                     alloc.new_object<CosineSpotLight>(sampleRenderFromLight, mi, emitted, perSampleScale));
             }
+
+            Point3f offsetP = p + ShadowEpsilon * n;
+            Transform translate = Translate(Vector3f(offsetP.x, offsetP.y, offsetP.z));
+            Transform dirToZ = (Transform)Frame::FromZ(n);
+            Transform sampleRenderFromLight = translate * Inverse(dirToZ);
+            newLights.push_back(
+                alloc.new_object<CosineSpotLight>(sampleRenderFromLight, mi, emitted, perSampleScale));
         }
     }
 

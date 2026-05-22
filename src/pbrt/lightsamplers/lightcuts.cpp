@@ -8,6 +8,7 @@
 #include <pbrt/util/stats.h>
 #include <pbrt/util/vecmath.h>
 #include <pbrt/util/hash.h>
+#include <pbrt/util/timer.h>
 
 #ifdef PBRT_BUILD_GPU_RENDERER
 #include <pbrt/gpu/lighttreebuilder.h>
@@ -21,6 +22,10 @@
 #endif // PBRT_BUILD_GPU_RENDERER
 
 namespace pbrt {
+
+STAT_MEMORY_COUNTER("Memory/Lightcuts LightTree", lightCutsLightTreeBytes);
+STAT_COUNTER("Time/Construction CPU", constructionMicroseconds);
+
 #ifdef PBRT_BUILD_GPU_RENDERER
 
 /// @brief GPU builder that constructs Lightcuts trees from Morton-sorted leaf nodes.
@@ -84,8 +89,10 @@ class LightcutsTreeBuilderGPU final : public LightTreeBuilderGPU<LightBounds, ui
 
         LightcutsNodeEmitter emitter(tree, bitTrailContainer, m_isPoint);
         GPUToLightcutsLeaf adapter(hostNodes, lights);
-        
+
+        Timer flattenTimer;
         FlattenLightTree<GPUToLightcutsLeaf, LightcutsNodeEmitter>(adapter, rootIndex, 0, 0, emitter);
+        constructionMicroseconds += flattenTimer.ElapsedMicroseconds();
     }
 
 private:
@@ -97,8 +104,6 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////
 // LightcutsLightSampler
-
-STAT_MEMORY_COUNTER("Memory/Lightcuts LightTree", lightCutsLightTreeBytes);
 
 constexpr uint32_t infiniteLightsIndex = 2;
 constexpr uint32_t otherLightsIndex = 3;
@@ -146,8 +151,10 @@ LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, All
         if (!buildOnGPU)
 #endif
         {
+            Timer constructionTimer;
             LightcutsNodeEmitter emitter(m_pointTree, m_lightToLocation, true);
             BuildLightTree<16, LightcutsBuildContainer, LightcutsCostEvaluator, LightcutsNodeEmitter>(pointLights, 0, pointLights.size(), 0, 0, LightcutsCostEvaluator(m_pointTree.allLightBounds, true), emitter);
+            constructionMicroseconds += constructionTimer.ElapsedMicroseconds();
         }
     }
 
@@ -158,8 +165,10 @@ LightcutsLightSampler::LightcutsLightSampler(pstd::span<const Light> lights, All
         if (!buildOnGPU)
 #endif
         {
+            Timer constructionTimer;
             LightcutsNodeEmitter emitter(m_spotTree, m_lightToLocation, false);
             BuildLightTree<16, LightcutsBuildContainer, LightcutsCostEvaluator, LightcutsNodeEmitter>(spotLights, 0, spotLights.size(), 0, 0, LightcutsCostEvaluator(m_spotTree.allLightBounds, false), emitter);
+            constructionMicroseconds += constructionTimer.ElapsedMicroseconds();
         }
     }
 

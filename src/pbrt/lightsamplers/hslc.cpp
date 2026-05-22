@@ -7,6 +7,7 @@
 
 #include <pbrt/util/stats.h>
 #include <pbrt/util/vecmath.h>
+#include <pbrt/util/timer.h>
 
 #include <pbrt/util/hash.h>
 
@@ -26,6 +27,7 @@ namespace pbrt {
 // Hierarchic Stochastic Lightcuts LightSampler
 
 STAT_MEMORY_COUNTER("Memory/Hierarchic Stochastic Lightcuts LightTree", HSLCLightTreeBytes);
+STAT_COUNTER("Time/CPU Construction", constructionMicroseconds);
 
 HSLCLightSampler::HSLCLightSampler(pstd::span<const Light> lights, Allocator alloc) :
     m_tree(alloc), m_infiniteLights(alloc), m_lightToBitTrail(alloc) {
@@ -52,8 +54,10 @@ HSLCLightSampler::HSLCLightSampler(pstd::span<const Light> lights, Allocator all
         if (!buildOnGPU)
 #endif
         {
+            Timer constructionTimer;
             SLCNodeEmitter emitter(m_tree, m_lightToBitTrail);
             BuildLightTree<16, LightcutsBuildContainer, SAOHCostEvaluator, SLCNodeEmitter>(treeLights, 0, treeLights.size(), 0, 0, SAOHCostEvaluator(), emitter);
+            constructionMicroseconds += constructionTimer.ElapsedMicroseconds();
         }
     }
 
@@ -122,8 +126,10 @@ class HSLCTreeBuilderGPU final : public LightTreeBuilderGPU<LightBounds, uint64_
 
         SLCNodeEmitter emitter(tree, bitTrailContainer);
         GPUToLightcutsLeaf adapter(hostNodes, lights);
-        
+
+        Timer flattenTimer;
         FlattenLightTree<GPUToLightcutsLeaf, SLCNodeEmitter>(adapter, rootIndex, 0, 0, emitter);
+        constructionMicroseconds += flattenTimer.ElapsedMicroseconds();
     }
 
 private:

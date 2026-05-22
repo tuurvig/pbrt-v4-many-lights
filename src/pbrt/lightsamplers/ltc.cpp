@@ -7,6 +7,7 @@
 
 #include <pbrt/util/stats.h>
 #include <pbrt/util/vecmath.h>
+#include <pbrt/util/timer.h>
 
 #include <pbrt/util/hash.h>
 
@@ -31,6 +32,8 @@ namespace pbrt {
 
 STAT_MEMORY_COUNTER("Memory/Learning To Cluster Light Tree", LTCLightTreeBytes);
 STAT_MEMORY_COUNTER("Memory/Learning To Cluster Scene Partition", LTCScenePartitionBytes);
+STAT_COUNTER("Time/Construction CPU", constructionMicroseconds);
+STAT_COUNTER("Time/Partition Tree Construction", partitionTreeMicroseconds);
 
 LTCLightSampler::LTCLightSampler(pstd::span<const Light> lights, Allocator alloc, Float beta, Float omega, Float gamma) :
     m_tree(alloc), m_partitions(alloc), m_infiniteLights(alloc), m_lightToBitTrail(alloc), m_beta(beta), m_omega(omega), m_gamma(gamma) {
@@ -56,8 +59,10 @@ LTCLightSampler::LTCLightSampler(pstd::span<const Light> lights, Allocator alloc
         if (!buildOnGPU)
 #endif
         {
+            Timer constructionTimer;
             LTCNodeEmitter emitter(m_tree, m_lightToBitTrail);
             BuildLightTree<16, LightBVHBuildContainer, SAOHCostEvaluator, LTCNodeEmitter>(treeLights, 0, treeLights.size(), 0, 0, SAOHCostEvaluator(), emitter);
+            constructionMicroseconds += constructionTimer.ElapsedMicroseconds();
         }
     }
 
@@ -122,8 +127,10 @@ class LTCTreeBuilderGPU final : public LightTreeBuilderGPU<LightBounds, uint64_t
 
         LTCNodeEmitter emitter(tree, bitTrailContainer);
         GPUToLightBVHLeaf adapter(hostNodes);
-        
+
+        Timer flattenTimer;
         FlattenLightTree<GPUToLightBVHLeaf, LTCNodeEmitter>(adapter, rootIndex, 0, 0, emitter);
+        constructionMicroseconds += flattenTimer.ElapsedMicroseconds();
     }
 
 private:
@@ -368,7 +375,7 @@ static void MakeInitialTreeCut(OnlineLightTreeCut& cut, ShadingPoint representan
 
         Float lu0, lu1;
         if (!ComputeErrorBounds(lu0, lu1, p, wo, n, shadingFrame, nullptr, leftChild->compactLightBounds, rightChild->compactLightBounds, allLightBounds)) {
-            lu0 = std::max(leftChild->compactLightBounds.PhiOrI() *  MathEpsilon, MathEpsilon);
+            lu0 = std::max(leftChild->compactLightBounds.PhiOrI() * MathEpsilon, MathEpsilon);
             lu1 = std::max(rightChild->compactLightBounds.PhiOrI() * MathEpsilon, MathEpsilon);
         }
 
@@ -376,7 +383,7 @@ static void MakeInitialTreeCut(OnlineLightTreeCut& cut, ShadingPoint representan
             lu0 = std::max(leftChild->compactLightBounds.PhiOrI() * MathEpsilon, MathEpsilon);
         }
 
-        if (lu1 == 1) {
+        if (lu1 == 0) {
             lu1 = std::max(rightChild->compactLightBounds.PhiOrI() * MathEpsilon, MathEpsilon);
         }
 
@@ -399,9 +406,11 @@ void LTCLightSampler::SetupScenePartitions(pstd::span<ShadingPoint> shadingPoint
     if (shadingPoints.empty())
         return;
 
+    Timer partitionTreeTimer;
     m_partitions.sceneExtent = sceneBounds.Diagonal();
     BuildPartitionTree(shadingPoints, 0, shadingPoints.size());
-    
+    partitionTreeMicroseconds += partitionTreeTimer.ElapsedMicroseconds();
+
     if (Options->useGPU) {
 #ifdef PBRT_BUILD_GPU_RENDERER
         GPUParallelFor("Initialize LTC tree cuts", ProfilerKernelGroup::WAVEFRONT, m_partitions.leaves.size(),
@@ -414,9 +423,11 @@ void LTCLightSampler::SetupScenePartitions(pstd::span<ShadingPoint> shadingPoint
 #endif
     }
     else {
+        Timer initializationTimer;
         ParallelFor(0, m_partitions.leaves.size(), [this](int idx) {
             MakeInitialTreeCut(*m_partitions.leaves[idx], m_partitions.representantPoints[idx], m_tree.nodes.data(), m_tree.allLightBounds);
         });
+        partitionTreeMicroseconds += initializationTimer.ElapsedMicroseconds();
     }
 
     LTCScenePartitionBytes += m_partitions.innerNodes.size() * sizeof(PartitionTreeNode) + 
@@ -554,14 +565,6 @@ static void ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& re
                 lu1 = std::max(child1->compactLightBounds.PhiOrI() * MathEpsilon, MathEpsilon);
             }
 
-            if (lu0 == 0) {
-                lu0 = std::max(MathEpsilon, child0->compactLightBounds.PhiOrI() * MathEpsilon);
-            }
-            
-            if (lu1 == 0) {
-                lu1 = std::max(MathEpsilon, child1->compactLightBounds.PhiOrI() * MathEpsilon);
-            }
-
             Float sqrt0 = lu0;
             Float sqrt1 = lu1;
             Float sumSqrt = sqrt0 + sqrt1;
@@ -580,7 +583,7 @@ static void ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& re
             const Float decay1 = std::pow(OneMinusLearningRate, nc1);
 
             {
-                const Float importance = decay0 * lu0 + (1 - decay0) * parentImportance;
+                const Float importance = std::max(decay0 * lu0 + (1 - decay0) * parentImportance, MathEpsilon);
                 cut.clusterIndex[cutIdx] = childIndex0;
                 cut.bitTrail[cutIdx] = parentBitTrail;
                 cut.depth[cutIdx] = parentDepth + 1;
@@ -589,7 +592,7 @@ static void ApplyIterationUpdate(OnlineLightTreeCut& cut, const ShadingPoint& re
                 cut.visitCount[cutIdx] = 0;
             }
             {
-                const Float importance = decay1 * lu1 + (1 - decay1) * parentImportance;
+                const Float importance = std::max(decay1 * lu1 + (1 - decay1) * parentImportance, MathEpsilon);
                 cut.clusterIndex[cut.cutSize] = childIndex1;
                 cut.bitTrail[cut.cutSize] = parentBitTrail | (1 << parentDepth);
                 cut.depth[cut.cutSize] = parentDepth + 1;

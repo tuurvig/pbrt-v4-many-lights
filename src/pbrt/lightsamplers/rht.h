@@ -93,7 +93,7 @@ class RHTLightSampler {
             }
 
             Float weight[2] = {0};
-            weight[0] = std::min(ci[0] / sumImportance, OneMinusEpsilon);
+            weight[0] = std::clamp(ci[0] / sumImportance, MathEpsilon, OneMinusEpsilon);
             weight[1] = 1 - weight[0];
 
             T = T_node * weight[child];
@@ -188,8 +188,11 @@ class RHTLightSampler {
                 for (int i = 0; i < heuristicHSampler.Size(); ++i) {
                     const Point2f uLightCurrent = uLight;
                     uLight += uLightOffset;
-                    if (uLight.x >= 1) uLight.x -= 1;
-                    if (uLight.y >= 1) uLight.y -= 1;
+
+                    const auto overOneX = static_cast<int>(uLight.x);
+                    const auto overOneY = static_cast<int>(uLight.y);
+                    uLight.x -= static_cast<Float>(overOneX);
+                    uLight.y -= static_cast<Float>(overOneY);
                  
                     const StatelessWeightedReservoirSampler<LightCandidate>& reservoir(heuristicHSampler.GetReservoir(i));
                     if (!reservoir.HasSample()) {
@@ -212,11 +215,11 @@ class RHTLightSampler {
                     contribution *= scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
 
                     // F(Si) = bsdf * (Li / pdfLight) * misW * hW(Li)
-                    const Float denom = std::max(lightPDF * hProb + scatterPDF, MathEpsilon);
+                    const Float denom = std::max(hProb * (lightPDF + scatterPDF), MathEpsilon);
                     const Float fWeight = contribution.MaxComponentValue() / denom;
                     if (fWeight > 0) {
                         heuristicFSampler.Add([&]{
-                            return SampledLd(contribution / hProb, light, ls->pLight, lightPDF, scatterPDF);
+                            return SampledLd(ClampZero(contribution), light, ls->pLight, lightPDF, scatterPDF, std::numeric_limits<uint32_t>::max(), hProb);
                         }, fWeight);
                     }
                 }
@@ -234,7 +237,8 @@ class RHTLightSampler {
                 samples.elements[out] = samples.elements[i];
 
             const Float fProb = heuristicFSampler.SampleProbability(i);
-            samples.elements[out].Ld /= std::max(fProb, MathEpsilon);
+            const Float hProb = samples.elements[i].pdfCancellationFactor;
+            samples.elements[out].Ld /= std::max(fProb * hProb, MathEpsilon);
             ++out;
         }
         samples.count = out;

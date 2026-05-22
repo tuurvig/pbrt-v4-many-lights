@@ -792,6 +792,7 @@ SET (PBRT_UTIL_SOURCE_HEADERS
   src/pbrt/util/stats.h
   src/pbrt/util/string.h
   src/pbrt/util/taggedptr.h
+  src/pbrt/util/timer.h
   src/pbrt/util/transform.h
   src/pbrt/util/vecmath.h
   )

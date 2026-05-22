@@ -556,6 +556,7 @@ class StatelessWeightedReservoirSampler {
 
     PBRT_CPU_GPU
     inline bool Add(const T &sample, Float weight, const Float u) {
+        weight = std::max(weight, MathEpsilon);
         weightSum += weight;
         // Randomly add _sample_ to reservoir
         Float p = weight / weightSum;
@@ -571,6 +572,7 @@ class StatelessWeightedReservoirSampler {
     template <typename F>
     PBRT_CPU_GPU bool Add(F func, Float weight, const Float u) {
         // Process weighted reservoir sample via callback
+        weight = std::max(weight, MathEpsilon);
         weightSum += weight;
         Float p = weight / weightSum;
         if (u < p) {
@@ -635,6 +637,7 @@ class WeightedReservoirSampler {
 
     PBRT_CPU_GPU
     bool Add(const T &sample, Float weight) {
+        weight = std::max(weight, MathEpsilon);
         weightSum += weight;
         // Randomly add _sample_ to reservoir
         Float p = weight / weightSum;
@@ -650,6 +653,7 @@ class WeightedReservoirSampler {
     template <typename F>
     PBRT_CPU_GPU bool Add(F func, Float weight) {
         // Process weighted reservoir sample via callback
+        weight = std::max(weight, MathEpsilon);
         weightSum += weight;
         Float p = weight / weightSum;
         if (rng.Uniform<Float>() < p) {

@@ -8,9 +8,9 @@
 #include <pbrt/pbrt.h>
 
 #include <pbrt/util/pstd.h>
+#include <pbrt/util/timer.h>
 
 #include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <string>
 #include <thread>
@@ -21,24 +21,6 @@
 #endif
 
 namespace pbrt {
-
-// Timer Definition
-class Timer {
-  public:
-    Timer() { start = clock::now(); }
-    double ElapsedSeconds() const {
-        clock::time_point now = clock::now();
-        int64_t elapseduS =
-            std::chrono::duration_cast<std::chrono::microseconds>(now - start).count();
-        return elapseduS / 1000000.;
-    }
-
-    std::string ToString() const;
-
-  private:
-    using clock = std::chrono::steady_clock;
-    clock::time_point start;
-};
 
 // ProgressReporter Definition
 class ProgressReporter {

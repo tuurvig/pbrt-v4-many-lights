@@ -7,6 +7,7 @@
 
 #include <pbrt/util/stats.h>
 #include <pbrt/util/vecmath.h>
+#include <pbrt/util/timer.h>
 #include <vector>
 
 #ifdef PBRT_BUILD_GPU_RENDERER
@@ -21,7 +22,11 @@
 #include <cub/device/device_radix_sort.cuh>
 #endif //PBRT_BUILD_GPU_RENDERER
 
-namespace pbrt{
+namespace pbrt {
+
+STAT_MEMORY_COUNTER("Memory/Light BVH", lightBVHBytes);
+STAT_INT_DISTRIBUTION("Integrator/Lights sampled per lookup", nLightsSampled);
+STAT_COUNTER("Time/CPU Construction", constructionMicroseconds);
 
 #ifdef PBRT_BUILD_GPU_RENDERER
 
@@ -78,7 +83,9 @@ class BVHLightTreeBuilder final : public LightTreeBuilderGPU<LightBounds, uint64
         LightHierarchyNodeEmitter emitter(nodes, bitTrailContainer, lights, m_allLightBounds);
         GPUToLightBVHLeaf adapter(hostNodes);
 
+        Timer flattenTime;
         FlattenLightTree<GPUToLightBVHLeaf, LightHierarchyNodeEmitter>(adapter, rootIndex, 0, 0, emitter);
+        constructionMicroseconds += flattenTime.ElapsedMicroseconds();
     }
 
     static uint64_t* UploadSortedLeaves(LightTreeBuildState<LightBounds>& buildState, uint64_t* dMortonCodes, const std::vector<LightBVHBuildContainer> &lights) {
@@ -142,15 +149,10 @@ class BVHLightTreeBuilder final : public LightTreeBuilderGPU<LightBounds, uint64
     Bounds3f m_allLightBounds;
 };
 
-
-
 #endif  // PBRT_BUILD_GPU_RENDERER
 
 ///////////////////////////////////////////////////////////////////////////
 // BVHLightSampler
-
-STAT_MEMORY_COUNTER("Memory/Light BVH", lightBVHBytes);
-STAT_INT_DISTRIBUTION("Integrator/Lights sampled per lookup", nLightsSampled);
 
 // BVHLightSampler Method Definitions
 BVHLightSampler::BVHLightSampler(pstd::span<const Light> lights, Allocator alloc)
@@ -178,8 +180,10 @@ BVHLightSampler::BVHLightSampler(pstd::span<const Light> lights, Allocator alloc
         if (!buildOnGPU)
 #endif
         {
+            Timer constructionTimer;
             LightHierarchyNodeEmitter nodeEmitter(m_nodes, m_lightToBitTrail, m_lights, m_allLightBounds);
             BuildLightTree<16, LightBVHBuildContainer, SAOHCostEvaluator, LightHierarchyNodeEmitter>(bvhLights, 0, bvhLights.size(), 0, 0, SAOHCostEvaluator(), nodeEmitter);
+            constructionMicroseconds += constructionTimer.ElapsedMicroseconds();
         }
     }
     

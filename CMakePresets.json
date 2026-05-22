@@ -8,7 +8,7 @@
         "PBRT_LIGHTCUTS_CUT_SIZE": "32",
         "PBRT_LTC_MAX_CUT_SIZE": "64",
         "PBRT_RHT_RESERVOIR_SET_H_SIZE": "16",
-        "PBRT_RHT_F_SAMPLES": "2"
+        "PBRT_RHT_F_SAMPLES": "1"
       }
     },
     {
@@ -43,11 +43,13 @@
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/bin-${presetName}",
       "cacheVariables": {
-        "CMAKE_C_COMPILER": "/usr/bin/gcc",
-        "CMAKE_CXX_COMPILER": "/usr/bin/g++",
+        "CMAKE_C_COMPILER": "/usr/bin/gcc-14",
+        "CMAKE_CXX_COMPILER": "/usr/bin/g++-14",
         "CMAKE_CUDA_STANDARD": "17",
         "CMAKE_CUDA_COMPILER": "/opt/cuda/bin/nvcc",
+        "CMAKE_CUDA_HOST_COMPILER": "/usr/bin/g++-14",
         "CMAKE_CUDA_ARCHITECTURES": "89",
+        "PBRT_GPU_SHADER_MODEL": "sm_89",
         "PBRT_OPTIX_PATH": "/opt/optix"
       },
       "condition": {
