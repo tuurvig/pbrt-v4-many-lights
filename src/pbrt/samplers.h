@@ -66,7 +66,10 @@ class HaltonSampler {
             haltonIndex %= sampleStride;
         }
 
-        haltonIndex += sampleIndex * sampleStride;
+        // The product must be computed in 64 bits: with the render-time limit the
+        // sample index can exceed samplesPerPixel, and sampleIndex * sampleStride
+        // overflows int32 past ~69k samples at common resolutions.
+        haltonIndex += int64_t(sampleIndex) * int64_t(sampleStride);
         dimension = std::max(2, dim);
     }
 

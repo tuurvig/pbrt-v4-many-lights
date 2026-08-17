@@ -64,6 +64,29 @@ struct SampledLd {
     Float pdfCancellationFactor;
 };
 
+/// @brief Removes direct-light samples that cannot form a finite MIS estimate.
+/// Degenerate light samples (e.g. a near-coincident light point yielding a garbage
+/// incident direction) can carry a NaN scatter PDF or non-finite radiance/PDF values;
+/// left in place they turn the shadow-ray MIS divide into 0/NaN and permanently
+/// poison the film pixel. Samples with zero radiance but valid PDFs are kept so that
+/// samplers with online feedback (LTC) still observe their zero contributions.
+template <int N>
+PBRT_CPU_GPU inline void DiscardInvalidSamples(CountedArray<SampledLd, N> &samples) {
+    int valid = 0;
+    for (int i = 0; i < samples.count; ++i) {
+        const SampledLd &s = samples.elements[i];
+        bool ok = s.lightPDF > 0 && !IsInf(s.lightPDF) && !IsNaN(s.scatterPDF) &&
+                  !IsInf(s.scatterPDF) && !s.Ld.HasNaNs() &&
+                  !IsInf(s.Ld.MaxComponentValue());
+        if (!ok)
+            continue;
+        if (valid != i)
+            samples.elements[valid] = s;
+        ++valid;
+    }
+    samples.count = valid;
+}
+
 #ifndef PBRT_RHT_F_SAMPLES
 #define PBRT_RHT_F_SAMPLES 2
 #endif

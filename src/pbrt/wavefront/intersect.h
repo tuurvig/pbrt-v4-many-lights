@@ -40,7 +40,7 @@ inline PBRT_CPU_GPU void RecordShadowRayResult(const ShadowRayWorkItem w,
              "(sr.Ld %f %f %f %f r_u %f %f %f %f r_l %f %f %f %f)\n",
              Ld[0], Ld[1], Ld[2], Ld[3], w.Ld[0], w.Ld[1], w.Ld[2], w.Ld[3], w.r_u[0],
              w.r_u[1], w.r_u[2], w.r_u[3], w.r_l[0], w.r_l[1], w.r_l[2], w.r_l[3]);
-        
+
         pixelSampleState->L.AtomicAdd(w.pixelIndex, Ld);
     } else {
         PBRT_DBG("Shadow ray was occluded\n");

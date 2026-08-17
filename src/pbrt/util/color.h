@@ -370,7 +370,10 @@ class RGBToSpectrumTable {
     // RGBToSpectrumTable Public Constants
     static constexpr int res = 64;
 
-    using CoefficientArray = float[3][res][res][res][3];
+    // Use literal dimensions: nvcc (CUDA 13.x) fails to resolve `res` when this
+    // alias is expanded inside extern declarations in other translation units.
+    using CoefficientArray = float[3][64][64][64][3];
+    static_assert(res == 64, "CoefficientArray dimensions must match res");
 
     // RGBToSpectrumTable Public Methods
     RGBToSpectrumTable(const float *zNodes, const CoefficientArray *coeffs)

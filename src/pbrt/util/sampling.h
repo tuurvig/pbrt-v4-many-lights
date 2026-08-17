@@ -556,6 +556,10 @@ class StatelessWeightedReservoirSampler {
 
     PBRT_CPU_GPU
     inline bool Add(const T &sample, Float weight, const Float u) {
+        // Reject non-finite weights before they poison weightSum permanently.
+        if (IsNaN(weight) || IsInf(weight))
+            return false;
+
         weight = std::max(weight, MathEpsilon);
         weightSum += weight;
         // Randomly add _sample_ to reservoir
@@ -800,6 +804,12 @@ class InPlaceWeightedReservoirSetSampler {
 
     PBRT_CPU_GPU
     bool Add(const T& sample, Float weight) {
+        // A non-finite weight would poison weightSum for the rest of the run
+        // (Inf/Inf acceptance tests never store a sample, yet HasSample() would
+        // report one), so reject it outright. NaN also fails weight > 0.
+        if (!(weight > 0) || IsInf(weight))
+            return false;
+
         int index = 0;
         if constexpr (N > 1) {
             // It is needed to compute a new seed for a permutation every N elements
@@ -834,6 +844,10 @@ class InPlaceWeightedReservoirSetSampler {
     template <typename F>
     PBRT_CPU_GPU
     bool Add(F func, Float weight) {
+        // See Add(sample, weight): non-finite weights must not reach weightSum.
+        if (!(weight > 0) || IsInf(weight))
+            return false;
+
         int index = 0;
         if constexpr (N > 1) {
             if (localIndex == N) {
@@ -865,7 +879,12 @@ class InPlaceWeightedReservoirSetSampler {
     }
 
     PBRT_CPU_GPU
-    int HasSample(int index) const { return weights[index].weightSum > 0; }
+    int HasSample(int index) const {
+        // Test the stored sample's weight, not weightSum: weightSum can be
+        // positive without any sample ever having been stored, in which case
+        // the reservoir slot holds uninitialized memory.
+        return weights[index].weight > 0;
+    }
 
     PBRT_CPU_GPU
     Float SampleProbability(int index) const {
