@@ -879,7 +879,6 @@ SampledSpectrum PathIntegrator::SampleLd(const SurfaceInteraction &intr, uint32_
     BSDFScatterEval scatterEval(bsdf, intr.shading.n);
     CountedArray<SampledLd, NShadowRays> samplesLd;
     lightSampler.SampleLd(samplesLd, ctx, lambda, bsdf, seed, u, uLight, scatterEval);
-    DiscardInvalidSamples(samplesLd);
 
     SampledSpectrum resultLd;
     for (int i = 0; i < samplesLd.count; ++i) {
@@ -1492,7 +1491,6 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, uint32_t se
         MediumScatterEval scatterEval(intr.AsMedium().phase);
         lightSampler.SampleLd(samplesLd, ctx, lambda, nullptr, seed, u, uLight, scatterEval);
     }
-    DiscardInvalidSamples(samplesLd);
 
     SampledSpectrum resultLd;
     for (int i = 0; i < samplesLd.count; ++i) {
@@ -3544,7 +3542,6 @@ SampledSpectrum SPPMIntegrator::SampleLd(const SurfaceInteraction &intr, uint32_
     BSDFScatterEval scatterEval(&b, intr.shading.n);
     CountedArray<SampledLd, 1> sampleLd;
     lightSampler.SampleLd(sampleLd, ctx, lambda, bsdf, seed, u, uLight, scatterEval);
-    DiscardInvalidSamples(sampleLd);
 
     if (sampleLd.count != 1) {
         return {};

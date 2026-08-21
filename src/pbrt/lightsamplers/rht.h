@@ -168,7 +168,7 @@ class RHTLightSampler {
                 Float lightPDF = infiniteLightSample->p * ls->pdf;
                 Float scatterPDF = 0;
                 SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
-                samples.Add(SampledLd(f_hat * ls->L, light, ls->pLight, lightPDF, scatterPDF));
+                AddIfValid(samples, SampledLd(f_hat * ls->L, light, ls->pLight, lightPDF, scatterPDF));
                 return;
             }
         }
@@ -233,12 +233,17 @@ class RHTLightSampler {
             if (!heuristicFSampler.HasSample(i))
                 continue;
 
-            if (out != i)
-                samples.elements[out] = samples.elements[i];
-
             const Float fProb = heuristicFSampler.SampleProbability(i);
             const Float hProb = samples.elements[i].pdfCancellationFactor;
-            samples.elements[out].Ld /= std::max(fProb * hProb, MathEpsilon);
+            SampledLd sLd = samples.elements[i];
+            sLd.Ld /= std::max(fProb * hProb, MathEpsilon);
+            // The normalization can overflow and stored candidates can carry a
+            // NaN scatter PDF from a degenerate light sample; never emit a
+            // sample whose MIS combine would be non-finite.
+            if (!sLd.IsValid())
+                continue;
+
+            samples.elements[out] = sLd;
             ++out;
         }
         samples.count = out;

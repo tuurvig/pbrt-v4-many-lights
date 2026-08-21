@@ -54,6 +54,19 @@ struct SampledLd {
         return pbrt::SpawnRayTo(pFrom, nFrom, time, pLight, nLight);
     }
 
+    /// @brief True if this sample can form a finite MIS estimate downstream.
+    /// Degenerate light samples (e.g. a near-coincident light point producing a
+    /// garbage incident direction) can carry a NaN scatter PDF or non-finite
+    /// radiance/PDF values; if enqueued they turn the shadow-ray MIS combine
+    /// Ld / (r_u + r_l) into NaN and permanently poison the film pixel.
+    PBRT_CPU_GPU
+    bool IsValid() const {
+        // lightPDF > 0 also rejects NaN.
+        return lightPDF > 0 && !IsInf(lightPDF) && !IsNaN(scatterPDF) &&
+               !IsInf(scatterPDF) && !Ld.HasNaNs() &&
+               !IsInf(Ld.MaxComponentValue());
+    }
+
     SampledSpectrum Ld;
     Point3fi pLight;
     Normal3f nLight;
@@ -64,27 +77,14 @@ struct SampledLd {
     Float pdfCancellationFactor;
 };
 
-/// @brief Removes direct-light samples that cannot form a finite MIS estimate.
-/// Degenerate light samples (e.g. a near-coincident light point yielding a garbage
-/// incident direction) can carry a NaN scatter PDF or non-finite radiance/PDF values;
-/// left in place they turn the shadow-ray MIS divide into 0/NaN and permanently
-/// poison the film pixel. Samples with zero radiance but valid PDFs are kept so that
-/// samplers with online feedback (LTC) still observe their zero contributions.
+/// @brief Adds the sample only if it can form a finite MIS estimate; see
+/// SampledLd::IsValid(). Samplers must route every produced sample through this
+/// (or an equivalent check) so invalid samples never enter the output array.
 template <int N>
-PBRT_CPU_GPU inline void DiscardInvalidSamples(CountedArray<SampledLd, N> &samples) {
-    int valid = 0;
-    for (int i = 0; i < samples.count; ++i) {
-        const SampledLd &s = samples.elements[i];
-        bool ok = s.lightPDF > 0 && !IsInf(s.lightPDF) && !IsNaN(s.scatterPDF) &&
-                  !IsInf(s.scatterPDF) && !s.Ld.HasNaNs() &&
-                  !IsInf(s.Ld.MaxComponentValue());
-        if (!ok)
-            continue;
-        if (valid != i)
-            samples.elements[valid] = s;
-        ++valid;
-    }
-    samples.count = valid;
+PBRT_CPU_GPU inline void AddIfValid(CountedArray<SampledLd, N> &samples,
+                                    const SampledLd &s) {
+    if (s.IsValid())
+        samples.Add(s);
 }
 
 #ifndef PBRT_RHT_F_SAMPLES

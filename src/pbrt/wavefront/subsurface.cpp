@@ -166,7 +166,6 @@ void WavefrontPathIntegrator::SampleSubsurface(int wavefrontDepth) {
                 CountedArray<SampledLd, NShadowRays> samplesLd;
                 lightSampler.SampleLd(samplesLd, ctx, lambda, &bsdf, Hash(sampleIndex, w.pixelIndex, (w.depth + 1)),
                                       raySamples.direct.uc, raySamples.direct.u, scatterEval);
-                DiscardInvalidSamples(samplesLd);
 
                 int reserveStartIdx = shadowRayQueue->ReserveEntries(samplesLd.count);
                 for (int i = 0; i < samplesLd.count; ++i) {

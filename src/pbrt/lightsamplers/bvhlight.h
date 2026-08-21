@@ -161,7 +161,7 @@ class BVHLightSampler {
         Float scatterPDF = 0;
         SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
 
-        samples.Add(SampledLd(ClampZero(f_hat * ls->L), light, ls->pLight, lightPDF, scatterPDF));
+        AddIfValid(samples, SampledLd(ClampZero(f_hat * ls->L), light, ls->pLight, lightPDF, scatterPDF));
     }
 
     std::string ToString() const;

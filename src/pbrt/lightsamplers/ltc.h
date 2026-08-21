@@ -418,7 +418,7 @@ class LTCLightSampler {
         SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
         SampledSpectrum Ld = ClampZero(f_hat * ls->L);
 
-        samples.Add(SampledLd(Ld, light, ls->pLight, lightPDF, scatterPDF, sampledLight->hint, sampledLight->pLearning));
+        AddIfValid(samples, SampledLd(Ld, light, ls->pLight, lightPDF, scatterPDF, sampledLight->hint, sampledLight->pLearning));
     }
 
     std::string ToString() const;

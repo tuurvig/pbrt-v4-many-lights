@@ -171,7 +171,7 @@ public:
                 Float lightPDF = infiniteLightSample->p * ls->pdf;
                 Float scatterPDF = 0;
                 SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
-                samples.Add(SampledLd(f_hat * ls->L, light, ls->pLight, lightPDF, scatterPDF));
+                AddIfValid(samples, SampledLd(f_hat * ls->L, light, ls->pLight, lightPDF, scatterPDF));
                 return;
             }
         }
@@ -201,7 +201,7 @@ public:
             
             Float scatterPDF = 0;
             SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
-            samples.Add(SampledLd(f_hat * ls->L, light, ls->pLight, lightPDF, scatterPDF));
+            AddIfValid(samples, SampledLd(f_hat * ls->L, light, ls->pLight, lightPDF, scatterPDF));
             return;
         }
 
@@ -253,7 +253,7 @@ public:
 
             Float scatterPDF = 0;
             SampledSpectrum f_hat = scatterEval(scatterPDF, ctx.wo, ls->wi, IsDeltaLight(light.Type()));
-            samples.Add(SampledLd(f_hat * ls->L, light, ls->pLight, lightPDF, scatterPDF));
+            AddIfValid(samples, SampledLd(f_hat * ls->L, light, ls->pLight, lightPDF, scatterPDF));
         }
 
         return;
