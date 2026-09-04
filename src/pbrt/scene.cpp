@@ -1657,6 +1657,23 @@ Primitive BasicScene::CreateAggregate(
     const std::map<std::string, pbrt::Material> &namedMaterials,
     const std::vector<pbrt::Material> &materials) {
     Allocator alloc;
+
+    // Reserve the global mesh tables before any of the parallel work below.
+    // Shape::Create appends to them while BVH construction for other object
+    // instances concurrently reads them through Triangle/BilinearPatch::GetMesh();
+    // a reallocation during that overlap hands out garbage mesh pointers
+    // (intermittent hangs and crashes in Triangle::Bounds() on heavily
+    // instanced scenes). A shape entity creates at most one mesh of each kind.
+    {
+        size_t nShapeEntities = shapes.size() + animatedShapes.size();
+        for (const auto &inst : this->instanceDefinitions)
+            if (inst.second)
+                nShapeEntities +=
+                    inst.second->shapes.size() + inst.second->animatedShapes.size();
+        Triangle::ReserveMeshes(nShapeEntities);
+        BilinearPatch::ReserveMeshes(nShapeEntities);
+    }
+
     auto findMedium = [&media](const std::string &s, const FileLoc *loc) -> Medium {
         if (s.empty())
             return nullptr;

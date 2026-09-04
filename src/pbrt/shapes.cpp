@@ -152,6 +152,10 @@ pstd::vector<const TriangleMesh *> *Triangle::allMeshes;
 #if defined(PBRT_BUILD_GPU_RENDERER)
 PBRT_GPU pstd::vector<const TriangleMesh *> *allTriangleMeshesGPU;
 #endif
+// Guards appends to _allMeshes_. Reads through GetMesh() are unsynchronized (they
+// are on the intersection hot path), so the vector must never reallocate while
+// meshes are created in parallel with BVH construction; see ReserveMeshes().
+static std::mutex allTriangleMeshesLock;
 
 void Triangle::Init(Allocator alloc) {
     allMeshes = alloc.new_object<pstd::vector<const TriangleMesh *>>(alloc);
@@ -160,6 +164,11 @@ void Triangle::Init(Allocator alloc) {
         CUDA_CHECK(cudaMemcpyToSymbol((const void *)&allTriangleMeshesGPU,
                                      (const void *)&allMeshes, sizeof(allMeshes)));
 #endif
+}
+
+void Triangle::ReserveMeshes(size_t nAdditional) {
+    std::lock_guard<std::mutex> lock(allTriangleMeshesLock);
+    allMeshes->reserve(allMeshes->size() + nAdditional);
 }
 
 STAT_MEMORY_COUNTER("Memory/Triangles", triangleBytes);
@@ -270,12 +279,11 @@ PBRT_CPU_GPU pstd::optional<TriangleIntersection> IntersectTriangle(const Ray &r
 
 // Triangle Method Definitions
 pstd::vector<Shape> Triangle::CreateTriangles(const TriangleMesh *mesh, Allocator alloc) {
-    static std::mutex allMeshesLock;
-    allMeshesLock.lock();
+    allTriangleMeshesLock.lock();
     CHECK_LT(allMeshes->size(), 1 << 31);
     int meshIndex = int(allMeshes->size());
     allMeshes->push_back(mesh);
-    allMeshesLock.unlock();
+    allTriangleMeshesLock.unlock();
 
     pstd::vector<Shape> tris(mesh->nTriangles, alloc);
     Triangle *t = alloc.allocate_object<Triangle>(mesh->nTriangles);
@@ -998,14 +1006,16 @@ BilinearPatchMesh *BilinearPatch::CreateMesh(const Transform *renderFromObject,
         std::move(N), std::move(uv), std::move(faceIndices), imageDist, alloc);
 }
 
+// See the comment at allTriangleMeshesLock.
+static std::mutex allBilinearMeshesLock;
+
 pstd::vector<Shape> BilinearPatch::CreatePatches(const BilinearPatchMesh *mesh,
                                                  Allocator alloc) {
-    static std::mutex allMeshesLock;
-    allMeshesLock.lock();
+    allBilinearMeshesLock.lock();
     CHECK_LT(allMeshes->size(), 1 << 31);
     int meshIndex = int(allMeshes->size());
     allMeshes->push_back(mesh);
-    allMeshesLock.unlock();
+    allBilinearMeshesLock.unlock();
 
     pstd::vector<Shape> blps(mesh->nPatches, alloc);
     BilinearPatch *patches = alloc.allocate_object<BilinearPatch>(mesh->nPatches);
@@ -1030,6 +1040,11 @@ void BilinearPatch::Init(Allocator alloc) {
                                      (const void *)&allMeshes,
                                      sizeof(allMeshes)));
 #endif
+}
+
+void BilinearPatch::ReserveMeshes(size_t nAdditional) {
+    std::lock_guard<std::mutex> lock(allBilinearMeshesLock);
+    allMeshes->reserve(allMeshes->size() + nAdditional);
 }
 
 STAT_MEMORY_COUNTER("Memory/Bilinear patches", blpBytes);

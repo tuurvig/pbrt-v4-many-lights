@@ -839,6 +839,9 @@ class Triangle {
     Triangle(int meshIndex, int triIndex) : meshIndex(meshIndex), triIndex(triIndex) {}
 
     static void Init(Allocator alloc);
+    // Grows _allMeshes_ ahead of time so it never reallocates while meshes are
+    // being appended concurrently with unsynchronized GetMesh() reads.
+    static void ReserveMeshes(size_t nAdditional);
 
     PBRT_CPU_GPU
     Bounds3f Bounds() const;
@@ -1353,6 +1356,9 @@ class BilinearPatch {
     BilinearPatch(const BilinearPatchMesh *mesh, int meshIndex, int blpIndex);
 
     static void Init(Allocator alloc);
+    // Grows _allMeshes_ ahead of time so it never reallocates while meshes are
+    // being appended concurrently with unsynchronized GetMesh() reads.
+    static void ReserveMeshes(size_t nAdditional);
 
     static BilinearPatchMesh *CreateMesh(const Transform *renderFromObject,
                                          bool reverseOrientation,
