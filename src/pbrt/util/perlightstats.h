@@ -18,8 +18,8 @@ namespace pbrt {
 void StatsEnablePerLightStatistics(pstd::span<const Light> lights,
                                    const std::string &outputBaseName);
 
-void ReportLightSampleBeforeShadow(Light light);
-void ReportLightSampleAfterShadowVisible(Light light);
+void ReportLightSampleBeforeShadow(Light light, Float contribution);
+void ReportLightSampleAfterShadowVisible(Light light, Float contribution);
 
 void StatsWritePerLightStatistics();
 

@@ -467,10 +467,14 @@ SampledSpectrum SimplePathIntegrator::Li(RayDifferential ray, uint32_t seed, Sam
                     Vector3f wi = ls->wi;
                     SampledSpectrum f = bsdf.f(wo, wi) * AbsDot(wi, isect.shading.n);
                     if (f) {
-                        ReportLightSampleBeforeShadow(sampledLight->light);
+                        SampledSpectrum Ldest =
+                            f * ls->L / (sampledLight->p * ls->pdf);
+                        ReportLightSampleBeforeShadow(sampledLight->light,
+                                                      Ldest.MaxComponentValue());
                         if (Unoccluded(isect, ls->pLight)) {
-                            ReportLightSampleAfterShadowVisible(sampledLight->light);
-                            L += beta * f * ls->L / (sampledLight->p * ls->pdf);
+                            ReportLightSampleAfterShadowVisible(
+                                sampledLight->light, Ldest.MaxComponentValue());
+                            L += beta * Ldest;
                         }
                     }
                 }
@@ -884,22 +888,23 @@ SampledSpectrum PathIntegrator::SampleLd(const SurfaceInteraction &intr, uint32_
     for (int i = 0; i < samplesLd.count; ++i) {
         const SampledLd& sLd(samplesLd[i]);
 
-        ReportLightSampleBeforeShadow(sLd.light);
+        Float p_b = sLd.scatterPDF;
+        Float p_l = sLd.lightPDF;
+
+        SampledSpectrum finalLd;
+        if (p_b == 0) {
+            finalLd = sLd.Ld / p_l;
+        }
+        else {
+            Float w_l = PowerHeuristic(1, p_l, 1, p_b);
+            finalLd = w_l * sLd.Ld / p_l;
+        }
+
+        ReportLightSampleBeforeShadow(sLd.light, finalLd.MaxComponentValue());
         const bool isUnoccluded = Unoccluded(intr, sLd.pLight, sLd.nLight);
         if (isUnoccluded) {
-            SampledSpectrum finalLd;
-            ReportLightSampleAfterShadowVisible(sLd.light);
-
-            Float p_b = sLd.scatterPDF;
-            Float p_l = sLd.lightPDF;
-            
-            if (p_b == 0) {
-                finalLd = sLd.Ld / p_l;
-            }
-            else {
-                Float w_l = PowerHeuristic(1, p_l, 1, p_b);
-                finalLd = w_l * sLd.Ld / p_l;
-            }
+            ReportLightSampleAfterShadowVisible(sLd.light,
+                                                finalLd.MaxComponentValue());
 
             resultLd += finalLd;
         }
@@ -1495,7 +1500,16 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, uint32_t se
     SampledSpectrum resultLd;
     for (int i = 0; i < samplesLd.count; ++i) {
         const SampledLd& sLd(samplesLd[i]);
-        ReportLightSampleBeforeShadow(sLd.light);
+
+        // Potential contribution if fully visible (T_ray = 1, pre-trace ratios),
+        // path throughput excluded.
+        SampledSpectrum potentialLd;
+        if (sLd.scatterPDF == 0)
+            potentialLd = sLd.Ld / (r_p * sLd.lightPDF).Average();
+        else
+            potentialLd =
+                sLd.Ld / (r_p * sLd.lightPDF + r_p * sLd.scatterPDF).Average();
+        ReportLightSampleBeforeShadow(sLd.light, potentialLd.MaxComponentValue());
 
         // Declare path state variables for ray to light source
         Ray lightRay = sLd.SpawnShadowRay(intr);
@@ -1563,19 +1577,24 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, uint32_t se
         const bool isUnoccluded = !shouldSkip;
         SampledSpectrum unweightedFinalLd;
         if (isUnoccluded) {
-            ReportLightSampleAfterShadowVisible(sLd.light);
             unweightedFinalLd = beta * sLd.Ld * T_ray;
             SampledSpectrum finalLd;
 
             // Return path contribution function estimate for direct lighting
+            Float pdfAvg;
             r_l *= r_p * sLd.lightPDF;
             if (sLd.scatterPDF == 0) {
-                finalLd = unweightedFinalLd / r_l.Average();
+                pdfAvg = r_l.Average();
             }
             else {
                 r_u *= r_p * sLd.scatterPDF;
-                finalLd = unweightedFinalLd / (r_l + r_u).Average();
+                pdfAvg = (r_l + r_u).Average();
             }
+            finalLd = unweightedFinalLd / pdfAvg;
+
+            // Realized contribution with path throughput excluded.
+            ReportLightSampleAfterShadowVisible(
+                sLd.light, (sLd.Ld * T_ray / pdfAvg).MaxComponentValue());
 
             resultLd += finalLd;
         }
@@ -3548,21 +3567,25 @@ SampledSpectrum SPPMIntegrator::SampleLd(const SurfaceInteraction &intr, uint32_
     }
 
     const SampledLd& sLd(sampleLd[0]);
-    ReportLightSampleBeforeShadow(sLd.light);
+
+    // Light's contribution to reflected radiance
+    Float p_l = sLd.lightPDF;
+    Float p_b = sLd.scatterPDF;
+    SampledSpectrum finalLd;
+    if (p_b == 0)
+        finalLd = sLd.Ld / p_l;
+    else {
+        Float w_l = PowerHeuristic(1, p_l, 1, p_b);
+        finalLd = w_l * sLd.Ld / p_l;
+    }
+
+    ReportLightSampleBeforeShadow(sLd.light, finalLd.MaxComponentValue());
     if (!Unoccluded(intr, sLd.pLight, sLd.nLight)) {
         return {};
     }
-    ReportLightSampleAfterShadowVisible(sLd.light);
+    ReportLightSampleAfterShadowVisible(sLd.light, finalLd.MaxComponentValue());
 
-    // Return light's contribution to reflected radiance
-    Float p_l = sLd.lightPDF;
-    Float p_b = sLd.scatterPDF;
-    if (p_b == 0)
-        return sLd.Ld / p_l;
-    else {
-        Float w_l = PowerHeuristic(1, p_l, 1, p_b);
-        return w_l * sLd.Ld / p_l;
-    }
+    return finalLd;
 }
 
 std::string SPPMIntegrator::ToString() const {
